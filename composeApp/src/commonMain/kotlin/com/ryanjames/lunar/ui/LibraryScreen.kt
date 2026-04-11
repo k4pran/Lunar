@@ -6,15 +6,12 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -52,6 +49,7 @@ import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.library.model.SortDirection
 import com.ryanjames.lunar.library.model.applyLibraryQuery
 import com.ryanjames.lunar.library.model.availableCollections
+import com.ryanjames.lunar.library.model.availableComposers
 import com.ryanjames.lunar.library.model.availableTags
 import com.ryanjames.lunar.platform.PlatformRuntime
 import kotlinx.datetime.TimeZone
@@ -67,6 +65,7 @@ fun LibraryScreen(
 ) {
     val visibleItems = snapshot.items.applyLibraryQuery(appState.query)
     val collections = snapshot.items.availableCollections()
+    val composers = snapshot.items.availableComposers()
     val tags = snapshot.items.availableTags()
     val editingItem = snapshot.items.firstOrNull { it.id == appState.editingItemId }
     val deleteCandidate = snapshot.items.firstOrNull { it.id == appState.deleteCandidateItemId }
@@ -75,36 +74,73 @@ fun LibraryScreen(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         HeaderPanel(
             runtime = runtime,
             snapshot = snapshot,
             visibleCount = visibleItems.size,
         )
+        BrowseModeSwitcher(appState = appState)
         SearchAndSortBar(appState = appState)
-        LibraryFilterRows(
-            appState = appState,
-            collections = collections.toList(),
-            tags = tags.toList(),
-        )
+
+        // Main content area
         Box(modifier = Modifier.weight(1f)) {
-            if (visibleItems.isEmpty()) {
-                EmptyLibraryState(
-                    totalItemCount = snapshot.items.size,
-                    onOpenImport = { appState.selectSection(AppSection.IMPORT) },
-                    onClearFilters = appState::clearFilters,
-                )
-            } else {
-                when (appState.layoutMode) {
-                    LibraryLayoutMode.GRID -> LibraryGrid(
-                        items = visibleItems,
-                        appState = appState,
-                    )
-                    LibraryLayoutMode.LIST -> LibraryList(
-                        items = visibleItems,
-                        appState = appState,
-                    )
+            when (appState.browseMode) {
+                LibraryBrowseMode.ALL -> {
+                    if (visibleItems.isEmpty()) {
+                        EmptyLibraryState(
+                            totalItemCount = snapshot.items.size,
+                            onOpenImport = { appState.selectSection(AppSection.IMPORT) },
+                            onClearFilters = appState::clearFilters,
+                        )
+                    } else {
+                        FlatScoreList(items = visibleItems, appState = appState)
+                    }
+                }
+
+                LibraryBrowseMode.BY_COLLECTION -> {
+                    val group = appState.selectedGroup
+                    if (group == null) {
+                        GroupList(
+                            groups = collections.toList(),
+                            itemsByGroup = visibleItems.groupBy { it.collection?.trim() ?: "" },
+                            emptyLabel = "No collections found. Import PDFs with a collection folder strategy.",
+                            onSelectGroup = appState::selectGroup,
+                        )
+                    } else {
+                        val groupItems = visibleItems.filter {
+                            it.collection?.trim().equals(group, ignoreCase = true)
+                        }
+                        DrillDownScoreList(
+                            groupName = group,
+                            items = groupItems,
+                            appState = appState,
+                            onBack = appState::clearGroupSelection,
+                        )
+                    }
+                }
+
+                LibraryBrowseMode.BY_COMPOSER -> {
+                    val group = appState.selectedGroup
+                    if (group == null) {
+                        GroupList(
+                            groups = composers.toList(),
+                            itemsByGroup = visibleItems.groupBy { it.composer?.trim() ?: "" },
+                            emptyLabel = "No composers found. Import PDFs with a composer folder strategy.",
+                            onSelectGroup = appState::selectGroup,
+                        )
+                    } else {
+                        val groupItems = visibleItems.filter {
+                            it.composer?.trim().equals(group, ignoreCase = true)
+                        }
+                        DrillDownScoreList(
+                            groupName = group,
+                            items = groupItems,
+                            appState = appState,
+                            onBack = appState::clearGroupSelection,
+                        )
+                    }
                 }
             }
         }
@@ -188,6 +224,216 @@ private fun SummaryPill(text: String) {
     }
 }
 
+// ─── Browse mode switcher ────────────────────────────────────────────────────
+
+@Composable
+private fun BrowseModeSwitcher(appState: LunarAppState) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        BrowseModeTab("All", appState.browseMode == LibraryBrowseMode.ALL) {
+            appState.updateBrowseMode(LibraryBrowseMode.ALL)
+        }
+        BrowseModeTab("Collections", appState.browseMode == LibraryBrowseMode.BY_COLLECTION) {
+            appState.updateBrowseMode(LibraryBrowseMode.BY_COLLECTION)
+        }
+        BrowseModeTab("Composers", appState.browseMode == LibraryBrowseMode.BY_COMPOSER) {
+            appState.updateBrowseMode(LibraryBrowseMode.BY_COMPOSER)
+        }
+    }
+}
+
+@Composable
+private fun BrowseModeTab(label: String, selected: Boolean, onClick: () -> Unit) {
+    val bg = if (selected) Color(0xFF1F4F6B) else Color(0xFFA7C6ED).copy(alpha = 0.25f)
+    val fg = if (selected) Color.White else Color(0xFF1A3E4F)
+    Surface(
+        color = bg,
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.clickable(onClick = onClick),
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+            color = fg,
+        )
+    }
+}
+
+// ─── Flat score list (All view) ──────────────────────────────────────────────
+
+@Composable
+private fun FlatScoreList(items: List<SheetMusicItem>, appState: LunarAppState) {
+    when (appState.layoutMode) {
+        LibraryLayoutMode.GRID -> LibraryGrid(items = items, appState = appState)
+        LibraryLayoutMode.LIST -> LibraryList(items = items, appState = appState)
+    }
+}
+
+// ─── Group list (Collection / Composer root view) ────────────────────────────
+
+@Composable
+private fun GroupList(
+    groups: List<String>,
+    itemsByGroup: Map<String, List<SheetMusicItem>>,
+    emptyLabel: String,
+    onSelectGroup: (String) -> Unit,
+) {
+    if (groups.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = emptyLabel,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(
+                count = groups.size,
+                key = { index -> groups[index] },
+            ) { index ->
+                val name = groups[index]
+                val count = itemsByGroup[name]?.size ?: 0
+                GroupCard(name = name, scoreCount = count, onClick = { onSelectGroup(name) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupCard(name: String, scoreCount: Int, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.large,
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            // Accent bar
+            Box(
+                modifier = Modifier
+                    .width(5.dp)
+                    .heightIn(min = 64.dp)
+                    .fillMaxHeight()
+                    .background(
+                        Brush.verticalGradient(listOf(Color(0xFF2A6E7C), Color(0xFF4C8FD5)))
+                    ),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "📁  $name",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                        color = Color(0xFF1A3E4F),
+                    )
+                    Text(
+                        text = "$scoreCount score${if (scoreCount == 1) "" else "s"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = "▸",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color(0xFF4D7C99),
+                )
+            }
+        }
+    }
+}
+
+// ─── Drill-down score list (inside a group) ──────────────────────────────────
+
+@Composable
+private fun DrillDownScoreList(
+    groupName: String,
+    items: List<SheetMusicItem>,
+    appState: LunarAppState,
+    onBack: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        // Back bar
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                color = Color(0xFF1F4F6B).copy(alpha = 0.10f),
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier.clickable(onClick = onBack),
+            ) {
+                Text(
+                    text = "◂  Back",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color(0xFF1F4F6B),
+                )
+            }
+            Text(
+                text = groupName,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                color = Color(0xFF1A3E4F),
+            )
+            SummaryPillDark("${items.size} scores")
+        }
+        // Score list
+        Box(modifier = Modifier.weight(1f)) {
+            if (items.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "No scores match the current filters in this group.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                FlatScoreList(items = items, appState = appState)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryPillDark(text: String) {
+    Surface(
+        color = Color(0xFF1F4F6B).copy(alpha = 0.12f),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = Color(0xFF1F4F6B),
+        )
+    }
+}
+
 @Composable
 private fun SearchAndSortBar(appState: LunarAppState) {
     Column(
@@ -229,91 +475,10 @@ private fun SearchAndSortBar(appState: LunarAppState) {
                 selected = appState.layoutMode,
                 onSelect = appState::updateLayoutMode,
             )
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun LibraryFilterRows(
-    appState: LunarAppState,
-    collections: List<String>,
-    tags: List<String>,
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
             FilterChip(
                 selected = appState.query.favoritesOnly,
                 onClick = appState::toggleFavoriteFilter,
-                label = { Text("★  Favorites only") },
-            )
-            TextButton(onClick = appState::clearFilters) {
-                Text("Clear filters")
-            }
-        }
-        if (collections.isNotEmpty()) {
-            FilterRow(
-                label = "Collections",
-                values = collections,
-                selectedValue = appState.query.selectedCollection,
-                onSelect = appState::selectCollection,
-            )
-        }
-        if (tags.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = "Tags",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.CenterVertically),
-                )
-                tags.forEach { tag ->
-                    FilterChip(
-                        selected = tag in appState.query.selectedTags,
-                        onClick = { appState.toggleTag(tag) },
-                        label = { Text(tag) },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun FilterRow(
-    label: String,
-    values: List<String>,
-    selectedValue: String?,
-    onSelect: (String?) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.align(Alignment.CenterVertically),
-        )
-        values.forEach { value ->
-            FilterChip(
-                selected = selectedValue == value,
-                onClick = { onSelect(value) },
-                label = { Text(value) },
+                label = { Text("★") },
             )
         }
     }

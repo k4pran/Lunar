@@ -19,7 +19,9 @@ fun List<SheetMusicItem>.applyLibraryQuery(query: LibraryQuery): List<SheetMusic
             return@filter false
         }
 
-        if (normalizedCollection.isNotEmpty() && item.collection.orEmpty().trim().lowercase() != normalizedCollection) {
+        if (normalizedCollection.isNotEmpty() &&
+            item.collection.orEmpty().trim().lowercase() != normalizedCollection
+        ) {
             return@filter false
         }
 
@@ -49,11 +51,15 @@ fun List<SheetMusicItem>.availableTags(): Set<String> =
     flatMap { it.tags }
         .map(String::trim)
         .filter(String::isNotEmpty)
-        .toSortedSet(String.CASE_INSENSITIVE_ORDER)
+        .distinctSortedCaseInsensitive()
 
 fun List<SheetMusicItem>.availableCollections(): Set<String> =
     mapNotNull { it.collection?.trim()?.takeIf(String::isNotEmpty) }
-        .toSortedSet(String.CASE_INSENSITIVE_ORDER)
+        .distinctSortedCaseInsensitive()
+
+fun List<SheetMusicItem>.availableComposers(): Set<String> =
+    mapNotNull { it.composer?.trim()?.takeIf(String::isNotEmpty) }
+        .distinctSortedCaseInsensitive()
 
 private fun buildSearchFields(item: SheetMusicItem): List<String> = buildList {
     add(item.title)
@@ -109,4 +115,15 @@ private fun <T> comparatorFor(
 ): Comparator<T> = when (direction) {
     SortDirection.ASCENDING -> comparator
     SortDirection.DESCENDING -> comparator.reversed()
+}
+
+private fun Iterable<String>.distinctSortedCaseInsensitive(): Set<String> {
+    val seen = linkedSetOf<String>()
+    return this
+        .sortedWith(String.CASE_INSENSITIVE_ORDER)
+        .filter { value ->
+            val normalized = value.lowercase()
+            seen.add(normalized)
+        }
+        .toSet()
 }

@@ -20,6 +20,12 @@ enum class LibraryLayoutMode {
     LIST,
 }
 
+enum class LibraryBrowseMode {
+    ALL,
+    BY_COLLECTION,
+    BY_COMPOSER,
+}
+
 enum class AppSection {
     IMPORT,
     LIBRARY,
@@ -36,6 +42,13 @@ class LunarAppState(
         private set
 
     var layoutMode: LibraryLayoutMode by mutableStateOf(LibraryLayoutMode.LIST)
+        private set
+
+    var browseMode: LibraryBrowseMode by mutableStateOf(LibraryBrowseMode.ALL)
+        private set
+
+    // When browsing BY_COLLECTION or BY_COMPOSER, the selected group name (null = show group list)
+    var selectedGroup: String? by mutableStateOf(null)
         private set
 
     var editingItemId: String? by mutableStateOf(null)
@@ -92,6 +105,19 @@ class LunarAppState(
 
     fun updateLayoutMode(layoutMode: LibraryLayoutMode) {
         this.layoutMode = layoutMode
+    }
+
+    fun updateBrowseMode(mode: LibraryBrowseMode) {
+        browseMode = mode
+        selectedGroup = null // reset drill-down when switching mode
+    }
+
+    fun selectGroup(groupName: String) {
+        selectedGroup = groupName
+    }
+
+    fun clearGroupSelection() {
+        selectedGroup = null
     }
 
     fun clearFilters() {
