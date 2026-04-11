@@ -39,6 +39,7 @@ import com.ryanjames.lunar.ui.ImportScreen
 import com.ryanjames.lunar.ui.LibraryScreen
 import com.ryanjames.lunar.ui.ViewerScreen
 import com.ryanjames.lunar.ui.rememberLunarAppState
+import kotlinx.coroutines.delay
 
 @Composable
 fun App() {
@@ -46,12 +47,20 @@ fun App() {
     val appState = rememberLunarAppState(runtime)
     val snapshot by runtime.repository.library.collectAsState()
     val importerState by runtime.importer.state.collectAsState()
+    val syncState by runtime.syncManager.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val previewItem = snapshot.items.firstOrNull { it.id == appState.previewItemId }
     val fullscreenItem = snapshot.items.firstOrNull { it.id == appState.fullscreenItemId }
 
-    LaunchedEffect(runtime.repository) {
+    LaunchedEffect(runtime.repository, runtime.syncManager) {
         runtime.repository.initialize()
+        runtime.syncManager.initialize()
+        runtime.syncManager.refresh(force = false)
+
+        while (true) {
+            delay(runtime.syncManager.automaticRefreshIntervalMillis())
+            runtime.syncManager.refresh(force = false)
+        }
     }
 
     LaunchedEffect(appState.bannerMessage) {
@@ -62,7 +71,6 @@ fun App() {
 
     LunarTheme {
         if (fullscreenItem != null) {
-            // Fullscreen: bare PDF, no scaffold, no nav bar, no dialog
             FullscreenViewerScreen(
                 runtime = runtime,
                 item = fullscreenItem,
@@ -76,97 +84,100 @@ fun App() {
                 },
             )
         } else {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.background,
-                            Color(0xFFCCDDE9),
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.background,
+                                Color(0xFFCCDDE9),
+                            )
                         )
-                    )
-                ),
-        ) {
-            Scaffold(
-                containerColor = Color.Transparent,
-                snackbarHost = { SnackbarHost(snackbarHostState) },
-                bottomBar = {
-                    BottomNavigationPanel(
-                        selectedSection = appState.selectedSection,
-                        onSelectSection = appState::selectSection,
-                    )
-                },
-            ) { innerPadding ->
-                when {
-                    appState.selectedSection == AppSection.IMPORT -> ImportScreen(
-                        runtime = runtime,
-                        importerState = importerState,
-                        libraryCount = snapshot.items.size,
-                        appState = appState,
-                        modifier = Modifier.padding(innerPadding),
-                    )
-                    else -> LibraryScreen(
-                        runtime = runtime,
-                        snapshot = snapshot,
-                        appState = appState,
-                        modifier = Modifier.padding(innerPadding),
-                    )
-                }
-            }
+                    ),
+            ) {
+                Scaffold(
+                    containerColor = Color.Transparent,
+                    snackbarHost = { SnackbarHost(snackbarHostState) },
+                    bottomBar = {
+                        BottomNavigationPanel(
+                            selectedSection = appState.selectedSection,
+                            onSelectSection = appState::selectSection,
+                        )
+                    },
+                ) { innerPadding ->
+                    when (appState.selectedSection) {
+                        AppSection.IMPORT -> ImportScreen(
+                            runtime = runtime,
+                            importerState = importerState,
+                            syncState = syncState,
+                            libraryCount = snapshot.items.size,
+                            appState = appState,
+                            modifier = Modifier.padding(innerPadding),
+                        )
 
-            if (previewItem != null) {
-                Dialog(
-                    onDismissRequest = appState::closePreview,
-                ) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth(0.96f)
-                            .fillMaxHeight(0.92f),
-                        shape = MaterialTheme.shapes.extraLarge,
-                        tonalElevation = 10.dp,
-                        color = MaterialTheme.colorScheme.surface,
+                        AppSection.LIBRARY -> LibraryScreen(
+                            runtime = runtime,
+                            snapshot = snapshot,
+                            appState = appState,
+                            modifier = Modifier.padding(innerPadding),
+                        )
+                    }
+                }
+
+                if (previewItem != null) {
+                    Dialog(
+                        onDismissRequest = appState::closePreview,
                     ) {
-                        Column(modifier = Modifier.fillMaxSize()) {
-                            Box(modifier = Modifier.weight(1f)) {
-                                ViewerScreen(
-                                    runtime = runtime,
-                                    item = previewItem,
-                                    onBack = appState::closePreview,
-                                    onToggleFavorite = { appState.toggleFavorite(previewItem.id) },
-                                    onPageChanged = { pageIndex ->
-                                        appState.updateViewerProgress(previewItem.id, pageIndex)
-                                    },
-                                    onPageCountResolved = { pageCount ->
-                                        appState.updateViewerPageCount(previewItem.id, pageCount)
-                                    },
-                                    backButtonLabel = "Close",
-                                )
-                            }
-                            Surface(
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-                                shape = MaterialTheme.shapes.extraLarge,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
-                                    verticalAlignment = Alignment.CenterVertically,
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth(0.96f)
+                                .fillMaxHeight(0.92f),
+                            shape = MaterialTheme.shapes.extraLarge,
+                            tonalElevation = 10.dp,
+                            color = MaterialTheme.colorScheme.surface,
+                        ) {
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                Box(modifier = Modifier.weight(1f)) {
+                                    ViewerScreen(
+                                        runtime = runtime,
+                                        item = previewItem,
+                                        onBack = appState::closePreview,
+                                        onToggleFavorite = { appState.toggleFavorite(previewItem.id) },
+                                        onPageChanged = { pageIndex ->
+                                            appState.updateViewerProgress(previewItem.id, pageIndex)
+                                        },
+                                        onPageCountResolved = { pageCount ->
+                                            appState.updateViewerPageCount(previewItem.id, pageCount)
+                                        },
+                                        backButtonLabel = "Close",
+                                    )
+                                }
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                                    shape = MaterialTheme.shapes.extraLarge,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                                 ) {
-                                    androidx.compose.material3.OutlinedButton(
-                                        onClick = appState::closePreview,
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+                                        verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        Text("Close")
-                                    }
-                                    androidx.compose.material3.Button(
-                                        onClick = { appState.openFullscreen(previewItem.id) },
-                                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                                            containerColor = Color(0xFF1F4F6B),
-                                        ),
-                                    ) {
-                                        Text("⛶  View Fullscreen", color = Color.White)
+                                        androidx.compose.material3.OutlinedButton(
+                                            onClick = appState::closePreview,
+                                        ) {
+                                            Text("Close")
+                                        }
+                                        androidx.compose.material3.Button(
+                                            onClick = { appState.openFullscreen(previewItem.id) },
+                                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                                containerColor = Color(0xFF1F4F6B),
+                                            ),
+                                        ) {
+                                            Text("View Fullscreen", color = Color.White)
+                                        }
                                     }
                                 }
                             }
@@ -175,7 +186,6 @@ fun App() {
                 }
             }
         }
-        } // end else (not fullscreen)
     }
 }
 
@@ -196,12 +206,12 @@ private fun BottomNavigationPanel(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             BottomNavItem(
-                title = "📥  Import",
+                title = "Import",
                 selected = selectedSection == AppSection.IMPORT,
                 onClick = { onSelectSection(AppSection.IMPORT) },
             )
             BottomNavItem(
-                title = "🎵  Library",
+                title = "Library",
                 selected = selectedSection == AppSection.LIBRARY,
                 onClick = { onSelectSection(AppSection.LIBRARY) },
             )

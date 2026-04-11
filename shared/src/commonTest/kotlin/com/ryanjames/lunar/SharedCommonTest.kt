@@ -3,6 +3,7 @@ package com.ryanjames.lunar
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
 import com.ryanjames.lunar.library.data.SheetMusicMetadataInput
+import com.ryanjames.lunar.library.data.SyncedSheetMusicDescriptor
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.library.model.LibraryQuery
 import com.ryanjames.lunar.library.model.LibrarySortOption
@@ -111,6 +112,39 @@ class SharedCommonTest {
 
         assertNull(repository.getItem(imported.single().id))
         assertEquals(emptyList(), repository.library.value.items)
+    }
+
+    @Test
+    fun repositoryApplyRemoteSyncUpsertsProviderItems() = runBlocking {
+        val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
+
+        repository.initialize()
+        repository.applyRemoteSync(
+            providerId = "supabase_public_storage",
+            providerName = "Supabase Public Storage",
+            syncedAtEpochMillis = 100L,
+            items = listOf(
+                SyncedSheetMusicDescriptor(
+                    remoteId = "moonlight",
+                    remoteVersion = "v1",
+                    storedPath = "/scores/moonlight.pdf",
+                    originalFileName = "Moonlight Sonata.pdf",
+                    sourceUri = "https://example.test/moonlight.pdf",
+                    title = "Moonlight Sonata",
+                    composer = "Beethoven",
+                    tags = listOf("piano", "sonata"),
+                    collection = "Cloud",
+                    pageCount = 6,
+                )
+            ),
+        )
+
+        val item = repository.library.value.items.single()
+        assertEquals("Moonlight Sonata", item.title)
+        assertEquals("Beethoven", item.composer)
+        assertEquals("supabase_public_storage", item.syncMetadata?.providerId)
+        assertEquals("moonlight", item.syncMetadata?.remoteId)
+        assertEquals("/scores/moonlight.pdf", item.document.storedPath)
     }
 }
 

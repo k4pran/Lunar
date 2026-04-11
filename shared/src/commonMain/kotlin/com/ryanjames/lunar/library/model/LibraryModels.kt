@@ -11,6 +11,15 @@ data class PdfDocumentReference(
 )
 
 @Serializable
+data class RemoteSyncMetadata(
+    val providerId: String,
+    val providerName: String,
+    val remoteId: String,
+    val remoteVersion: String? = null,
+    val lastSyncedEpochMillis: Long? = null,
+)
+
+@Serializable
 data class SheetMusicItem(
     val id: String,
     val title: String,
@@ -23,6 +32,7 @@ data class SheetMusicItem(
     val lastOpenedEpochMillis: Long? = null,
     val lastViewedPage: Int = 0,
     val pageCount: Int? = null,
+    val syncMetadata: RemoteSyncMetadata? = null,
 )
 
 data class ImportedPdfDescriptor(

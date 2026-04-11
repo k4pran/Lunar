@@ -2,6 +2,7 @@ package com.ryanjames.lunar.library.data
 
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.library.model.PdfDocumentReference
+import com.ryanjames.lunar.library.model.RemoteSyncMetadata
 import com.ryanjames.lunar.library.model.SheetMusicItem
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,9 +22,19 @@ data class LibrarySnapshot(
 sealed interface SyncStatus {
     data object LocalOnly : SyncStatus
 
+    data class Syncing(
+        val providerName: String,
+    ) : SyncStatus
+
     data class Ready(
         val providerName: String,
         val lastSyncedEpochMillis: Long? = null,
+    ) : SyncStatus
+
+    data class Error(
+        val providerName: String,
+        val message: String,
+        val lastAttemptEpochMillis: Long? = null,
     ) : SyncStatus
 }
 
@@ -62,6 +73,20 @@ data class SheetMusicMetadataInput(
     val isFavorite: Boolean,
 )
 
+data class SyncedSheetMusicDescriptor(
+    val remoteId: String,
+    val remoteVersion: String? = null,
+    val storedPath: String,
+    val originalFileName: String,
+    val sourceUri: String? = null,
+    val title: String,
+    val composer: String? = null,
+    val tags: List<String> = emptyList(),
+    val collection: String? = null,
+    val pageCount: Int? = null,
+    val dateAddedEpochMillis: Long? = null,
+)
+
 interface SheetMusicRepository {
     val library: StateFlow<LibrarySnapshot>
 
@@ -80,6 +105,15 @@ interface SheetMusicRepository {
     suspend fun updatePageCount(itemId: String, pageCount: Int)
 
     suspend fun deleteItem(itemId: String)
+
+    suspend fun applyRemoteSync(
+        providerId: String,
+        providerName: String,
+        items: List<SyncedSheetMusicDescriptor>,
+        syncedAtEpochMillis: Long,
+    )
+
+    suspend fun updateSyncStatus(syncStatus: SyncStatus)
 
     fun getItem(itemId: String): SheetMusicItem?
 }
@@ -143,11 +177,7 @@ class DefaultSheetMusicRepository(
             item.copy(
                 title = metadata.title.trim().ifEmpty { item.title },
                 composer = metadata.composer?.trim()?.ifEmpty { null },
-                tags = metadata.tags
-                    .map(String::trim)
-                    .filter(String::isNotEmpty)
-                    .distinctBy(String::lowercase)
-                    .sortedWith(String.CASE_INSENSITIVE_ORDER),
+                tags = normalizeTags(metadata.tags),
                 collection = metadata.collection?.trim()?.ifEmpty { null },
                 isFavorite = metadata.isFavorite,
             )
@@ -199,6 +229,91 @@ class DefaultSheetMusicRepository(
         }
     }
 
+    override suspend fun applyRemoteSync(
+        providerId: String,
+        providerName: String,
+        items: List<SyncedSheetMusicDescriptor>,
+        syncedAtEpochMillis: Long,
+    ) {
+        ensureInitialized()
+
+        val stalePaths = mutableListOf<String>()
+
+        mutationLock.withLock {
+            val existingItems = _library.value.items
+            val existingRemoteItems = existingItems.filter { it.syncMetadata?.providerId == providerId }
+            val existingRemoteById = existingRemoteItems.associateBy { it.syncMetadata?.remoteId.orEmpty() }
+            val keptLocalItems = existingItems.filterNot { it.syncMetadata?.providerId == providerId }
+            val incomingRemoteIds = items.mapTo(mutableSetOf()) { it.remoteId }
+
+            val syncedItems = items.map { descriptor ->
+                val existing = existingRemoteById[descriptor.remoteId]
+                val nextDocument = PdfDocumentReference(
+                    storedPath = descriptor.storedPath,
+                    originalFileName = descriptor.originalFileName,
+                    sourceUri = descriptor.sourceUri,
+                )
+
+                if (existing != null && existing.document.storedPath != descriptor.storedPath) {
+                    stalePaths += existing.document.storedPath
+                }
+
+                existing?.copy(
+                    title = descriptor.title,
+                    composer = descriptor.composer,
+                    tags = normalizeTags(descriptor.tags),
+                    collection = descriptor.collection?.trim()?.ifEmpty { null },
+                    document = nextDocument,
+                    pageCount = descriptor.pageCount ?: existing.pageCount,
+                    syncMetadata = RemoteSyncMetadata(
+                        providerId = providerId,
+                        providerName = providerName,
+                        remoteId = descriptor.remoteId,
+                        remoteVersion = descriptor.remoteVersion,
+                        lastSyncedEpochMillis = syncedAtEpochMillis,
+                    ),
+                ) ?: SheetMusicItem(
+                    id = buildRemoteItemId(providerId, descriptor.remoteId),
+                    title = descriptor.title,
+                    composer = descriptor.composer,
+                    tags = normalizeTags(descriptor.tags),
+                    collection = descriptor.collection?.trim()?.ifEmpty { null },
+                    document = nextDocument,
+                    pageCount = descriptor.pageCount,
+                    dateAddedEpochMillis = descriptor.dateAddedEpochMillis ?: syncedAtEpochMillis,
+                    syncMetadata = RemoteSyncMetadata(
+                        providerId = providerId,
+                        providerName = providerName,
+                        remoteId = descriptor.remoteId,
+                        remoteVersion = descriptor.remoteVersion,
+                        lastSyncedEpochMillis = syncedAtEpochMillis,
+                    ),
+                )
+            }
+
+            existingRemoteItems
+                .filter { existing -> existing.syncMetadata?.remoteId !in incomingRemoteIds }
+                .forEach { stalePaths += it.document.storedPath }
+
+            val updatedItems = keptLocalItems + syncedItems
+            storage.writeItems(updatedItems)
+            _library.value = _library.value.copy(items = updatedItems)
+        }
+
+        stalePaths
+            .distinct()
+            .forEach { stalePath ->
+                runCatching { storedDocumentCleaner.deleteStoredDocument(stalePath) }
+            }
+    }
+
+    override suspend fun updateSyncStatus(syncStatus: SyncStatus) {
+        ensureInitialized()
+        mutationLock.withLock {
+            _library.value = _library.value.copy(syncStatus = syncStatus)
+        }
+    }
+
     override fun getItem(itemId: String): SheetMusicItem? = _library.value.items.firstOrNull { it.id == itemId }
 
     private suspend fun ensureInitialized() {
@@ -230,6 +345,11 @@ class DefaultSheetMusicRepository(
 
     private fun buildStableId(importedAt: Long, index: Int): String =
         "${importedAt}_${index}_${Random.nextInt(1000, 9999)}"
+
+    private fun buildRemoteItemId(
+        providerId: String,
+        remoteId: String,
+    ): String = "remote_${providerId}_${remoteId}"
 }
 
 private fun normalizeTitle(
@@ -238,3 +358,9 @@ private fun normalizeTitle(
 ): String = suggestedTitle.trim()
     .ifEmpty { originalFileName.substringBeforeLast('.') }
     .ifEmpty { "Untitled score" }
+
+private fun normalizeTags(tags: List<String>): List<String> = tags
+    .map(String::trim)
+    .filter(String::isNotEmpty)
+    .distinctBy(String::lowercase)
+    .sortedWith(String.CASE_INSENSITIVE_ORDER)

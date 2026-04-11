@@ -8,6 +8,8 @@ import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
 import com.ryanjames.lunar.library.data.NoOpStoredDocumentCleaner
 import com.ryanjames.lunar.library.data.SheetMusicRepository
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
+import com.ryanjames.lunar.sync.LibrarySyncManager
+import com.ryanjames.lunar.sync.rememberNoOpLibrarySyncManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,6 +20,7 @@ data class PlatformRuntime(
     val repository: SheetMusicRepository,
     val importer: PdfImporter,
     val renderer: PdfPageRenderer,
+    val syncManager: LibrarySyncManager,
 )
 
 data class PlatformCapabilities(
@@ -122,8 +125,14 @@ fun rememberUnsupportedPlatformRuntime(
             storedDocumentCleaner = NoOpStoredDocumentCleaner,
         )
     }
+    val syncManager = remember(repository) {
+        rememberNoOpLibrarySyncManager(
+            repository = repository,
+            renderer = UnavailablePdfPageRenderer,
+        )
+    }
 
-    return remember(platformName, statusLine, importMessage, repository) {
+    return remember(platformName, statusLine, importMessage, repository, syncManager) {
         PlatformRuntime(
             platformName = platformName,
             capabilities = PlatformCapabilities(
@@ -136,6 +145,7 @@ fun rememberUnsupportedPlatformRuntime(
             repository = repository,
             importer = UnsupportedPdfImporter(importMessage),
             renderer = UnavailablePdfPageRenderer,
+            syncManager = syncManager,
         )
     }
 }

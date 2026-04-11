@@ -6,7 +6,11 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.JsonLibraryStorage
 import com.ryanjames.lunar.library.data.OkioStoredDocumentCleaner
+import com.ryanjames.lunar.library.data.JsonSyncSettingsStorage
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
+import com.ryanjames.lunar.sync.LibrarySyncManager
+import com.ryanjames.lunar.sync.ManagedPdfStore
+import com.ryanjames.lunar.sync.SyncHttpClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,6 +35,9 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
     val metadataPath = remember(appRoot) {
         File(appRoot, "metadata/library.json").absolutePath.toPath()
     }
+    val syncSettingsPath = remember(appRoot) {
+        File(appRoot, "sync/settings.json").absolutePath.toPath()
+    }
     val scoresDirectory = remember(appRoot) {
         File(appRoot, "scores").apply { mkdirs() }
     }
@@ -44,6 +51,22 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
         )
     }
     val renderer = remember { DesktopPdfPageRenderer() }
+    val pdfStore = remember(scoresDirectory) {
+        DesktopManagedPdfStore(scoresDirectory = scoresDirectory)
+    }
+    val syncHttpClient = remember { DesktopSyncHttpClient() }
+    val syncManager = remember(repository, renderer, syncSettingsPath, pdfStore, syncHttpClient) {
+        LibrarySyncManager(
+            repository = repository,
+            settingsStorage = JsonSyncSettingsStorage(
+                fileSystem = FileSystem.SYSTEM,
+                settingsPath = syncSettingsPath,
+            ),
+            httpClient = syncHttpClient,
+            pdfStore = pdfStore,
+            renderer = renderer,
+        )
+    }
     val importer = remember(scoresDirectory, renderer) {
         DesktopPdfImporter(
             scoresDirectory = scoresDirectory,
@@ -51,7 +74,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
         )
     }
 
-    return remember(repository, importer, renderer, appRoot) {
+    return remember(repository, importer, renderer, syncManager, appRoot) {
         PlatformRuntime(
             platformName = System.getProperty("os.name") ?: "Desktop JVM",
             capabilities = PlatformCapabilities(
@@ -64,6 +87,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             repository = repository,
             importer = importer,
             renderer = renderer,
+            syncManager = syncManager,
         )
     }
 }
@@ -220,6 +244,65 @@ private class DesktopPdfPageRenderer : PdfPageRenderer {
                 image = image.toComposeImageBitmap(),
             )
         }
+    }
+}
+
+private class DesktopSyncHttpClient : SyncHttpClient {
+    override suspend fun getText(url: String): String = withContext(Dispatchers.IO) {
+        java.net.URL(url).openConnection().apply {
+            connectTimeout = 15_000
+            readTimeout = 30_000
+        }.getInputStream().bufferedReader().use { it.readText() }
+    }
+
+    override suspend fun getBytes(url: String): ByteArray = withContext(Dispatchers.IO) {
+        java.net.URL(url).openConnection().apply {
+            connectTimeout = 15_000
+            readTimeout = 60_000
+        }.getInputStream().use { it.readBytes() }
+    }
+
+    override suspend fun postJson(url: String, jsonBody: String, headers: Map<String, String>): String = withContext(Dispatchers.IO) {
+        val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        connection.apply {
+            requestMethod = "POST"
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+            headers.forEach { (key, value) -> setRequestProperty(key, value) }
+            connectTimeout = 15_000
+            readTimeout = 30_000
+            doOutput = true
+        }
+        connection.outputStream.bufferedWriter().use { it.write(jsonBody) }
+        val responseCode = connection.responseCode
+        if (responseCode !in 200..299) {
+            val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+            throw java.io.IOException("HTTP $responseCode from POST $url: $errorBody")
+        }
+        connection.inputStream.bufferedReader().use { it.readText() }
+    }
+}
+
+private class DesktopManagedPdfStore(
+    private val scoresDirectory: File,
+) : ManagedPdfStore {
+    override suspend fun savePdf(
+        originalFileName: String,
+        contents: ByteArray,
+    ): String = withContext(Dispatchers.IO) {
+        val safeStem = safeFileStem(originalFileName)
+        val destination = File(
+            scoresDirectory,
+            "${System.currentTimeMillis()}_${Random.nextInt(1000, 9999)}_$safeStem.pdf",
+        )
+        destination.outputStream().use { output ->
+            output.write(contents)
+        }
+        destination.absolutePath
+    }
+
+    override suspend fun exists(storedPath: String): Boolean = withContext(Dispatchers.IO) {
+        File(storedPath).exists()
     }
 }
 

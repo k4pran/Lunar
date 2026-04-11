@@ -131,6 +131,67 @@ class LunarAppState(
         runImport { runtime.importer.importPdfFolder() }
     }
 
+    fun selectSyncProvider(providerId: String) {
+        scope.launch {
+            runtime.syncManager.selectProvider(providerId)
+        }
+    }
+
+    fun updateSupabaseProjectUrl(projectUrl: String) {
+        scope.launch {
+            val current = runtime.syncManager.state.value.settings.supabasePublicStorage
+            runtime.syncManager.updateSupabasePublicStorageSettings(
+                current.copy(projectUrl = projectUrl),
+            )
+        }
+    }
+
+    fun updateSupabaseBucketName(bucketName: String) {
+        scope.launch {
+            val current = runtime.syncManager.state.value.settings.supabasePublicStorage
+            runtime.syncManager.updateSupabasePublicStorageSettings(
+                current.copy(bucketName = bucketName),
+            )
+        }
+    }
+
+    fun updateSupabaseRootDirectory(rootDirectory: String) {
+        scope.launch {
+            val current = runtime.syncManager.state.value.settings.supabasePublicStorage
+            runtime.syncManager.updateSupabasePublicStorageSettings(
+                current.copy(rootDirectory = rootDirectory),
+            )
+        }
+    }
+
+    fun updateSupabaseFolderStrategy(strategy: com.ryanjames.lunar.library.data.BucketFolderStrategy) {
+        scope.launch {
+            val current = runtime.syncManager.state.value.settings.supabasePublicStorage
+            runtime.syncManager.updateSupabasePublicStorageSettings(
+                current.copy(folderStrategy = strategy),
+            )
+        }
+    }
+
+    fun updateSupabaseAnonKey(anonKey: String) {
+        scope.launch {
+            val current = runtime.syncManager.state.value.settings.supabasePublicStorage
+            runtime.syncManager.updateSupabasePublicStorageSettings(
+                current.copy(anonKey = anonKey),
+            )
+        }
+    }
+
+    fun forceSyncRefresh() {
+        scope.launch {
+            runtime.syncManager.refresh(force = true)
+            val message = runtime.syncManager.state.value.lastMessage
+            if (!message.isNullOrBlank()) {
+                bannerMessage = message
+            }
+        }
+    }
+
     fun openPreview(item: SheetMusicItem) {
         selectedSection = AppSection.LIBRARY
         previewItemId = item.id
@@ -234,6 +295,7 @@ class LunarAppState(
                         val scores = imported.size
                         "$scores PDF${if (scores == 1) "" else "s"} added to your library."
                     }
+
                     !result.notice.isNullOrBlank() -> result.notice
                     else -> null
                 }

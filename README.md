@@ -95,6 +95,76 @@ Lunar currently uses local-first storage.
 
 This keeps the first milestone simple while preserving a clean seam for future sync work.
 
+## Cloud Sync
+
+Lunar includes a sync abstraction with multiple provider slots.
+
+Current provider options:
+
+- `Local only`
+- `Supabase public storage`
+
+The cloud implementation is pull-based:
+
+- Lunar calls the Supabase Storage API to list PDFs in your bucket automatically
+- No manifest file is required — PDFs are discovered by scanning the bucket
+- Metadata (title, composer, collection, tags) is inferred from your folder structure
+- Lunar checks on startup and at the auto-refresh interval, or you can force a refresh any time
+
+### Why Supabase first?
+
+Supabase is a practical first step because it gives Lunar:
+
+- hosted file storage for PDFs
+- a REST API to list bucket contents without requiring a separate manifest file
+- simple public URLs for a first milestone
+- room to grow into authenticated/private storage later
+- a free starting tier for early testing
+
+### Supabase setup
+
+1. Create a Supabase project.
+2. Create a **public** storage bucket, for example `sheet-music`.
+3. Upload your PDF files into the bucket using a folder structure that matches one of the layout strategies below.
+4. In Lunar, go to the **Import** tab and choose `Supabase public storage`.
+5. Enter:
+   - **Project URL** — for example `https://your-project.supabase.co`
+   - **Bucket name** — for example `sheet-music`
+   - **Root directory** — the folder inside the bucket where your PDFs live, for example `scores`. Leave empty to scan the entire bucket.
+   - **Layout strategy** — how your folders are organised (see below)
+6. Tap **Refresh now**.
+
+Lunar calls `POST /storage/v1/object/list/{bucket}` recursively to discover all PDFs. No manifest file is needed or used.
+
+### Folder layout strategies
+
+Pick the strategy that matches how your PDFs are organised in the bucket.
+
+| Strategy | Bucket layout | What Lunar infers |
+|---|---|---|
+| **Flat** | `root/*.pdf` | Title from file name |
+| **By composer** | `root/{Composer}/*.pdf` | Composer from folder, title from file name |
+| **By collection** | `root/{Collection}/*.pdf` | Collection from folder, title from file name |
+| **Composer → Collection** | `root/{Composer}/{Collection}/*.pdf` | Both composer and collection |
+| **By instrument** | `root/{Instrument}/*.pdf` | Instrument added as a tag, title from file name |
+| **By date** | `root/{YYYY-MM}/*.pdf` | Date-added from folder name, title from file name |
+
+#### Examples
+
+```
+# Flat — all PDFs in one folder
+scores/Für Elise.pdf
+scores/Moonlight Sonata.pdf
+
+# By composer — one folder per composer
+scores/Beethoven/Für Elise.pdf
+scores/Chopin/Nocturne Op.9 No.2.pdf
+
+# Composer → Collection — two folder levels
+scores/Beethoven/Piano Sonatas/Moonlight Sonata.pdf
+scores/Chopin/Nocturnes/Nocturne Op.9 No.2.pdf
+```
+
 ## Tech Stack
 
 - Kotlin Multiplatform

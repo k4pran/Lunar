@@ -844,5 +844,7 @@ private fun LibrarySortOption.label(): String = when (this) {
 
 private fun syncStatusLabel(syncStatus: SyncStatus): String = when (syncStatus) {
     SyncStatus.LocalOnly -> "Local sync stub"
+    is SyncStatus.Syncing -> "Syncing ${syncStatus.providerName}"
     is SyncStatus.Ready -> "Sync: ${syncStatus.providerName}"
+    is SyncStatus.Error -> "Sync issue: ${syncStatus.providerName}"
 }
