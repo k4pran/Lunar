@@ -11,6 +11,7 @@ import com.ryanjames.lunar.library.model.applyLibraryQuery
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 class SharedCommonTest {
     @Test
@@ -90,6 +91,26 @@ class SharedCommonTest {
         )
 
         assertEquals(listOf("Moon River"), result.map { it.title })
+    }
+
+    @Test
+    fun repositoryDeleteRemovesStoredItem() = runBlocking {
+        val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
+
+        repository.initialize()
+        val imported = repository.importDocuments(
+            listOf(
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/delete-me.pdf",
+                    originalFileName = "Delete Me.pdf",
+                )
+            )
+        )
+
+        repository.deleteItem(imported.single().id)
+
+        assertNull(repository.getItem(imported.single().id))
+        assertEquals(emptyList(), repository.library.value.items)
     }
 }
 

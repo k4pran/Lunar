@@ -47,6 +47,9 @@ class LunarAppState(
     var fullscreenItemId: String? by mutableStateOf(null)
         private set
 
+    var deleteCandidateItemId: String? by mutableStateOf(null)
+        private set
+
     var importInProgress: Boolean by mutableStateOf(false)
         private set
 
@@ -106,6 +109,14 @@ class LunarAppState(
 
     fun dismissEditor() {
         editingItemId = null
+    }
+
+    fun requestDelete(itemId: String) {
+        deleteCandidateItemId = itemId
+    }
+
+    fun dismissDeleteRequest() {
+        deleteCandidateItemId = null
     }
 
     fun clearBanner() {
@@ -170,6 +181,25 @@ class LunarAppState(
             )
             editingItemId = null
             bannerMessage = "Library details updated."
+        }
+    }
+
+    fun confirmDelete() {
+        val itemId = deleteCandidateItemId ?: return
+        scope.launch {
+            runtime.repository.deleteItem(itemId)
+            if (previewItemId == itemId) {
+                previewItemId = null
+            }
+            if (fullscreenItemId == itemId) {
+                fullscreenItemId = null
+            }
+            if (editingItemId == itemId) {
+                editingItemId = null
+            }
+            deleteCandidateItemId = null
+            selectedSection = AppSection.LIBRARY
+            bannerMessage = "Score removed from your library."
         }
     }
 

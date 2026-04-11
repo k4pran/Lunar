@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import okio.FileSystem
+import okio.Path.Companion.toPath
 import kotlin.random.Random
 import kotlin.time.Clock
 
@@ -31,6 +33,25 @@ interface LibrarySyncGateway {
 
 object LocalOnlySyncGateway : LibrarySyncGateway {
     override suspend fun currentStatus(): SyncStatus = SyncStatus.LocalOnly
+}
+
+interface StoredDocumentCleaner {
+    suspend fun deleteStoredDocument(storedPath: String)
+}
+
+object NoOpStoredDocumentCleaner : StoredDocumentCleaner {
+    override suspend fun deleteStoredDocument(storedPath: String) = Unit
+}
+
+class OkioStoredDocumentCleaner(
+    private val fileSystem: FileSystem,
+) : StoredDocumentCleaner {
+    override suspend fun deleteStoredDocument(storedPath: String) {
+        val path = storedPath.toPath()
+        if (fileSystem.metadataOrNull(path) != null) {
+            fileSystem.delete(path, mustExist = false)
+        }
+    }
 }
 
 data class SheetMusicMetadataInput(
@@ -58,12 +79,15 @@ interface SheetMusicRepository {
 
     suspend fun updatePageCount(itemId: String, pageCount: Int)
 
+    suspend fun deleteItem(itemId: String)
+
     fun getItem(itemId: String): SheetMusicItem?
 }
 
 class DefaultSheetMusicRepository(
     private val storage: LibraryStorage,
     private val syncGateway: LibrarySyncGateway = LocalOnlySyncGateway,
+    private val storedDocumentCleaner: StoredDocumentCleaner = NoOpStoredDocumentCleaner,
     private val clock: Clock = Clock.System,
 ) : SheetMusicRepository {
     private val mutationLock = Mutex()
@@ -159,6 +183,19 @@ class DefaultSheetMusicRepository(
             } else {
                 item.copy(pageCount = pageCount)
             }
+        }
+    }
+
+    override suspend fun deleteItem(itemId: String) {
+        ensureInitialized()
+
+        val item = getItem(itemId) ?: return
+        runCatching {
+            storedDocumentCleaner.deleteStoredDocument(item.document.storedPath)
+        }
+
+        mutateItems { items ->
+            items.filterNot { existing -> existing.id == itemId }
         }
     }
 

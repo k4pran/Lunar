@@ -69,6 +69,7 @@ fun LibraryScreen(
     val collections = snapshot.items.availableCollections()
     val tags = snapshot.items.availableTags()
     val editingItem = snapshot.items.firstOrNull { it.id == appState.editingItemId }
+    val deleteCandidate = snapshot.items.firstOrNull { it.id == appState.deleteCandidateItemId }
 
     Column(
         modifier = modifier
@@ -123,6 +124,14 @@ fun LibraryScreen(
                     isFavorite = isFavorite,
                 )
             },
+        )
+    }
+
+    if (deleteCandidate != null) {
+        DeleteScoreDialog(
+            item = deleteCandidate,
+            onDismiss = appState::dismissDeleteRequest,
+            onConfirm = appState::confirmDelete,
         )
     }
 }
@@ -559,6 +568,11 @@ private fun LibraryCard(
                         ) {
                             Text("✎ Edit", color = Color(0xFF4D7C99))
                         }
+                        androidx.compose.material3.TextButton(
+                            onClick = { appState.requestDelete(item.id) },
+                        ) {
+                            Text("Delete", color = Color(0xFFB42318))
+                        }
                         androidx.compose.material3.Button(
                             onClick = { appState.openPreview(item) },
                             colors = androidx.compose.material3.ButtonDefaults.buttonColors(
@@ -572,6 +586,33 @@ private fun LibraryCard(
             }
         }
     }
+}
+
+@Composable
+private fun DeleteScoreDialog(
+    item: SheetMusicItem,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete score?") },
+        text = {
+            Text(
+                "Remove \"${item.title}\" from the library? Lunar will also delete its imported PDF copy for this score.",
+            )
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) {
+                Text("Delete")
+            }
+        },
+    )
 }
 
 @Composable

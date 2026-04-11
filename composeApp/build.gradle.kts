@@ -2,6 +2,18 @@ import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+val lunarAppName = "Lunar"
+val lunarBundleId = "com.ryanjames.lunar"
+val lunarVendor = "Ryan James"
+val lunarVersionName = providers.gradleProperty("lunar.versionName").getOrElse("0.1.0")
+val lunarVersionCode = providers.gradleProperty("lunar.versionCode").map(String::toInt).getOrElse(1)
+val lunarDesktopPackageVersion = providers.gradleProperty("lunar.desktopPackageVersion").getOrElse(lunarVersionName)
+val lunarWindowsUpgradeUuid = providers.gradleProperty("lunar.windowsUpgradeUuid")
+    .getOrElse("D1247941-B317-4D82-B11B-C7F06F513202")
+
+group = lunarBundleId
+version = lunarDesktopPackageVersion
+
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidApplication)
@@ -16,7 +28,7 @@ kotlin {
             jvmTarget.set(JvmTarget.JVM_11)
         }
     }
-    
+
     listOf(
         iosArm64(),
         iosSimulatorArm64()
@@ -26,20 +38,20 @@ kotlin {
             isStatic = true
         }
     }
-    
+
     jvm()
-    
+
     js {
         browser()
         binaries.executable()
     }
-    
+
     @OptIn(ExperimentalWasmDsl::class)
     wasmJs {
         browser()
         binaries.executable()
     }
-    
+
     sourceSets {
         androidMain.dependencies {
             implementation(libs.compose.uiToolingPreview)
@@ -76,11 +88,11 @@ android {
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
-        applicationId = "com.ryanjames.lunar"
+        applicationId = lunarBundleId
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = lunarVersionCode
+        versionName = lunarVersionName
     }
     packaging {
         resources {
@@ -108,8 +120,34 @@ compose.desktop {
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "com.ryanjames.lunar"
-            packageVersion = "1.0.0"
+            packageName = lunarAppName
+            packageVersion = lunarDesktopPackageVersion
+            description = "Cross-platform sheet music library and PDF viewer."
+            vendor = lunarVendor
+            copyright = "Copyright 2026 $lunarVendor"
+
+            windows {
+                iconFile.set(project.file("desktop-icons/windows/lunar.ico"))
+                menuGroup = lunarAppName
+                dirChooser = true
+                perUserInstall = true
+                msiPackageVersion = lunarDesktopPackageVersion
+                upgradeUuid = lunarWindowsUpgradeUuid
+            }
+
+            linux {
+                iconFile.set(project.file("desktop-icons/linux/lunar.png"))
+                packageName = "lunar"
+                menuGroup = lunarAppName
+                debPackageVersion = lunarDesktopPackageVersion
+            }
+
+            macOS {
+                packageName = lunarAppName
+                dockName = lunarAppName
+                bundleID = lunarBundleId
+                packageVersion = lunarDesktopPackageVersion
+            }
         }
     }
 }

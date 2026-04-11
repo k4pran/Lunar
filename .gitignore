@@ -17,3 +17,17 @@ captures
 !*.xcworkspace/contents.xcworkspacedata
 **/xcshareddata/WorkspaceSettings.xcsettings
 node_modules/
+out/
+tmp/
+temp/
+*.log
+*.tmp
+*.swp
+Thumbs.db
+desktop.ini
+.Spotlight-V100
+.Trashes
+composeApp/.kotlin/
+shared/.kotlin/
+composeApp/.DS_Store
+shared/.DS_Store

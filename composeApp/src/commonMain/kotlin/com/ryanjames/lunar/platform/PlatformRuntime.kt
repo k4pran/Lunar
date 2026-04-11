@@ -5,6 +5,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.ImageBitmap
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
+import com.ryanjames.lunar.library.data.NoOpStoredDocumentCleaner
 import com.ryanjames.lunar.library.data.SheetMusicRepository
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -118,6 +119,7 @@ fun rememberUnsupportedPlatformRuntime(
     val repository = remember {
         DefaultSheetMusicRepository(
             storage = InMemoryLibraryStorage(),
+            storedDocumentCleaner = NoOpStoredDocumentCleaner,
         )
     }
 

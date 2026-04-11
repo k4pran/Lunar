@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.documentfile.provider.DocumentFile
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.JsonLibraryStorage
+import com.ryanjames.lunar.library.data.OkioStoredDocumentCleaner
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,6 +53,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
                 fileSystem = FileSystem.SYSTEM,
                 metadataPath = metadataPath,
             ),
+            storedDocumentCleaner = OkioStoredDocumentCleaner(FileSystem.SYSTEM),
         )
     }
     val renderer = remember(context) { AndroidPdfPageRenderer() }

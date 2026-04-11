@@ -16,12 +16,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,7 +51,9 @@ import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.RenderedPdfPage
 
-// ─── Preview mode (inside dialog) ───────────────────────────────────────────
+private const val MinZoom = 0.2f
+private const val MaxZoom = 4.0f
+private const val ZoomStep = 0.2f
 
 @Composable
 fun ViewerScreen(
@@ -105,7 +111,6 @@ fun ViewerScreen(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-        // ── Compact top bar ──────────────────────────────────────────────────
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -119,7 +124,6 @@ fun ViewerScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Title + composer
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = item.title,
@@ -138,8 +142,7 @@ fun ViewerScreen(
                         )
                     }
                 }
-                // Prev / page label / Next
-                CompactNavButton("◀", canGoPrevious) {
+                CompactNavButton("<", canGoPrevious) {
                     currentPage = (currentPage - 1).coerceAtLeast(0)
                 }
                 Text(
@@ -147,25 +150,24 @@ fun ViewerScreen(
                     style = MaterialTheme.typography.labelMedium,
                     color = Color.White.copy(alpha = 0.9f),
                 )
-                CompactNavButton("▶", canGoNext) { currentPage += 1 }
-                // Zoom
-                CompactNavButton("−", zoom > 0.6f) { zoom = (zoom - 0.2f).coerceAtLeast(0.6f) }
-                CompactNavButton("+", zoom < 2.2f) { zoom = (zoom + 0.2f).coerceAtMost(2.2f) }
-                // Favourite
+                CompactNavButton(">", canGoNext) { currentPage += 1 }
+                CompactNavButton("-", zoom > MinZoom) { zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom) }
+                CompactNavButton("+", zoom < MaxZoom) { zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom) }
                 Text(
-                    text = if (item.isFavorite) "★" else "☆",
+                    text = if (item.isFavorite) "*" else "o",
                     style = MaterialTheme.typography.titleMedium,
                     color = if (item.isFavorite) Color(0xFFA7C6ED) else Color.White.copy(alpha = 0.55f),
                     modifier = Modifier
                         .clickable(onClick = onToggleFavorite)
                         .padding(horizontal = 6.dp, vertical = 4.dp),
                 )
-                // Close
-                CompactNavButton("✕", true, onClick = onBack)
+                if (onEnterFullscreen != null) {
+                    CompactNavButton("Full", true, onClick = onEnterFullscreen)
+                }
+                CompactNavButton("Close", true, onClick = onBack)
             }
         }
 
-        // ── PDF canvas fills everything below the bar ────────────────────────
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -184,8 +186,6 @@ fun ViewerScreen(
         }
     }
 }
-
-// ─── Fullscreen mode ─────────────────────────────────────────────────────────
 
 @Composable
 fun FullscreenViewerScreen(
@@ -237,12 +237,12 @@ fun FullscreenViewerScreen(
     val resolvedPageCount = renderedPage?.pageCount ?: item.pageCount
     val canGoPrevious = currentPage > 0
     val canGoNext = resolvedPageCount?.let { currentPage < it - 1 } ?: true
+    val zoomLabel = "${(zoom * 100).toInt()}%"
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
-            // Double-tap anywhere on the PDF area toggles the overlay
             .pointerInput(Unit) {
                 detectTapGestures(
                     onDoubleTap = { overlayVisible = !overlayVisible }
@@ -250,7 +250,6 @@ fun FullscreenViewerScreen(
             },
         contentAlignment = Alignment.Center,
     ) {
-        // ── PDF fills the entire screen ──────────────────────────────────────
         when {
             isLoading -> CircularProgressIndicator(color = Color(0xFFA7C6ED))
             renderedPage != null -> PdfPageCanvas(page = renderedPage!!, zoom = zoom)
@@ -260,75 +259,143 @@ fun FullscreenViewerScreen(
             )
         }
 
-        // ── Overlay: appears on double-tap, hidden by default ────────────────
         AnimatedVisibility(
             visible = overlayVisible,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter),
+            modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
                         Brush.verticalGradient(
-                            listOf(Color.Black.copy(alpha = 0.75f), Color.Transparent)
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.88f))
                         )
                     )
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 16.dp),
             ) {
-                Row(
+                Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    color = Color(0xFF113243).copy(alpha = 0.96f),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    tonalElevation = 10.dp,
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = item.title,
-                            style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Serif),
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        item.composer?.let { composer ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.title,
+                                    style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Serif),
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                item.composer?.let { composer ->
+                                    Text(
+                                        text = composer,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color.White.copy(alpha = 0.78f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
                             Text(
-                                text = composer,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.7f),
-                                maxLines = 1,
+                                text = buildPageLabel(currentPage, resolvedPageCount),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = Color.White.copy(alpha = 0.92f),
+                                modifier = Modifier.padding(start = 12.dp),
                             )
                         }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            FullscreenToolbarButton(
+                                label = "Prev",
+                                enabled = canGoPrevious,
+                                onClick = { currentPage = (currentPage - 1).coerceAtLeast(0) },
+                            )
+                            FullscreenToolbarButton(
+                                label = "Next",
+                                enabled = canGoNext,
+                                onClick = { currentPage += 1 },
+                            )
+                            Surface(
+                                color = Color.White.copy(alpha = 0.12f),
+                                shape = MaterialTheme.shapes.large,
+                            ) {
+                                Text(
+                                    text = "Zoom $zoomLabel",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            FilledTonalButton(
+                                onClick = { zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom) },
+                                enabled = zoom > MinZoom,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("Zoom -")
+                            }
+                            FilledTonalButton(
+                                onClick = { zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom) },
+                                enabled = zoom < MaxZoom,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("Zoom +")
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = onToggleFavorite,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(if (item.isFavorite) "Unfavorite" else "Favorite")
+                            }
+                            Button(
+                                onClick = onBack,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("Exit Fullscreen")
+                            }
+                        }
                     }
-                    CompactNavButton("◀", canGoPrevious) {
-                        currentPage = (currentPage - 1).coerceAtLeast(0)
-                    }
-                    Text(
-                        text = buildPageLabel(currentPage, resolvedPageCount),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color.White.copy(alpha = 0.9f),
-                    )
-                    CompactNavButton("▶", canGoNext) { currentPage += 1 }
-                    CompactNavButton("−", zoom > 0.6f) { zoom = (zoom - 0.2f).coerceAtLeast(0.6f) }
-                    CompactNavButton("+", zoom < 2.2f) { zoom = (zoom + 0.2f).coerceAtMost(2.2f) }
-                    Text(
-                        text = if (item.isFavorite) "★" else "☆",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = if (item.isFavorite) Color(0xFFA7C6ED) else Color.White.copy(alpha = 0.55f),
-                        modifier = Modifier
-                            .clickable(onClick = onToggleFavorite)
-                            .padding(horizontal = 6.dp, vertical = 4.dp),
-                    )
-                    CompactNavButton("✕  Exit", true, onClick = onBack)
                 }
             }
         }
     }
 }
 
-// ─── Shared helpers ───────────────────────────────────────────────────────────
-
 @Composable
-private fun CompactNavButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+private fun CompactNavButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
     Text(
         text = label,
         style = MaterialTheme.typography.labelLarge,
@@ -341,6 +408,20 @@ private fun CompactNavButton(label: String, enabled: Boolean, onClick: () -> Uni
             )
             .padding(horizontal = 10.dp, vertical = 5.dp),
     )
+}
+
+@Composable
+private fun FullscreenToolbarButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Button(
+        enabled = enabled,
+        onClick = onClick,
+    ) {
+        Text(label)
+    }
 }
 
 @Composable
@@ -376,13 +457,15 @@ private fun PdfPageCanvas(
 }
 
 @Composable
-private fun ViewerMessage(title: String, body: String) {
+private fun ViewerMessage(
+    title: String,
+    body: String,
+) {
     Column(
         modifier = Modifier.padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("📄", style = MaterialTheme.typography.displaySmall)
         Text(
             text = title,
             style = MaterialTheme.typography.headlineSmall.copy(
@@ -399,5 +482,11 @@ private fun ViewerMessage(title: String, body: String) {
     }
 }
 
-private fun buildPageLabel(currentPage: Int, pageCount: Int?): String =
-    if (pageCount == null) "p.${currentPage + 1}" else "${currentPage + 1} / $pageCount"
+private fun buildPageLabel(
+    currentPage: Int,
+    pageCount: Int?,
+): String = if (pageCount == null) {
+    "p.${currentPage + 1}"
+} else {
+    "${currentPage + 1} / $pageCount"
+}

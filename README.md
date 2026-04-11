@@ -1,95 +1,309 @@
-This is a Kotlin Multiplatform project targeting Android, iOS, Web, Desktop (JVM), Server.
+# Lunar
 
-* [/composeApp](./composeApp/src) is for code that will be shared across your Compose Multiplatform applications.
-  It contains several subfolders:
-  - [commonMain](./composeApp/src/commonMain/kotlin) is for code that’s common for all targets.
-  - Other folders are for Kotlin code that will be compiled for only the platform indicated in the folder name.
-    For example, if you want to use Apple’s CoreCrypto for the iOS part of your Kotlin app,
-    the [iosMain](./composeApp/src/iosMain/kotlin) folder would be the right place for such calls.
-    Similarly, if you want to edit the Desktop (JVM) specific part, the [jvmMain](./composeApp/src/jvmMain/kotlin)
-    folder is the appropriate location.
+Lunar is a Kotlin Multiplatform sheet music library and PDF viewer built with Kotlin and Compose Multiplatform.
 
-* [/iosApp](./iosApp/iosApp) contains iOS applications. Even if you’re sharing your UI with Compose Multiplatform,
-  you need this entry point for your iOS app. This is also where you should add SwiftUI code for your project.
+The current milestone focuses on a clean shared foundation for:
 
-* [/server](./server/src/main/kotlin) is for the Ktor server application.
+- importing PDF sheet music
+- browsing a library across devices and screen sizes
+- searching, sorting, filtering, and organizing scores
+- previewing and viewing PDFs in-app
+- leaving room for future file and metadata sync
 
-* [/shared](./shared/src) is for the code that will be shared between all targets in the project.
-  The most important subfolder is [commonMain](./shared/src/commonMain/kotlin). If preferred, you
-  can add code to the platform-specific folders here too.
+## Can I run this on Windows?
 
-### Build and Run Android Application
+Yes.
 
-To build and run the development version of the Android app, use the run configuration from the run widget
-in your IDE’s toolbar or build it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:assembleDebug
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:assembleDebug
-  ```
+This repo includes a desktop JVM target, and on Windows you can:
 
-### Build and Run Desktop (JVM) Application
+- run the app directly during development with `.\gradlew.bat :composeApp:run`
+- build a Windows installer with `.\gradlew.bat :composeApp:packageReleaseMsi`
 
-To build and run the development version of the desktop app, use the run configuration from the run widget
-in your IDE’s toolbar or run it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :composeApp:run
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :composeApp:run
-  ```
+Desktop packaging is currently configured for:
 
-### Build and Run Server
+- `MSI` on Windows
+- `DEB` on Linux
+- `DMG` on macOS
 
-To build and run the development version of the server, use the run configuration from the run widget
-in your IDE’s toolbar or run it directly from the terminal:
-- on macOS/Linux
-  ```shell
-  ./gradlew :server:run
-  ```
-- on Windows
-  ```shell
-  .\gradlew.bat :server:run
-  ```
+## Current Platform Support
 
-### Build and Run Web Application
+| Target | Status | Notes |
+| --- | --- | --- |
+| Android | Active | First-class target. PDF import, folder import, SAF permission tracking, library UI, dialog preview, and fullscreen viewer are wired. |
+| Desktop JVM (Windows) | Active | First-class target. File/folder import, local storage, library UI, dialog preview, fullscreen viewer, and MSI packaging are wired. |
+| Desktop JVM (Linux) | Active | Same shared desktop app flow as Windows. `DEB` packaging is configured. |
+| iOS | Preview shell | Build targets exist, but PDF import/viewing are not fully wired yet. |
+| Web / Wasm | Preview shell | Build targets exist, but PDF import/viewing are not fully wired yet. |
+| Server | Placeholder | Ktor module exists for future sync/back-end work, but it is not part of the current app flow. |
 
-To build and run the development version of the web app, use the run configuration from the run widget
-in your IDE's toolbar or run it directly from the terminal:
-- for the Wasm target (faster, modern browsers):
-  - on macOS/Linux
-    ```shell
-    ./gradlew :composeApp:wasmJsBrowserDevelopmentRun
-    ```
-  - on Windows
-    ```shell
-    .\gradlew.bat :composeApp:wasmJsBrowserDevelopmentRun
-    ```
-- for the JS target (slower, supports older browsers):
-  - on macOS/Linux
-    ```shell
-    ./gradlew :composeApp:jsBrowserDevelopmentRun
-    ```
-  - on Windows
-    ```shell
-    .\gradlew.bat :composeApp:jsBrowserDevelopmentRun
-    ```
+## Architecture
 
-### Build and Run iOS Application
+The project is split into a shared core plus thin platform integrations.
 
-To build and run the development version of the iOS app, use the run configuration from the run widget
-in your IDE’s toolbar or open the [/iosApp](./iosApp) directory in Xcode and run it from there.
+### Modules
 
----
+- `shared/`
+  - Shared domain models for sheet music items and library queries
+  - Shared repository and persistence abstractions
+  - Shared sort, filter, search, and metadata logic
+  - Shared tests for repository and query behavior
+- `composeApp/`
+  - Shared Compose UI and app state
+  - Shared library, import, preview, and fullscreen viewer flows
+  - Platform-specific import and PDF rendering integrations
+- `iosApp/`
+  - Native iOS launcher shell for the Compose app target
+- `server/`
+  - Ktor-based placeholder for future sync services
 
-Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html),
-[Compose Multiplatform](https://github.com/JetBrains/compose-multiplatform/#compose-multiplatform),
-[Kotlin/Wasm](https://kotl.in/wasm/)…
+### Source set responsibilities
 
-We would appreciate your feedback on Compose/Web and Kotlin/Wasm in the public Slack channel [#compose-web](https://slack-chats.kotlinlang.org/c/compose-web).
-If you face any issues, please report them on [YouTrack](https://youtrack.jetbrains.com/newIssue?project=CMP).
+- `composeApp/src/commonMain`
+  - App shell, navigation, library screen, import screen, viewer screen, and shared state
+- `composeApp/src/androidMain`
+  - Android SAF file/folder import
+  - persisted URI permission tracking
+  - PDF rendering via Android `PdfRenderer`
+- `composeApp/src/jvmMain`
+  - Desktop file/folder chooser
+  - PDF rendering via Apache PDFBox
+- `shared/src/commonMain`
+  - Library models
+  - query/filter/sort logic
+  - repository logic
+  - metadata persistence helpers
+
+### Current app flow
+
+1. Import PDFs from file or folder.
+2. Register them in the shared repository.
+3. Persist library metadata locally.
+4. Browse the shared library UI with search, sort, and filters.
+5. Open a score in a dialog preview.
+6. Expand into fullscreen viewing when needed.
+
+## Storage Model
+
+Lunar currently uses local-first storage.
+
+- Metadata is stored as JSON through the shared repository layer.
+- Imported PDFs are copied into app-managed storage.
+- Android stores app data under app-private storage and tracks persisted SAF permissions for imported documents/folders.
+- Desktop stores app data under:
+  - `%APPDATA%\Lunar` on Windows
+  - `~/.lunar` as a fallback when `APPDATA` is unavailable
+
+This keeps the first milestone simple while preserving a clean seam for future sync work.
+
+## Tech Stack
+
+- Kotlin Multiplatform
+- Compose Multiplatform
+- Kotlin Coroutines
+- kotlinx-datetime
+- kotlinx-serialization
+- Okio
+- Android `PdfRenderer`
+- Apache PDFBox
+- Ktor (server placeholder)
+
+## Requirements
+
+Recommended local setup:
+
+- JDK 17 or newer for Gradle and Android tooling
+- Android Studio or IntelliJ IDEA with Kotlin/Compose support
+- Android SDK 36
+- A connected Android device or emulator for Android testing
+
+## How to Run
+
+### Android
+
+From Android Studio, run the `composeApp` Android target on a device or emulator.
+
+From the terminal on Windows:
+
+```powershell
+.\gradlew.bat :composeApp:installDebug
+```
+
+Useful Android commands:
+
+```powershell
+.\gradlew.bat :composeApp:assembleDebug
+.\gradlew.bat :composeApp:compileDebugKotlinAndroid
+```
+
+### Windows desktop
+
+Run the desktop app directly:
+
+```powershell
+.\gradlew.bat :composeApp:run
+```
+
+Hot reload development run:
+
+```powershell
+.\gradlew.bat :composeApp:hotRunJvm
+```
+
+### Linux desktop
+
+On Linux, the equivalent development run is:
+
+```bash
+./gradlew :composeApp:run
+```
+
+### Shared tests
+
+Run the shared repository/query tests:
+
+```powershell
+.\gradlew.bat :shared:jvmTest
+```
+
+## How to Build
+
+### Android artifacts
+
+Debug APK:
+
+```powershell
+.\gradlew.bat :composeApp:assembleDebug
+```
+
+Release APK:
+
+```powershell
+.\gradlew.bat :composeApp:assembleRelease
+```
+
+Release Android App Bundle:
+
+```powershell
+.\gradlew.bat :composeApp:bundleRelease
+```
+
+### Desktop artifacts
+
+Build a distributable for the current OS:
+
+```powershell
+.\gradlew.bat :composeApp:packageDistributionForCurrentOS
+```
+
+Build release distributables for the current OS:
+
+```powershell
+.\gradlew.bat :composeApp:packageReleaseDistributionForCurrentOS
+```
+
+Windows MSI:
+
+```powershell
+.\gradlew.bat :composeApp:packageReleaseMsi
+```
+
+Linux DEB:
+
+```bash
+./gradlew :composeApp:packageReleaseDeb
+```
+
+macOS DMG:
+
+```bash
+./gradlew :composeApp:packageReleaseDmg
+```
+
+Desktop outputs are written under `composeApp/build/compose/`.
+
+## How to Publish / Distribute
+
+There is not yet an automated publishing pipeline for app stores or package repositories.
+
+Current practical distribution options are:
+
+- Android
+  - build a signed `APK` for direct distribution, or
+  - build a signed `AAB` for Google Play submission later
+- Windows
+  - distribute the generated `MSI`
+- Linux
+  - distribute the generated `DEB`
+- macOS
+  - distribute the generated `DMG`
+
+What still needs to be added for production publishing:
+
+- release signing configuration and secret management
+- CI/CD build automation
+- store-specific metadata and release workflows
+- installer signing and notarization where required
+- update delivery strategy
+
+## Versioning
+
+Release metadata is centralized in `gradle.properties`.
+
+- `lunar.versionName`
+  - app-facing release version
+- `lunar.versionCode`
+  - Android version code
+- `lunar.desktopPackageVersion`
+  - desktop package version used for `MSI`, `DEB`, and `DMG` packaging
+- `lunar.windowsUpgradeUuid`
+  - stable Windows installer identity used for upgrade-aware MSI installs
+
+The desktop package version may need to differ from the app-facing version name because native installer formats apply stricter version rules than Android does.
+
+Keep `lunar.windowsUpgradeUuid` unchanged once Windows installers are distributed, otherwise upgrades may install side-by-side instead of replacing older versions.
+
+## Useful Gradle Tasks
+
+### App development
+
+- `:composeApp:run`
+- `:composeApp:hotRunJvm`
+- `:composeApp:compileKotlinJvm`
+- `:composeApp:compileDebugKotlinAndroid`
+
+### Packaging
+
+- `:composeApp:packageDistributionForCurrentOS`
+- `:composeApp:packageReleaseDistributionForCurrentOS`
+- `:composeApp:packageReleaseMsi`
+- `:composeApp:packageReleaseDeb`
+- `:composeApp:packageReleaseDmg`
+
+### Verification
+
+- `:shared:jvmTest`
+- `:composeApp:jvmTest`
+- `:composeApp:testDebugUnitTest`
+
+## Roadmap Direction
+
+Near-term priorities:
+
+- improve PDF viewing ergonomics and performance
+- strengthen library organization features
+- add thumbnails and richer metadata flows
+- prepare sync boundaries for metadata and file transport
+
+Longer-term possibilities:
+
+- setlists
+- performance mode
+- pedal support
+- cross-device sync
+- broader platform support
+
+## Notes
+
+- The first milestone is intentionally PDF-only.
+- Lunar is a viewing and library-management app, not a notation editor.
+- Most application logic is shared; platform code is isolated around import, storage access, and PDF rendering.
