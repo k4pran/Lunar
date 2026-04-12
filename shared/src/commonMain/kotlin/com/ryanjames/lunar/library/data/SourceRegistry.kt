@@ -16,14 +16,15 @@ import okio.buffer
 import kotlin.random.Random
 import kotlin.time.Clock
 
-// ─── Library Source types ─────────────────────────────────────────────────────
-
 @Serializable
 sealed interface LibrarySource {
     val id: String
     val label: String
     val addedAtEpochMillis: Long
 }
+
+@Serializable
+sealed interface CloudLibrarySource : LibrarySource
 
 @Serializable
 @SerialName("local_files")
@@ -51,16 +52,21 @@ data class CloudSupabaseSource(
     override val label: String,
     override val addedAtEpochMillis: Long,
     val settings: SupabasePublicStorageSettings = SupabasePublicStorageSettings(),
-) : LibrarySource
+) : CloudLibrarySource
 
-// ─── Persisted container ──────────────────────────────────────────────────────
+@Serializable
+@SerialName("cloud_google_drive")
+data class CloudGoogleDriveSource(
+    override val id: String,
+    override val label: String,
+    override val addedAtEpochMillis: Long,
+    val settings: GoogleDriveStorageSettings = GoogleDriveStorageSettings(),
+) : CloudLibrarySource
 
 @Serializable
 data class PersistedSources(
     val sources: List<LibrarySource> = emptyList(),
 )
-
-// ─── SourceRegistry interface and implementations ─────────────────────────────
 
 interface SourceRegistry {
     val sources: StateFlow<List<LibrarySource>>
@@ -78,7 +84,7 @@ class InMemorySourceRegistry(
     private val _sources = MutableStateFlow(initialSources)
     override val sources: StateFlow<List<LibrarySource>> = _sources.asStateFlow()
 
-    override suspend fun initialize() {}
+    override suspend fun initialize() = Unit
 
     override suspend fun addSource(source: LibrarySource) {
         _sources.value = _sources.value + source
@@ -115,8 +121,7 @@ class JsonSourceRegistry(
     override suspend fun initialize() {
         mutex.withLock {
             if (initialized) return
-            val items = readFromDisk()
-            _sources.value = items
+            _sources.value = readFromDisk()
             initialized = true
         }
     }
@@ -171,10 +176,7 @@ class JsonSourceRegistry(
     }
 }
 
-// ─── ID generation helper ─────────────────────────────────────────────────────
-
 fun generateSourceId(): String {
     val now = Clock.System.now().toEpochMilliseconds()
     return "src_${now}_${Random.nextInt(1000, 9999)}"
 }
-

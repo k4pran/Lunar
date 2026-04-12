@@ -146,6 +146,44 @@ class SharedCommonTest {
         assertEquals("moonlight", item.syncMetadata?.remoteId)
         assertEquals("/scores/moonlight.pdf", item.document.storedPath)
     }
+
+    @Test
+    fun repositoryApplyRemoteSyncKeepsDifferentProvidersAggregated() = runBlocking {
+        val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
+
+        repository.initialize()
+        repository.applyRemoteSync(
+            providerId = "src_supabase",
+            providerName = "Supabase",
+            syncedAtEpochMillis = 100L,
+            sourceId = "src_supabase",
+            items = listOf(
+                SyncedSheetMusicDescriptor(
+                    remoteId = "supabase-1",
+                    storedPath = "/scores/cloud-a.pdf",
+                    originalFileName = "Cloud A.pdf",
+                    title = "Cloud A",
+                )
+            ),
+        )
+        repository.applyRemoteSync(
+            providerId = "src_google_drive",
+            providerName = "Google Drive",
+            syncedAtEpochMillis = 200L,
+            sourceId = "src_google_drive",
+            items = listOf(
+                SyncedSheetMusicDescriptor(
+                    remoteId = "drive-1",
+                    storedPath = "/scores/cloud-b.pdf",
+                    originalFileName = "Cloud B.pdf",
+                    title = "Cloud B",
+                )
+            ),
+        )
+
+        val titles = repository.library.value.items.map { it.title }.sorted()
+        assertEquals(listOf("Cloud A", "Cloud B"), titles)
+    }
 }
 
 private fun testItem(

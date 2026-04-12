@@ -52,14 +52,21 @@ fun App() {
     val previewItem = snapshot.items.firstOrNull { it.id == appState.previewItemId }
     val fullscreenItem = snapshot.items.firstOrNull { it.id == appState.fullscreenItemId }
 
-    LaunchedEffect(runtime.repository, runtime.syncManager) {
+    LaunchedEffect(runtime.repository, runtime.syncManager, runtime.sourceRegistry) {
         runtime.repository.initialize()
+        runtime.sourceRegistry.initialize()
         runtime.syncManager.initialize()
-        runtime.syncManager.refresh(force = false)
+        runtime.syncManager.refreshAllSources(
+            sources = runtime.sourceRegistry.sources.value,
+            force = false,
+        )
 
         while (true) {
             delay(runtime.syncManager.automaticRefreshIntervalMillis())
-            runtime.syncManager.refresh(force = false)
+            runtime.syncManager.refreshAllSources(
+                sources = runtime.sourceRegistry.sources.value,
+                force = false,
+            )
         }
     }
 

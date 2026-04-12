@@ -6,8 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import com.ryanjames.lunar.library.data.CloudSupabaseSource
-import com.ryanjames.lunar.library.data.LibrarySource
+import com.ryanjames.lunar.library.data.CloudLibrarySource
 import com.ryanjames.lunar.library.data.LocalFilesSource
 import com.ryanjames.lunar.library.data.LocalFolderSource
 import com.ryanjames.lunar.library.data.SheetMusicMetadataInput
@@ -16,6 +15,7 @@ import com.ryanjames.lunar.library.model.LibraryQuery
 import com.ryanjames.lunar.library.model.LibrarySortOption
 import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.library.model.SortDirection
+import com.ryanjames.lunar.platform.ImportRequestResult
 import com.ryanjames.lunar.platform.PlatformRuntime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -53,7 +53,6 @@ class LunarAppState(
     var browseMode: LibraryBrowseMode by mutableStateOf(LibraryBrowseMode.ALL)
         private set
 
-    // When browsing BY_COLLECTION or BY_COMPOSER, the selected group name (null = show group list)
     var selectedGroup: String? by mutableStateOf(null)
         private set
 
@@ -115,7 +114,7 @@ class LunarAppState(
 
     fun updateBrowseMode(mode: LibraryBrowseMode) {
         browseMode = mode
-        selectedGroup = null // reset drill-down when switching mode
+        selectedGroup = null
     }
 
     fun selectGroup(groupName: String) {
@@ -163,69 +162,6 @@ class LunarAppState(
         runImport { runtime.importer.importPdfFolder() }
     }
 
-    fun selectSyncProvider(providerId: String) {
-        scope.launch {
-            runtime.syncManager.selectProvider(providerId)
-        }
-    }
-
-    fun updateSupabaseProjectUrl(projectUrl: String) {
-        scope.launch {
-            val current = runtime.syncManager.state.value.settings.supabasePublicStorage
-            runtime.syncManager.updateSupabasePublicStorageSettings(
-                current.copy(projectUrl = projectUrl),
-            )
-        }
-    }
-
-    fun updateSupabaseBucketName(bucketName: String) {
-        scope.launch {
-            val current = runtime.syncManager.state.value.settings.supabasePublicStorage
-            runtime.syncManager.updateSupabasePublicStorageSettings(
-                current.copy(bucketName = bucketName),
-            )
-        }
-    }
-
-    fun updateSupabaseRootDirectory(rootDirectory: String) {
-        scope.launch {
-            val current = runtime.syncManager.state.value.settings.supabasePublicStorage
-            runtime.syncManager.updateSupabasePublicStorageSettings(
-                current.copy(rootDirectory = rootDirectory),
-            )
-        }
-    }
-
-    fun updateSupabaseFolderStrategy(strategy: com.ryanjames.lunar.library.data.BucketFolderStrategy) {
-        scope.launch {
-            val current = runtime.syncManager.state.value.settings.supabasePublicStorage
-            runtime.syncManager.updateSupabasePublicStorageSettings(
-                current.copy(folderStrategy = strategy),
-            )
-        }
-    }
-
-    fun updateSupabaseAnonKey(anonKey: String) {
-        scope.launch {
-            val current = runtime.syncManager.state.value.settings.supabasePublicStorage
-            runtime.syncManager.updateSupabasePublicStorageSettings(
-                current.copy(anonKey = anonKey),
-            )
-        }
-    }
-
-    fun forceSyncRefresh() {
-        scope.launch {
-            runtime.syncManager.refresh(force = true)
-            val message = runtime.syncManager.state.value.lastMessage
-            if (!message.isNullOrBlank()) {
-                bannerMessage = message
-            }
-        }
-    }
-
-    // ─── Source management ────────────────────────────────────────────────────
-
     fun addLocalFilesSource(label: String) {
         val sourceId = generateSourceId()
         val source = LocalFilesSource(
@@ -252,13 +188,12 @@ class LunarAppState(
         runImportForSource(sourceId) { runtime.importer.importPdfFolder() }
     }
 
-    fun addCloudSource(source: CloudSupabaseSource) {
+    fun addCloudSource(source: CloudLibrarySource) {
         scope.launch {
             runtime.sourceRegistry.addSource(source)
             runtime.syncManager.refreshSource(source)
-            val message = runtime.syncManager.state.value.lastMessage
-            if (!message.isNullOrBlank()) {
-                bannerMessage = message
+            runtime.syncManager.state.value.lastMessage?.takeIf(String::isNotBlank)?.let {
+                bannerMessage = it
             }
         }
     }
@@ -271,23 +206,20 @@ class LunarAppState(
         }
     }
 
-    fun refreshCloudSource(source: CloudSupabaseSource) {
+    fun refreshCloudSource(source: CloudLibrarySource) {
         scope.launch {
             runtime.syncManager.refreshSource(source)
-            val message = runtime.syncManager.state.value.lastMessage
-            if (!message.isNullOrBlank()) {
-                bannerMessage = message
+            runtime.syncManager.state.value.lastMessage?.takeIf(String::isNotBlank)?.let {
+                bannerMessage = it
             }
         }
     }
 
     fun refreshAllCloudSources() {
         scope.launch {
-            val sources = runtime.sourceRegistry.sources.value
-            runtime.syncManager.refreshAllSources(sources)
-            val message = runtime.syncManager.state.value.lastMessage
-            if (!message.isNullOrBlank()) {
-                bannerMessage = message
+            runtime.syncManager.refreshAllSources(runtime.sourceRegistry.sources.value, force = true)
+            runtime.syncManager.state.value.lastMessage?.takeIf(String::isNotBlank)?.let {
+                bannerMessage = it
             }
         }
     }
@@ -377,11 +309,9 @@ class LunarAppState(
     }
 
     private fun runImport(
-        importerAction: suspend () -> com.ryanjames.lunar.platform.ImportRequestResult,
+        importerAction: suspend () -> ImportRequestResult,
     ) {
-        if (importInProgress) {
-            return
-        }
+        if (importInProgress) return
 
         scope.launch {
             importInProgress = true
@@ -409,11 +339,9 @@ class LunarAppState(
 
     private fun runImportForSource(
         sourceId: String,
-        importerAction: suspend () -> com.ryanjames.lunar.platform.ImportRequestResult,
+        importerAction: suspend () -> ImportRequestResult,
     ) {
-        if (importInProgress) {
-            return
-        }
+        if (importInProgress) return
 
         scope.launch {
             importInProgress = true
@@ -422,11 +350,9 @@ class LunarAppState(
                 val imported = runtime.repository.importDocumentsForSource(sourceId, result.documents)
 
                 if (imported.isEmpty() && result.documents.isEmpty()) {
-                    // No files picked — remove the empty source
                     runtime.sourceRegistry.removeSource(sourceId)
                 }
 
-                // Update the source's item count
                 val currentSource = runtime.sourceRegistry.getSource(sourceId)
                 if (currentSource != null) {
                     val count = runtime.repository.itemCountForSource(sourceId)
@@ -437,7 +363,7 @@ class LunarAppState(
                         is LocalFolderSource -> runtime.sourceRegistry.updateSource(
                             currentSource.copy(itemCount = count)
                         )
-                        else -> {}
+                        else -> Unit
                     }
                 }
 

@@ -33,6 +33,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.ryanjames.lunar.library.data.CloudGoogleDriveSource
+import com.ryanjames.lunar.library.data.CloudLibrarySource
 import com.ryanjames.lunar.library.data.CloudSupabaseSource
 import com.ryanjames.lunar.library.data.LibrarySource
 import com.ryanjames.lunar.library.data.LocalFilesSource
@@ -183,7 +185,7 @@ fun ImportScreen(
                     source = source,
                     itemCount = runtime.repository.itemCountForSource(source.id),
                     onRemove = { appState.removeSource(source.id) },
-                    onRefresh = if (source is CloudSupabaseSource) {
+                    onRefresh = if (source is CloudLibrarySource) {
                         { appState.refreshCloudSource(source) }
                     } else null,
                     isSyncing = syncState.isRefreshing,
@@ -192,7 +194,7 @@ fun ImportScreen(
         }
 
         // Sync status
-        if (sources.any { it is CloudSupabaseSource }) {
+        if (sources.any { it is CloudLibrarySource }) {
             val hasErrors = syncState.syncErrors.isNotEmpty()
             val statusBg = when {
                 hasErrors -> Color(0xFFB71C1C).copy(alpha = 0.08f)
@@ -286,6 +288,7 @@ private fun SourceCard(
         is LocalFilesSource -> "Local files"
         is LocalFolderSource -> "Local folder"
         is CloudSupabaseSource -> "Supabase"
+        is CloudGoogleDriveSource -> "Google Drive"
     }
 
     Card(
@@ -326,12 +329,33 @@ private fun SourceCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            if (source is CloudSupabaseSource && source.settings.projectUrl.isNotBlank()) {
-                Text(
-                    text = "${source.settings.projectUrl} / ${source.settings.bucketName}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            when (source) {
+                is CloudSupabaseSource -> {
+                    if (source.settings.projectUrl.isNotBlank()) {
+                        Text(
+                            text = "${source.settings.projectUrl} / ${source.settings.bucketName}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                is CloudGoogleDriveSource -> {
+                    Text(
+                        text = "${source.settings.roots.size} Drive root${if (source.settings.roots.size == 1) "" else "s"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    source.settings.roots.take(2).forEach { root ->
+                        Text(
+                            text = root.label.ifBlank { root.folderId },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                else -> Unit
             }
 
             Row(

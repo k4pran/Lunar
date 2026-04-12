@@ -6,7 +6,6 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.JsonLibraryStorage
 import com.ryanjames.lunar.library.data.OkioStoredDocumentCleaner
-import com.ryanjames.lunar.library.data.JsonSyncSettingsStorage
 import com.ryanjames.lunar.library.data.JsonSourceRegistry
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.sync.LibrarySyncManager
@@ -36,9 +35,6 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
     val metadataPath = remember(appRoot) {
         File(appRoot, "metadata/library.json").absolutePath.toPath()
     }
-    val syncSettingsPath = remember(appRoot) {
-        File(appRoot, "sync/settings.json").absolutePath.toPath()
-    }
     val sourcesPath = remember(appRoot) {
         File(appRoot, "sources/sources.json").absolutePath.toPath()
     }
@@ -59,13 +55,9 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
         DesktopManagedPdfStore(scoresDirectory = scoresDirectory)
     }
     val syncHttpClient = remember { DesktopSyncHttpClient() }
-    val syncManager = remember(repository, renderer, syncSettingsPath, pdfStore, syncHttpClient) {
+    val syncManager = remember(repository, renderer, pdfStore, syncHttpClient) {
         LibrarySyncManager(
             repository = repository,
-            settingsStorage = JsonSyncSettingsStorage(
-                fileSystem = FileSystem.SYSTEM,
-                settingsPath = syncSettingsPath,
-            ),
             httpClient = syncHttpClient,
             pdfStore = pdfStore,
             renderer = renderer,
@@ -259,22 +251,38 @@ private class DesktopPdfPageRenderer : PdfPageRenderer {
 }
 
 private class DesktopSyncHttpClient : SyncHttpClient {
-    override suspend fun getText(url: String): String = withContext(Dispatchers.IO) {
-        java.net.URL(url).openConnection().apply {
+    override suspend fun getText(url: String, headers: Map<String, String>): String = withContext(Dispatchers.IO) {
+        val connection = java.net.URI(url).toURL().openConnection() as java.net.HttpURLConnection
+        connection.apply {
             connectTimeout = 15_000
             readTimeout = 30_000
-        }.getInputStream().bufferedReader().use { it.readText() }
+            headers.forEach { (key, value) -> setRequestProperty(key, value) }
+        }
+        val responseCode = connection.responseCode
+        if (responseCode !in 200..299) {
+            val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+            throw java.io.IOException("HTTP $responseCode from GET $url: $errorBody")
+        }
+        connection.inputStream.bufferedReader().use { it.readText() }
     }
 
-    override suspend fun getBytes(url: String): ByteArray = withContext(Dispatchers.IO) {
-        java.net.URL(url).openConnection().apply {
+    override suspend fun getBytes(url: String, headers: Map<String, String>): ByteArray = withContext(Dispatchers.IO) {
+        val connection = java.net.URI(url).toURL().openConnection() as java.net.HttpURLConnection
+        connection.apply {
             connectTimeout = 15_000
             readTimeout = 60_000
-        }.getInputStream().use { it.readBytes() }
+            headers.forEach { (key, value) -> setRequestProperty(key, value) }
+        }
+        val responseCode = connection.responseCode
+        if (responseCode !in 200..299) {
+            val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+            throw java.io.IOException("HTTP $responseCode from GET $url: $errorBody")
+        }
+        connection.inputStream.use { it.readBytes() }
     }
 
     override suspend fun postJson(url: String, jsonBody: String, headers: Map<String, String>): String = withContext(Dispatchers.IO) {
-        val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        val connection = java.net.URI(url).toURL().openConnection() as java.net.HttpURLConnection
         connection.apply {
             requestMethod = "POST"
             setRequestProperty("Content-Type", "application/json")
@@ -285,6 +293,25 @@ private class DesktopSyncHttpClient : SyncHttpClient {
             doOutput = true
         }
         connection.outputStream.bufferedWriter().use { it.write(jsonBody) }
+        val responseCode = connection.responseCode
+        if (responseCode !in 200..299) {
+            val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+            throw java.io.IOException("HTTP $responseCode from POST $url: $errorBody")
+        }
+        connection.inputStream.bufferedReader().use { it.readText() }
+    }
+
+    override suspend fun postForm(url: String, formBody: String, headers: Map<String, String>): String = withContext(Dispatchers.IO) {
+        val connection = java.net.URI(url).toURL().openConnection() as java.net.HttpURLConnection
+        connection.apply {
+            requestMethod = "POST"
+            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            headers.forEach { (key, value) -> setRequestProperty(key, value) }
+            connectTimeout = 15_000
+            readTimeout = 30_000
+            doOutput = true
+        }
+        connection.outputStream.bufferedWriter().use { it.write(formBody) }
         val responseCode = connection.responseCode
         if (responseCode !in 200..299) {
             val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
