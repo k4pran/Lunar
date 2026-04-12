@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import com.ryanjames.lunar.library.data.CloudGoogleDriveSource
 import com.ryanjames.lunar.library.data.CloudLibrarySource
 import com.ryanjames.lunar.library.data.LocalFilesSource
 import com.ryanjames.lunar.library.data.LocalFolderSource
@@ -190,10 +191,15 @@ class LunarAppState(
 
     fun addCloudSource(source: CloudLibrarySource) {
         scope.launch {
-            runtime.sourceRegistry.addSource(source)
-            runtime.syncManager.refreshSource(source)
-            runtime.syncManager.state.value.lastMessage?.takeIf(String::isNotBlank)?.let {
-                bannerMessage = it
+            try {
+                val connectedSource = connectCloudSourceIfNeeded(source)
+                runtime.sourceRegistry.addSource(connectedSource)
+                runtime.syncManager.refreshSource(connectedSource)
+                runtime.syncManager.state.value.lastMessage?.takeIf(String::isNotBlank)?.let {
+                    bannerMessage = it
+                }
+            } catch (error: Throwable) {
+                bannerMessage = error.message ?: "Cloud source connection failed."
             }
         }
     }
@@ -208,9 +214,17 @@ class LunarAppState(
 
     fun refreshCloudSource(source: CloudLibrarySource) {
         scope.launch {
-            runtime.syncManager.refreshSource(source)
-            runtime.syncManager.state.value.lastMessage?.takeIf(String::isNotBlank)?.let {
-                bannerMessage = it
+            try {
+                val connectedSource = connectCloudSourceIfNeeded(source)
+                if (connectedSource != source) {
+                    runtime.sourceRegistry.updateSource(connectedSource)
+                }
+                runtime.syncManager.refreshSource(connectedSource)
+                runtime.syncManager.state.value.lastMessage?.takeIf(String::isNotBlank)?.let {
+                    bannerMessage = it
+                }
+            } catch (error: Throwable) {
+                bannerMessage = error.message ?: "Cloud refresh failed."
             }
         }
     }
@@ -384,6 +398,31 @@ class LunarAppState(
                 importInProgress = false
             }
         }
+    }
+
+    private suspend fun connectCloudSourceIfNeeded(source: CloudLibrarySource): CloudLibrarySource = when (source) {
+        is CloudGoogleDriveSource -> connectGoogleDriveSourceIfNeeded(source)
+        else -> source
+    }
+
+    private suspend fun connectGoogleDriveSourceIfNeeded(source: CloudGoogleDriveSource): CloudGoogleDriveSource {
+        val settings = source.settings
+        if (settings.refreshToken.isNotBlank()) {
+            return source
+        }
+
+        val session = runtime.googleDriveOAuth.getOrFetchRefreshToken(settings)
+        runtime.syncManager.primeGoogleAccessToken(
+            sourceId = source.id,
+            accessToken = session.accessToken,
+            expiresAtEpochMillis = session.expiresAtEpochMillis,
+        )
+        return source.copy(
+            settings = settings.copy(
+                refreshToken = session.refreshToken,
+                accessToken = "",
+            ),
+        )
     }
 }
 

@@ -55,6 +55,9 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
         DesktopManagedPdfStore(scoresDirectory = scoresDirectory)
     }
     val syncHttpClient = remember { DesktopSyncHttpClient() }
+    val googleDriveOAuth = remember(syncHttpClient) {
+        DesktopGoogleDriveOAuthCoordinator(httpClient = syncHttpClient)
+    }
     val syncManager = remember(repository, renderer, pdfStore, syncHttpClient) {
         LibrarySyncManager(
             repository = repository,
@@ -76,7 +79,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
         )
     }
 
-    return remember(repository, importer, renderer, syncManager, sourceRegistry, appRoot) {
+    return remember(repository, importer, renderer, syncManager, sourceRegistry, googleDriveOAuth, appRoot) {
         PlatformRuntime(
             platformName = System.getProperty("os.name") ?: "Desktop JVM",
             capabilities = PlatformCapabilities(
@@ -91,6 +94,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             renderer = renderer,
             syncManager = syncManager,
             sourceRegistry = sourceRegistry,
+            googleDriveOAuth = googleDriveOAuth,
         )
     }
 }

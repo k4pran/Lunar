@@ -9,8 +9,10 @@ import com.ryanjames.lunar.library.data.InMemorySourceRegistry
 import com.ryanjames.lunar.library.data.NoOpStoredDocumentCleaner
 import com.ryanjames.lunar.library.data.SheetMusicRepository
 import com.ryanjames.lunar.library.data.SourceRegistry
+import com.ryanjames.lunar.sync.GoogleDriveOAuthCoordinator
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.sync.LibrarySyncManager
+import com.ryanjames.lunar.sync.UnsupportedGoogleDriveOAuthCoordinator
 import com.ryanjames.lunar.sync.rememberNoOpLibrarySyncManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +26,7 @@ data class PlatformRuntime(
     val renderer: PdfPageRenderer,
     val syncManager: LibrarySyncManager,
     val sourceRegistry: SourceRegistry,
+    val googleDriveOAuth: GoogleDriveOAuthCoordinator,
 )
 
 data class PlatformCapabilities(
@@ -150,6 +153,7 @@ fun rememberUnsupportedPlatformRuntime(
             renderer = UnavailablePdfPageRenderer,
             syncManager = syncManager,
             sourceRegistry = InMemorySourceRegistry(),
+            googleDriveOAuth = UnsupportedGoogleDriveOAuthCoordinator,
         )
     }
 }

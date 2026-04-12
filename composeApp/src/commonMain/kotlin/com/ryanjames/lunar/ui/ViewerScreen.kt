@@ -54,6 +54,9 @@ import com.ryanjames.lunar.platform.RenderedPdfPage
 private const val MinZoom = 0.2f
 private const val MaxZoom = 4.0f
 private const val ZoomStep = 0.2f
+private const val SinglePageBaseWidth = 680
+private const val SpreadPageBaseWidth = 500
+private const val PageGap = 20
 
 @Composable
 fun ViewerScreen(
@@ -69,11 +72,12 @@ fun ViewerScreen(
 ) {
     var currentPage by remember(item.id) { mutableIntStateOf(item.lastViewedPage.coerceAtLeast(0)) }
     var zoom by remember(item.id) { mutableFloatStateOf(1f) }
-    var renderedPage by remember(item.id, currentPage) { mutableStateOf<RenderedPdfPage?>(null) }
+    var twoPageMode by remember(item.id) { mutableStateOf(false) }
+    var renderedPages by remember(item.id, currentPage, twoPageMode) { mutableStateOf<List<RenderedPdfPage>>(emptyList()) }
     var errorMessage by remember(item.id, currentPage) { mutableStateOf<String?>(null) }
     var isLoading by remember(item.id, currentPage) { mutableStateOf(true) }
 
-    LaunchedEffect(item.id, currentPage) {
+    LaunchedEffect(item.id, currentPage, twoPageMode) {
         isLoading = true
         errorMessage = null
         onPageChanged(currentPage)
@@ -87,13 +91,22 @@ fun ViewerScreen(
             }
         }
 
-        renderedPage = runtime.renderer.renderPage(
-            documentPath = item.document.storedPath,
-            pageIndex = currentPage,
-        )
-        renderedPage?.let { onPageCountResolved(it.pageCount) }
+        renderedPages = buildList {
+            runtime.renderer.renderPage(
+                documentPath = item.document.storedPath,
+                pageIndex = currentPage,
+            )?.let(::add)
 
-        if (renderedPage == null) {
+            if (twoPageMode) {
+                runtime.renderer.renderPage(
+                    documentPath = item.document.storedPath,
+                    pageIndex = currentPage + 1,
+                )?.let(::add)
+            }
+        }
+        renderedPages.firstOrNull()?.let { onPageCountResolved(it.pageCount) }
+
+        if (renderedPages.isEmpty()) {
             errorMessage = if (runtime.capabilities.inAppViewingSupported) {
                 "The PDF page could not be rendered yet."
             } else {
@@ -103,9 +116,10 @@ fun ViewerScreen(
         isLoading = false
     }
 
-    val resolvedPageCount = renderedPage?.pageCount ?: item.pageCount
+    val resolvedPageCount = renderedPages.firstOrNull()?.pageCount ?: item.pageCount
+    val pageStep = if (twoPageMode) 2 else 1
     val canGoPrevious = currentPage > 0
-    val canGoNext = resolvedPageCount?.let { currentPage < it - 1 } ?: true
+    val canGoNext = resolvedPageCount?.let { currentPage + pageStep < it } ?: true
 
     Column(
         modifier = modifier.fillMaxSize(),
@@ -143,16 +157,21 @@ fun ViewerScreen(
                     }
                 }
                 CompactNavButton("<", canGoPrevious) {
-                    currentPage = (currentPage - 1).coerceAtLeast(0)
+                    currentPage = (currentPage - pageStep).coerceAtLeast(0)
                 }
                 Text(
-                    text = buildPageLabel(currentPage, resolvedPageCount),
+                    text = buildPageLabel(currentPage, resolvedPageCount, renderedPages.size),
                     style = MaterialTheme.typography.labelMedium,
                     color = Color.White.copy(alpha = 0.9f),
                 )
-                CompactNavButton(">", canGoNext) { currentPage += 1 }
+                CompactNavButton(">", canGoNext) {
+                    currentPage = nextPageIndex(currentPage, resolvedPageCount, pageStep)
+                }
                 CompactNavButton("-", zoom > MinZoom) { zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom) }
                 CompactNavButton("+", zoom < MaxZoom) { zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom) }
+                CompactNavButton(if (twoPageMode) "1-Up" else "2-Up", true) {
+                    twoPageMode = !twoPageMode
+                }
                 Text(
                     text = if (item.isFavorite) "*" else "o",
                     style = MaterialTheme.typography.titleMedium,
@@ -177,7 +196,7 @@ fun ViewerScreen(
         ) {
             when {
                 isLoading -> CircularProgressIndicator(color = Color(0xFFA7C6ED))
-                renderedPage != null -> PdfPageCanvas(page = renderedPage!!, zoom = zoom)
+                renderedPages.isNotEmpty() -> PdfPageCanvas(pages = renderedPages, zoom = zoom, twoPageMode = twoPageMode)
                 else -> ViewerMessage(
                     title = "Viewer unavailable",
                     body = errorMessage ?: "The viewer could not load this PDF page.",
@@ -199,12 +218,13 @@ fun FullscreenViewerScreen(
 ) {
     var currentPage by remember(item.id) { mutableIntStateOf(item.lastViewedPage.coerceAtLeast(0)) }
     var zoom by remember(item.id) { mutableFloatStateOf(1f) }
-    var renderedPage by remember(item.id, currentPage) { mutableStateOf<RenderedPdfPage?>(null) }
+    var twoPageMode by remember(item.id) { mutableStateOf(false) }
+    var renderedPages by remember(item.id, currentPage, twoPageMode) { mutableStateOf<List<RenderedPdfPage>>(emptyList()) }
     var errorMessage by remember(item.id, currentPage) { mutableStateOf<String?>(null) }
     var isLoading by remember(item.id, currentPage) { mutableStateOf(true) }
     var overlayVisible by remember { mutableStateOf(false) }
 
-    LaunchedEffect(item.id, currentPage) {
+    LaunchedEffect(item.id, currentPage, twoPageMode) {
         isLoading = true
         errorMessage = null
         onPageChanged(currentPage)
@@ -218,13 +238,22 @@ fun FullscreenViewerScreen(
             }
         }
 
-        renderedPage = runtime.renderer.renderPage(
-            documentPath = item.document.storedPath,
-            pageIndex = currentPage,
-        )
-        renderedPage?.let { onPageCountResolved(it.pageCount) }
+        renderedPages = buildList {
+            runtime.renderer.renderPage(
+                documentPath = item.document.storedPath,
+                pageIndex = currentPage,
+            )?.let(::add)
 
-        if (renderedPage == null) {
+            if (twoPageMode) {
+                runtime.renderer.renderPage(
+                    documentPath = item.document.storedPath,
+                    pageIndex = currentPage + 1,
+                )?.let(::add)
+            }
+        }
+        renderedPages.firstOrNull()?.let { onPageCountResolved(it.pageCount) }
+
+        if (renderedPages.isEmpty()) {
             errorMessage = if (runtime.capabilities.inAppViewingSupported) {
                 "The PDF page could not be rendered yet."
             } else {
@@ -234,9 +263,10 @@ fun FullscreenViewerScreen(
         isLoading = false
     }
 
-    val resolvedPageCount = renderedPage?.pageCount ?: item.pageCount
+    val resolvedPageCount = renderedPages.firstOrNull()?.pageCount ?: item.pageCount
+    val pageStep = if (twoPageMode) 2 else 1
     val canGoPrevious = currentPage > 0
-    val canGoNext = resolvedPageCount?.let { currentPage < it - 1 } ?: true
+    val canGoNext = resolvedPageCount?.let { currentPage + pageStep < it } ?: true
     val zoomLabel = "${(zoom * 100).toInt()}%"
 
     Box(
@@ -252,7 +282,11 @@ fun FullscreenViewerScreen(
     ) {
         when {
             isLoading -> CircularProgressIndicator(color = Color(0xFFA7C6ED))
-            renderedPage != null -> PdfPageCanvas(page = renderedPage!!, zoom = zoom)
+            renderedPages.isNotEmpty() -> PdfPageCanvas(
+                pages = renderedPages,
+                zoom = zoom,
+                twoPageMode = twoPageMode,
+            )
             else -> ViewerMessage(
                 title = "Viewer unavailable",
                 body = errorMessage ?: "The viewer could not load this PDF page.",
@@ -312,7 +346,7 @@ fun FullscreenViewerScreen(
                                 }
                             }
                             Text(
-                                text = buildPageLabel(currentPage, resolvedPageCount),
+                                text = buildPageLabel(currentPage, resolvedPageCount, renderedPages.size),
                                 style = MaterialTheme.typography.labelLarge,
                                 color = Color.White.copy(alpha = 0.92f),
                                 modifier = Modifier.padding(start = 12.dp),
@@ -326,12 +360,14 @@ fun FullscreenViewerScreen(
                             FullscreenToolbarButton(
                                 label = "Prev",
                                 enabled = canGoPrevious,
-                                onClick = { currentPage = (currentPage - 1).coerceAtLeast(0) },
+                                onClick = { currentPage = (currentPage - pageStep).coerceAtLeast(0) },
                             )
                             FullscreenToolbarButton(
                                 label = "Next",
                                 enabled = canGoNext,
-                                onClick = { currentPage += 1 },
+                                onClick = {
+                                    currentPage = nextPageIndex(currentPage, resolvedPageCount, pageStep)
+                                },
                             )
                             Surface(
                                 color = Color.White.copy(alpha = 0.12f),
@@ -363,6 +399,36 @@ fun FullscreenViewerScreen(
                                 modifier = Modifier.weight(1f),
                             ) {
                                 Text("Zoom +")
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            FilledTonalButton(
+                                onClick = { twoPageMode = !twoPageMode },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(if (twoPageMode) "Single Page" else "Two Pages")
+                            }
+                            Surface(
+                                color = Color.White.copy(alpha = 0.12f),
+                                shape = MaterialTheme.shapes.large,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = if (twoPageMode) "Spread view" else "Single view",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = Color.White,
+                                    )
+                                }
                             }
                         }
 
@@ -426,11 +492,13 @@ private fun FullscreenToolbarButton(
 
 @Composable
 private fun PdfPageCanvas(
-    page: RenderedPdfPage,
+    pages: List<RenderedPdfPage>,
     zoom: Float,
+    twoPageMode: Boolean,
 ) {
     val verticalScroll = rememberScrollState()
     val horizontalScroll = rememberScrollState()
+    val pageWidth = if (twoPageMode) SpreadPageBaseWidth else SinglePageBaseWidth
 
     Box(
         modifier = Modifier
@@ -439,19 +507,24 @@ private fun PdfPageCanvas(
             .horizontalScroll(horizontalScroll)
             .verticalScroll(verticalScroll),
     ) {
-        Column(
-            modifier = Modifier.padding(0.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(PageGap.dp),
+            verticalAlignment = Alignment.Top,
         ) {
-            Image(
-                bitmap = page.image,
-                contentDescription = "Sheet music page ${page.pageIndex + 1}",
-                modifier = Modifier
-                    .background(Color.White)
-                    .width((680 * zoom).dp)
-                    .height((900 * zoom).dp),
-                contentScale = ContentScale.Fit,
-            )
+            pages.forEach { page ->
+                val scaledWidth = (pageWidth * zoom).dp
+                val scaledHeight = ((pageWidth / page.aspectRatio.coerceAtLeast(0.1f)) * zoom).dp
+                Image(
+                    bitmap = page.image,
+                    contentDescription = "Sheet music page ${page.pageIndex + 1}",
+                    modifier = Modifier
+                        .background(Color.White)
+                        .width(scaledWidth)
+                        .height(scaledHeight),
+                    contentScale = ContentScale.Fit,
+                )
+            }
         }
     }
 }
@@ -485,8 +558,21 @@ private fun ViewerMessage(
 private fun buildPageLabel(
     currentPage: Int,
     pageCount: Int?,
+    visiblePages: Int,
 ): String = if (pageCount == null) {
     "p.${currentPage + 1}"
+} else if (visiblePages > 1) {
+    "${currentPage + 1}-${(currentPage + visiblePages).coerceAtMost(pageCount)} / $pageCount"
 } else {
     "${currentPage + 1} / $pageCount"
+}
+
+private fun nextPageIndex(
+    currentPage: Int,
+    pageCount: Int?,
+    pageStep: Int,
+): Int = if (pageCount == null) {
+    currentPage + pageStep
+} else {
+    (currentPage + pageStep).coerceAtMost((pageCount - 1).coerceAtLeast(0))
 }

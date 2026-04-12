@@ -165,6 +165,7 @@ private fun LocalSourceOption(
 
 @Composable
 fun AddCloudSourceDialog(
+    googleDriveOAuthSupported: Boolean,
     onDismiss: () -> Unit,
     onConfirm: (CloudLibrarySource) -> Unit,
 ) {
@@ -182,8 +183,6 @@ fun AddCloudSourceDialog(
     var driveApiKey by remember { mutableStateOf("") }
     var driveClientId by remember { mutableStateOf("") }
     var driveClientSecret by remember { mutableStateOf("") }
-    var driveRefreshToken by remember { mutableStateOf("") }
-    var driveAccessToken by remember { mutableStateOf("") }
     val driveRoots = remember { mutableStateListOf(EditableGoogleDriveRoot(id = generateSourceId())) }
 
     val isSupabaseSelected = selectedProviderId == SyncProviderIds.SUPABASE_PUBLIC_STORAGE
@@ -194,10 +193,9 @@ fun AddCloudSourceDialog(
     val isValid = if (isSupabaseSelected) {
         projectUrl.isNotBlank() && bucketName.isNotBlank()
     } else {
-        validDriveRoots.isNotEmpty() && (
-            driveAccessToken.isNotBlank() ||
-                (driveClientId.isNotBlank() && driveRefreshToken.isNotBlank())
-            )
+        googleDriveOAuthSupported &&
+            validDriveRoots.isNotEmpty() &&
+            driveClientId.isNotBlank()
     }
 
     AlertDialog(
@@ -288,10 +286,7 @@ fun AddCloudSourceDialog(
                         onClientIdChange = { driveClientId = it },
                         clientSecret = driveClientSecret,
                         onClientSecretChange = { driveClientSecret = it },
-                        refreshToken = driveRefreshToken,
-                        onRefreshTokenChange = { driveRefreshToken = it },
-                        accessToken = driveAccessToken,
-                        onAccessTokenChange = { driveAccessToken = it },
+                        oauthSupported = googleDriveOAuthSupported,
                         roots = driveRoots,
                     )
                 }
@@ -322,8 +317,6 @@ fun AddCloudSourceDialog(
                                 apiKey = driveApiKey.trim(),
                                 clientId = driveClientId.trim(),
                                 clientSecret = driveClientSecret.trim(),
-                                refreshToken = driveRefreshToken.trim(),
-                                accessToken = driveAccessToken.trim(),
                                 roots = validDriveRoots.map { (root, folderId) ->
                                     GoogleDriveImportRoot(
                                         id = root.id,
@@ -421,14 +414,11 @@ private fun GoogleDriveFields(
     onClientIdChange: (String) -> Unit,
     clientSecret: String,
     onClientSecretChange: (String) -> Unit,
-    refreshToken: String,
-    onRefreshTokenChange: (String) -> Unit,
-    accessToken: String,
-    onAccessTokenChange: (String) -> Unit,
+    oauthSupported: Boolean,
     roots: MutableList<EditableGoogleDriveRoot>,
 ) {
     Text(
-        text = "Google Drive uses Drive API access. Add one or more root folders and choose how each root maps folder paths into metadata.",
+        text = "Google Drive uses a desktop OAuth sign-in. Add one or more root folders, paste your desktop OAuth client details, and Lunar will open the browser when you press Connect.",
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -460,26 +450,12 @@ private fun GoogleDriveFields(
         placeholder = { Text("GOCSPX-...") },
     )
 
-    OutlinedTextField(
-        value = refreshToken,
-        onValueChange = onRefreshTokenChange,
-        modifier = Modifier.fillMaxWidth(),
-        minLines = 2,
-        label = { Text("Refresh token (recommended)") },
-        placeholder = { Text("1//0g...") },
-    )
-
-    OutlinedTextField(
-        value = accessToken,
-        onValueChange = onAccessTokenChange,
-        modifier = Modifier.fillMaxWidth(),
-        minLines = 2,
-        label = { Text("Access token (optional fallback)") },
-        placeholder = { Text("ya29....") },
-    )
-
     Text(
-        text = "A refresh token gives Lunar stable background sync. API key alone is not enough for listing private Drive folders.",
+        text = if (oauthSupported) {
+            "Do not paste a refresh token. Lunar requests offline access during the first Google sign-in, stores the returned refresh token locally, and uses it for later background sync."
+        } else {
+            "Google Drive sign-in is currently available on the desktop build. Add this source from Windows or Linux to complete the OAuth connection."
+        },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

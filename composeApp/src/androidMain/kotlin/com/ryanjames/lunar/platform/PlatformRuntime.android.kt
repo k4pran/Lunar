@@ -27,6 +27,7 @@ import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.sync.LibrarySyncManager
 import com.ryanjames.lunar.sync.ManagedPdfStore
 import com.ryanjames.lunar.sync.SyncHttpClient
+import com.ryanjames.lunar.sync.UnsupportedGoogleDriveOAuthCoordinator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -120,6 +121,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             renderer = renderer,
             syncManager = syncManager,
             sourceRegistry = sourceRegistry,
+            googleDriveOAuth = UnsupportedGoogleDriveOAuthCoordinator,
         )
     }
 }

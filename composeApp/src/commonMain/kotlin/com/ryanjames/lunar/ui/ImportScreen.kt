@@ -30,6 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -53,6 +55,7 @@ fun ImportScreen(
     modifier: Modifier = Modifier,
 ) {
     val sources by runtime.sourceRegistry.sources.collectAsState()
+    val clipboardManager = LocalClipboardManager.current
 
     var showLocalDialog by remember { mutableStateOf(false) }
     var showCloudDialog by remember { mutableStateOf(false) }
@@ -209,7 +212,7 @@ fun ImportScreen(
                 ) {
                     Text(
                         text = when {
-                            syncState.isRefreshing -> "Refreshing..."
+                            syncState.isRefreshing -> syncState.currentStep ?: "Refreshing..."
                             hasErrors -> "Sync completed with errors"
                             !syncState.lastMessage.isNullOrBlank() -> syncState.lastMessage.orEmpty()
                             else -> "Cloud sources are configured. Press refresh to sync."
@@ -217,9 +220,68 @@ fun ImportScreen(
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                         color = if (hasErrors) Color(0xFFB71C1C) else Color(0xFF1A3E4F),
                     )
+                    if (syncState.activeSourceLabels.isNotEmpty()) {
+                        Text(
+                            text = "Active sources: ${syncState.activeSourceLabels.joinToString()}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (
+                        syncState.isRefreshing ||
+                        syncState.discoveredResources > 0 ||
+                        syncState.processedResources > 0 ||
+                        syncState.visitedFolders > 0
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            ImportSummaryPill("Folders ${syncState.visitedFolders}")
+                            ImportSummaryPill("Found ${syncState.discoveredResources}")
+                            ImportSummaryPill("Ready ${syncState.processedResources}")
+                        }
+                    }
                     if (hasErrors) {
                         syncState.syncErrors.forEach { error ->
                             Text(error, style = MaterialTheme.typography.bodySmall, color = Color(0xFFB71C1C))
+                        }
+                    }
+                    if (syncState.activityLog.isNotEmpty()) {
+                        Surface(
+                            color = Color.White.copy(alpha = 0.5f),
+                            shape = MaterialTheme.shapes.medium,
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Text(
+                                    text = "Activity log",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = Color(0xFF1A3E4F),
+                                )
+                                syncState.activityLog.takeLast(12).forEach { entry ->
+                                    Text(
+                                        text = entry,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (hasErrors || syncState.activityLog.isNotEmpty()) {
+                        TextButton(
+                            onClick = {
+                                clipboardManager.setText(
+                                    AnnotatedString(buildSyncDetails(syncState))
+                                )
+                            },
+                        ) {
+                            Text(if (hasErrors) "Copy sync details" else "Copy activity log")
                         }
                     }
                 }
@@ -267,6 +329,7 @@ fun ImportScreen(
 
     if (showCloudDialog) {
         AddCloudSourceDialog(
+            googleDriveOAuthSupported = runtime.googleDriveOAuth.isSupported,
             onDismiss = { showCloudDialog = false },
             onConfirm = { source ->
                 showCloudDialog = false
@@ -346,6 +409,15 @@ private fun SourceCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Text(
+                        text = if (source.settings.refreshToken.isNotBlank()) {
+                            "OAuth connected"
+                        } else {
+                            "Desktop sign-in required"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     source.settings.roots.take(2).forEach { root ->
                         Text(
                             text = root.label.ifBlank { root.folderId },
@@ -394,5 +466,34 @@ private fun ImportSummaryPill(text: String) {
             style = MaterialTheme.typography.labelLarge,
             color = Color.White,
         )
+    }
+}
+
+private fun buildSyncDetails(syncState: CloudSyncState): String = buildString {
+    syncState.currentStep?.takeIf(String::isNotBlank)?.let { step ->
+        appendLine("Step: $step")
+    }
+    syncState.lastMessage?.takeIf(String::isNotBlank)?.let { message ->
+        appendLine("Summary: $message")
+    }
+    appendLine("Visited folders: ${syncState.visitedFolders}")
+    appendLine("Found resources: ${syncState.discoveredResources}")
+    appendLine("Processed resources: ${syncState.processedResources}")
+    syncState.activeSourceLabels.takeIf { it.isNotEmpty() }?.let { labels ->
+        appendLine("Active sources: ${labels.joinToString()}")
+    }
+    if (syncState.syncErrors.isNotEmpty()) {
+        if (isNotEmpty()) appendLine()
+        appendLine("Errors:")
+        syncState.syncErrors.forEach { error ->
+            appendLine(error)
+        }
+    }
+    if (syncState.activityLog.isNotEmpty()) {
+        if (isNotEmpty()) appendLine()
+        appendLine("Activity log:")
+        syncState.activityLog.forEach { entry ->
+            appendLine(entry)
+        }
     }
 }
