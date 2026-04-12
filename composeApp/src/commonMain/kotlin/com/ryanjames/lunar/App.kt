@@ -206,7 +206,7 @@ private fun BottomNavigationPanel(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             BottomNavItem(
-                title = "Import",
+                title = "Sources",
                 selected = selectedSection == AppSection.IMPORT,
                 onClick = { onSelectSection(AppSection.IMPORT) },
             )

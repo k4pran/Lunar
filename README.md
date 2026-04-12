@@ -75,12 +75,13 @@ The project is split into a shared core plus thin platform integrations.
 
 ### Current app flow
 
-1. Import PDFs from file or folder.
-2. Register them in the shared repository.
-3. Persist library metadata locally.
-4. Browse the shared library UI with search, sort, and filters.
+1. Add sources — local files, local folders, or cloud (Supabase) connections.
+2. Each source imports or syncs PDFs into the shared repository.
+3. The library aggregates scores from all configured sources.
+4. Browse the combined library UI with search, sort, and filters.
 5. Open a score in a dialog preview.
 6. Expand into fullscreen viewing when needed.
+7. Remove individual sources to clean up their contributed scores.
 
 ## Storage Model
 
@@ -97,12 +98,15 @@ This keeps the first milestone simple while preserving a clean seam for future s
 
 ## Cloud Sync
 
-Lunar includes a sync abstraction with multiple provider slots.
+Lunar supports multiple library sources that can be mixed and matched:
 
-Current provider options:
+- **Local file sources** — pick individual PDF files to import
+- **Local folder sources** — scan a folder for all PDFs
+- **Cloud sources** — connect to a Supabase Storage bucket
 
-- `Local only`
-- `Supabase public storage`
+Multiple sources of any type can be active at the same time. The library aggregates scores from all configured sources. Each source can be removed individually, which also cleans up its contributed scores.
+
+### Cloud provider: Supabase public storage
 
 The cloud implementation is pull-based:
 
@@ -126,7 +130,7 @@ Supabase is a practical first step because it gives Lunar:
 1. Create a Supabase project.
 2. Create a **public** storage bucket, for example `sheet-music`.
 3. Upload your PDF files into the bucket using a folder structure that matches one of the layout strategies below.
-4. In Lunar, go to the **Import** tab and choose `Supabase public storage`.
+4. In Lunar, go to the **Sources** tab and tap **Add cloud source**.
 5. Enter:
    - **Project URL** — for example `https://your-project.supabase.co`
    - **Bucket name** — for example `sheet-music`

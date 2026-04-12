@@ -33,6 +33,7 @@ data class SheetMusicItem(
     val lastViewedPage: Int = 0,
     val pageCount: Int? = null,
     val syncMetadata: RemoteSyncMetadata? = null,
+    val sourceId: String? = null,
 )
 
 data class ImportedPdfDescriptor(

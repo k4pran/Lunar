@@ -6,7 +6,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import com.ryanjames.lunar.library.data.CloudSupabaseSource
+import com.ryanjames.lunar.library.data.LibrarySource
+import com.ryanjames.lunar.library.data.LocalFilesSource
+import com.ryanjames.lunar.library.data.LocalFolderSource
 import com.ryanjames.lunar.library.data.SheetMusicMetadataInput
+import com.ryanjames.lunar.library.data.generateSourceId
 import com.ryanjames.lunar.library.model.LibraryQuery
 import com.ryanjames.lunar.library.model.LibrarySortOption
 import com.ryanjames.lunar.library.model.SheetMusicItem
@@ -14,6 +19,7 @@ import com.ryanjames.lunar.library.model.SortDirection
 import com.ryanjames.lunar.platform.PlatformRuntime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlin.time.Clock
 
 enum class LibraryLayoutMode {
     GRID,
@@ -218,6 +224,74 @@ class LunarAppState(
         }
     }
 
+    // ─── Source management ────────────────────────────────────────────────────
+
+    fun addLocalFilesSource(label: String) {
+        val sourceId = generateSourceId()
+        val source = LocalFilesSource(
+            id = sourceId,
+            label = label.ifBlank { "Local files" },
+            addedAtEpochMillis = Clock.System.now().toEpochMilliseconds(),
+        )
+        scope.launch {
+            runtime.sourceRegistry.addSource(source)
+        }
+        runImportForSource(sourceId) { runtime.importer.importPdfFiles() }
+    }
+
+    fun addLocalFolderSource(label: String) {
+        val sourceId = generateSourceId()
+        val source = LocalFolderSource(
+            id = sourceId,
+            label = label.ifBlank { "Local folder" },
+            addedAtEpochMillis = Clock.System.now().toEpochMilliseconds(),
+        )
+        scope.launch {
+            runtime.sourceRegistry.addSource(source)
+        }
+        runImportForSource(sourceId) { runtime.importer.importPdfFolder() }
+    }
+
+    fun addCloudSource(source: CloudSupabaseSource) {
+        scope.launch {
+            runtime.sourceRegistry.addSource(source)
+            runtime.syncManager.refreshSource(source)
+            val message = runtime.syncManager.state.value.lastMessage
+            if (!message.isNullOrBlank()) {
+                bannerMessage = message
+            }
+        }
+    }
+
+    fun removeSource(sourceId: String) {
+        scope.launch {
+            runtime.repository.removeItemsBySource(sourceId)
+            runtime.sourceRegistry.removeSource(sourceId)
+            bannerMessage = "Source removed."
+        }
+    }
+
+    fun refreshCloudSource(source: CloudSupabaseSource) {
+        scope.launch {
+            runtime.syncManager.refreshSource(source)
+            val message = runtime.syncManager.state.value.lastMessage
+            if (!message.isNullOrBlank()) {
+                bannerMessage = message
+            }
+        }
+    }
+
+    fun refreshAllCloudSources() {
+        scope.launch {
+            val sources = runtime.sourceRegistry.sources.value
+            runtime.syncManager.refreshAllSources(sources)
+            val message = runtime.syncManager.state.value.lastMessage
+            if (!message.isNullOrBlank()) {
+                bannerMessage = message
+            }
+        }
+    }
+
     fun openPreview(item: SheetMusicItem) {
         selectedSection = AppSection.LIBRARY
         previewItemId = item.id
@@ -314,6 +388,59 @@ class LunarAppState(
             try {
                 val result = importerAction()
                 val imported = runtime.repository.importDocuments(result.documents)
+                bannerMessage = when {
+                    imported.isNotEmpty() -> {
+                        selectedSection = AppSection.LIBRARY
+                        clearFilters()
+                        val scores = imported.size
+                        "$scores PDF${if (scores == 1) "" else "s"} added to your library."
+                    }
+
+                    !result.notice.isNullOrBlank() -> result.notice
+                    else -> null
+                }
+            } catch (error: Throwable) {
+                bannerMessage = error.message ?: "Import failed."
+            } finally {
+                importInProgress = false
+            }
+        }
+    }
+
+    private fun runImportForSource(
+        sourceId: String,
+        importerAction: suspend () -> com.ryanjames.lunar.platform.ImportRequestResult,
+    ) {
+        if (importInProgress) {
+            return
+        }
+
+        scope.launch {
+            importInProgress = true
+            try {
+                val result = importerAction()
+                val imported = runtime.repository.importDocumentsForSource(sourceId, result.documents)
+
+                if (imported.isEmpty() && result.documents.isEmpty()) {
+                    // No files picked — remove the empty source
+                    runtime.sourceRegistry.removeSource(sourceId)
+                }
+
+                // Update the source's item count
+                val currentSource = runtime.sourceRegistry.getSource(sourceId)
+                if (currentSource != null) {
+                    val count = runtime.repository.itemCountForSource(sourceId)
+                    when (currentSource) {
+                        is LocalFilesSource -> runtime.sourceRegistry.updateSource(
+                            currentSource.copy(itemCount = count)
+                        )
+                        is LocalFolderSource -> runtime.sourceRegistry.updateSource(
+                            currentSource.copy(itemCount = count)
+                        )
+                        else -> {}
+                    }
+                }
+
                 bannerMessage = when {
                     imported.isNotEmpty() -> {
                         selectedSection = AppSection.LIBRARY

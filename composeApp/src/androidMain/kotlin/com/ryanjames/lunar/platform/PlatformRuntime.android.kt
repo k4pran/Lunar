@@ -23,6 +23,7 @@ import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.JsonLibraryStorage
 import com.ryanjames.lunar.library.data.OkioStoredDocumentCleaner
 import com.ryanjames.lunar.library.data.JsonSyncSettingsStorage
+import com.ryanjames.lunar.library.data.JsonSourceRegistry
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.sync.LibrarySyncManager
 import com.ryanjames.lunar.sync.ManagedPdfStore
@@ -53,6 +54,9 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
     }
     val syncSettingsPath = remember(context) {
         File(context.filesDir, "lunar/sync/settings.json").absolutePath.toPath()
+    }
+    val sourcesPath = remember(context) {
+        File(context.filesDir, "lunar/sources/sources.json").absolutePath.toPath()
     }
     val repository = remember(context) {
         DefaultSheetMusicRepository(
@@ -102,7 +106,14 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
         importer.bindLaunchers(fileLauncher = fileLauncher, folderLauncher = folderLauncher)
     }
 
-    return remember(repository, importer, renderer, syncManager) {
+    val sourceRegistry = remember(sourcesPath) {
+        JsonSourceRegistry(
+            fileSystem = FileSystem.SYSTEM,
+            sourcesPath = sourcesPath,
+        )
+    }
+
+    return remember(repository, importer, renderer, syncManager, sourceRegistry) {
         PlatformRuntime(
             platformName = "Android",
             capabilities = PlatformCapabilities(
@@ -116,6 +127,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             importer = importer,
             renderer = renderer,
             syncManager = syncManager,
+            sourceRegistry = sourceRegistry,
         )
     }
 }

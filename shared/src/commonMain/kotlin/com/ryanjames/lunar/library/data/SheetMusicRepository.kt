@@ -94,6 +94,13 @@ interface SheetMusicRepository {
 
     suspend fun importDocuments(documents: List<ImportedPdfDescriptor>): List<SheetMusicItem>
 
+    suspend fun importDocumentsForSource(
+        sourceId: String?,
+        documents: List<ImportedPdfDescriptor>,
+    ): List<SheetMusicItem>
+
+    suspend fun removeItemsBySource(sourceId: String)
+
     suspend fun updateMetadata(itemId: String, metadata: SheetMusicMetadataInput)
 
     suspend fun toggleFavorite(itemId: String)
@@ -111,11 +118,14 @@ interface SheetMusicRepository {
         providerName: String,
         items: List<SyncedSheetMusicDescriptor>,
         syncedAtEpochMillis: Long,
+        sourceId: String? = null,
     )
 
     suspend fun updateSyncStatus(syncStatus: SyncStatus)
 
     fun getItem(itemId: String): SheetMusicItem?
+
+    fun itemCountForSource(sourceId: String): Int
 }
 
 class DefaultSheetMusicRepository(
@@ -146,6 +156,13 @@ class DefaultSheetMusicRepository(
     }
 
     override suspend fun importDocuments(documents: List<ImportedPdfDescriptor>): List<SheetMusicItem> {
+        return importDocumentsForSource(sourceId = null, documents = documents)
+    }
+
+    override suspend fun importDocumentsForSource(
+        sourceId: String?,
+        documents: List<ImportedPdfDescriptor>,
+    ): List<SheetMusicItem> {
         ensureInitialized()
         if (documents.isEmpty()) {
             return emptyList()
@@ -163,11 +180,25 @@ class DefaultSheetMusicRepository(
                 ),
                 pageCount = document.pageCount,
                 dateAddedEpochMillis = importedAt + index,
+                sourceId = sourceId,
             )
         }
 
         mutateItems { items -> items + importedItems }
         return importedItems
+    }
+
+    override suspend fun removeItemsBySource(sourceId: String) {
+        ensureInitialized()
+
+        val toRemove = _library.value.items.filter { it.sourceId == sourceId }
+        toRemove.forEach { item ->
+            runCatching { storedDocumentCleaner.deleteStoredDocument(item.document.storedPath) }
+        }
+
+        mutateItems { items ->
+            items.filterNot { it.sourceId == sourceId }
+        }
     }
 
     override suspend fun updateMetadata(itemId: String, metadata: SheetMusicMetadataInput) {
@@ -234,6 +265,7 @@ class DefaultSheetMusicRepository(
         providerName: String,
         items: List<SyncedSheetMusicDescriptor>,
         syncedAtEpochMillis: Long,
+        sourceId: String?,
     ) {
         ensureInitialized()
 
@@ -288,6 +320,7 @@ class DefaultSheetMusicRepository(
                         remoteVersion = descriptor.remoteVersion,
                         lastSyncedEpochMillis = syncedAtEpochMillis,
                     ),
+                    sourceId = sourceId,
                 )
             }
 
@@ -315,6 +348,9 @@ class DefaultSheetMusicRepository(
     }
 
     override fun getItem(itemId: String): SheetMusicItem? = _library.value.items.firstOrNull { it.id == itemId }
+
+    override fun itemCountForSource(sourceId: String): Int =
+        _library.value.items.count { it.sourceId == sourceId }
 
     private suspend fun ensureInitialized() {
         if (!initialized) {

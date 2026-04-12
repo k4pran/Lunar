@@ -5,8 +5,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.ImageBitmap
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
+import com.ryanjames.lunar.library.data.InMemorySourceRegistry
 import com.ryanjames.lunar.library.data.NoOpStoredDocumentCleaner
 import com.ryanjames.lunar.library.data.SheetMusicRepository
+import com.ryanjames.lunar.library.data.SourceRegistry
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.sync.LibrarySyncManager
 import com.ryanjames.lunar.sync.rememberNoOpLibrarySyncManager
@@ -21,6 +23,7 @@ data class PlatformRuntime(
     val importer: PdfImporter,
     val renderer: PdfPageRenderer,
     val syncManager: LibrarySyncManager,
+    val sourceRegistry: SourceRegistry,
 )
 
 data class PlatformCapabilities(
@@ -146,6 +149,7 @@ fun rememberUnsupportedPlatformRuntime(
             importer = UnsupportedPdfImporter(importMessage),
             renderer = UnavailablePdfPageRenderer,
             syncManager = syncManager,
+            sourceRegistry = InMemorySourceRegistry(),
         )
     }
 }
