@@ -23,6 +23,7 @@ import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.JsonLibraryStorage
 import com.ryanjames.lunar.library.data.OkioStoredDocumentCleaner
 import com.ryanjames.lunar.library.data.JsonSourceRegistry
+import com.ryanjames.lunar.library.data.StoredDocumentFingerprinter
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.sync.LibrarySyncManager
 import com.ryanjames.lunar.sync.ManagedPdfStore
@@ -38,6 +39,7 @@ import kotlinx.coroutines.withContext
 import okio.FileSystem
 import okio.Path.Companion.toPath
 import java.io.File
+import java.security.MessageDigest
 import kotlin.coroutines.resume
 import kotlin.math.roundToInt
 import kotlin.random.Random
@@ -46,14 +48,23 @@ import kotlin.random.Random
 actual fun rememberPlatformRuntime(): PlatformRuntime {
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
+    val appRoot = remember(context) {
+        File(context.filesDir, "lunar").apply { mkdirs() }
+    }
     val scoresDirectory = remember(context) {
-        File(context.filesDir, "lunar/scores").apply { mkdirs() }
+        File(appRoot, "scores").apply { mkdirs() }
     }
-    val metadataPath = remember(context) {
-        File(context.filesDir, "lunar/metadata/library.json").absolutePath.toPath()
+    val metadataFile = remember(context) {
+        File(appRoot, "metadata/library.json")
     }
-    val sourcesPath = remember(context) {
-        File(context.filesDir, "lunar/sources/sources.json").absolutePath.toPath()
+    val metadataPath = remember(metadataFile) {
+        metadataFile.absolutePath.toPath()
+    }
+    val sourcesFile = remember(context) {
+        File(appRoot, "sources/sources.json")
+    }
+    val sourcesPath = remember(sourcesFile) {
+        sourcesFile.absolutePath.toPath()
     }
     val repository = remember(context) {
         DefaultSheetMusicRepository(
@@ -62,6 +73,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
                 metadataPath = metadataPath,
             ),
             storedDocumentCleaner = OkioStoredDocumentCleaner(FileSystem.SYSTEM),
+            storedDocumentFingerprinter = AndroidStoredDocumentFingerprinter(),
         )
     }
     val renderer = remember(context) { AndroidPdfPageRenderer() }
@@ -105,8 +117,16 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             sourcesPath = sourcesPath,
         )
     }
+    val cacheInspector = remember(appRoot, metadataFile, sourcesFile, scoresDirectory) {
+        AndroidLibraryCacheInspector(
+            appRoot = appRoot,
+            metadataFile = metadataFile,
+            sourcesFile = sourcesFile,
+            scoresDirectory = scoresDirectory,
+        )
+    }
 
-    return remember(repository, importer, renderer, syncManager, sourceRegistry) {
+    return remember(repository, importer, renderer, syncManager, sourceRegistry, cacheInspector) {
         PlatformRuntime(
             platformName = "Android",
             capabilities = PlatformCapabilities(
@@ -122,6 +142,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             syncManager = syncManager,
             sourceRegistry = sourceRegistry,
             googleDriveOAuth = UnsupportedGoogleDriveOAuthCoordinator,
+            cacheInspector = cacheInspector,
         )
     }
 }
@@ -261,11 +282,7 @@ private class AndroidPdfImporter(
         )
 
         val inputStream = context.contentResolver.openInputStream(uri) ?: return null
-        inputStream.use { input ->
-            destination.outputStream().use { output ->
-                input.copyTo(output)
-            }
-        }
+        val contentFingerprint = copyToManagedPdf(input = inputStream, destination = destination)
 
         val pageCount = renderer.inspect(destination.absolutePath)?.pageCount
 
@@ -273,9 +290,29 @@ private class AndroidPdfImporter(
             storedPath = destination.absolutePath,
             originalFileName = originalName,
             sourceUri = uri.toString(),
+            contentFingerprint = contentFingerprint,
             pageCount = pageCount,
             suggestedTitle = originalName.substringBeforeLast('.'),
         )
+    }
+
+    private fun copyToManagedPdf(
+        input: java.io.InputStream,
+        destination: File,
+    ): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        input.use { source ->
+            destination.outputStream().use { output ->
+                val buffer = ByteArray(COPY_BUFFER_SIZE_BYTES)
+                while (true) {
+                    val read = source.read(buffer)
+                    if (read <= 0) break
+                    digest.update(buffer, 0, read)
+                    output.write(buffer, 0, read)
+                }
+            }
+        }
+        return digest.digest().toHexString()
     }
 
     private fun collectPdfDocuments(root: DocumentFile): List<DocumentFile> {
@@ -469,6 +506,52 @@ private class AndroidSyncHttpClient : SyncHttpClient {
     }
 }
 
+private class AndroidStoredDocumentFingerprinter : StoredDocumentFingerprinter {
+    override suspend fun fingerprint(storedPath: String): String? = withContext(Dispatchers.IO) {
+        val file = File(storedPath)
+        if (!file.exists()) {
+            return@withContext null
+        }
+
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(COPY_BUFFER_SIZE_BYTES)
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        digest.digest().toHexString()
+    }
+}
+
+private class AndroidLibraryCacheInspector(
+    private val appRoot: File,
+    private val metadataFile: File,
+    private val sourcesFile: File,
+    private val scoresDirectory: File,
+) : LibraryCacheInspector {
+    override suspend fun inspect(): LibraryCacheSnapshot = withContext(Dispatchers.IO) {
+        val cachedPdfFiles = if (scoresDirectory.exists()) {
+            scoresDirectory.walkTopDown()
+                .filter { it.isFile && it.extension.equals("pdf", ignoreCase = true) }
+                .toList()
+        } else {
+            emptyList()
+        }
+
+        LibraryCacheSnapshot(
+            storageLabel = "Android app private storage",
+            cacheRootPath = appRoot.absolutePath,
+            metadataCached = metadataFile.exists(),
+            sourceRegistryCached = sourcesFile.exists(),
+            cachedPdfCount = cachedPdfFiles.size,
+            cachedPdfBytes = cachedPdfFiles.sumOf(File::length),
+        )
+    }
+}
+
 private class AndroidManagedPdfStore(
     private val scoresDirectory: File,
 ) : ManagedPdfStore {
@@ -497,3 +580,9 @@ private fun safeFileStem(fileName: String): String = fileName
     .replace(Regex("[^A-Za-z0-9_-]+"), "_")
     .trim('_')
     .ifEmpty { "score" }
+
+private const val COPY_BUFFER_SIZE_BYTES = 8_192
+
+private fun ByteArray.toHexString(): String = joinToString(separator = "") { byte ->
+    byte.toUByte().toString(16).padStart(2, '0')
+}

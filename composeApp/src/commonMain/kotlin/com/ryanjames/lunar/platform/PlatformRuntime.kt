@@ -7,6 +7,7 @@ import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
 import com.ryanjames.lunar.library.data.InMemorySourceRegistry
 import com.ryanjames.lunar.library.data.NoOpStoredDocumentCleaner
+import com.ryanjames.lunar.library.data.NoOpStoredDocumentFingerprinter
 import com.ryanjames.lunar.library.data.SheetMusicRepository
 import com.ryanjames.lunar.library.data.SourceRegistry
 import com.ryanjames.lunar.sync.GoogleDriveOAuthCoordinator
@@ -17,6 +18,7 @@ import com.ryanjames.lunar.sync.rememberNoOpLibrarySyncManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.round
 
 data class PlatformRuntime(
     val platformName: String,
@@ -27,6 +29,7 @@ data class PlatformRuntime(
     val syncManager: LibrarySyncManager,
     val sourceRegistry: SourceRegistry,
     val googleDriveOAuth: GoogleDriveOAuthCoordinator,
+    val cacheInspector: LibraryCacheInspector,
 )
 
 data class PlatformCapabilities(
@@ -36,6 +39,36 @@ data class PlatformCapabilities(
     val inAppViewingSupported: Boolean = true,
     val statusLine: String = "Local metadata only",
 )
+
+data class LibraryCacheSnapshot(
+    val storageLabel: String,
+    val cacheRootPath: String? = null,
+    val metadataCached: Boolean = false,
+    val sourceRegistryCached: Boolean = false,
+    val cachedPdfCount: Int = 0,
+    val cachedPdfBytes: Long = 0L,
+) {
+    val cachedPdfBytesLabel: String
+        get() = formatStorageSize(cachedPdfBytes)
+
+    val offlineLibraryReady: Boolean
+        get() = metadataCached
+
+    val offlineViewerReady: Boolean
+        get() = cachedPdfCount > 0
+}
+
+interface LibraryCacheInspector {
+    suspend fun inspect(): LibraryCacheSnapshot
+}
+
+class UnsupportedLibraryCacheInspector(
+    private val storageLabel: String,
+) : LibraryCacheInspector {
+    override suspend fun inspect(): LibraryCacheSnapshot = LibraryCacheSnapshot(
+        storageLabel = storageLabel,
+    )
+}
 
 enum class ImportPermissionKind {
     FILE,
@@ -129,6 +162,7 @@ fun rememberUnsupportedPlatformRuntime(
         DefaultSheetMusicRepository(
             storage = InMemoryLibraryStorage(),
             storedDocumentCleaner = NoOpStoredDocumentCleaner,
+            storedDocumentFingerprinter = NoOpStoredDocumentFingerprinter,
         )
     }
     val syncManager = remember(repository) {
@@ -154,9 +188,29 @@ fun rememberUnsupportedPlatformRuntime(
             syncManager = syncManager,
             sourceRegistry = InMemorySourceRegistry(),
             googleDriveOAuth = UnsupportedGoogleDriveOAuthCoordinator,
+            cacheInspector = UnsupportedLibraryCacheInspector(statusLine),
         )
     }
 }
 
 @Composable
 expect fun rememberPlatformRuntime(): PlatformRuntime
+
+private fun formatStorageSize(bytes: Long): String {
+    if (bytes <= 0L) return "0 B"
+
+    val units = listOf("B", "KB", "MB", "GB", "TB")
+    var value = bytes.toDouble()
+    var unitIndex = 0
+    while (value >= 1024 && unitIndex < units.lastIndex) {
+        value /= 1024.0
+        unitIndex += 1
+    }
+
+    val formatted = if (value >= 10 || unitIndex == 0) {
+        value.toInt().toString()
+    } else {
+        ((round(value * 10) / 10.0)).toString()
+    }
+    return "$formatted ${units[unitIndex]}"
+}

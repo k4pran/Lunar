@@ -4,13 +4,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -32,6 +35,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.ryanjames.lunar.platform.rememberPlatformRuntime
 import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.FullscreenViewerScreen
@@ -135,55 +139,70 @@ fun App() {
                 if (previewItem != null) {
                     Dialog(
                         onDismissRequest = appState::closePreview,
+                        properties = DialogProperties(
+                            usePlatformDefaultWidth = false,
+                        ),
                     ) {
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth(0.96f)
-                                .fillMaxHeight(0.92f),
-                            shape = MaterialTheme.shapes.extraLarge,
-                            tonalElevation = 10.dp,
-                            color = MaterialTheme.colorScheme.surface,
+                        BoxWithConstraints(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Column(modifier = Modifier.fillMaxSize()) {
-                                Box(modifier = Modifier.weight(1f)) {
-                                    ViewerScreen(
-                                        runtime = runtime,
-                                        item = previewItem,
-                                        onBack = appState::closePreview,
-                                        onToggleFavorite = { appState.toggleFavorite(previewItem.id) },
-                                        onPageChanged = { pageIndex ->
-                                            appState.updateViewerProgress(previewItem.id, pageIndex)
-                                        },
-                                        onPageCountResolved = { pageCount ->
-                                            appState.updateViewerPageCount(previewItem.id, pageCount)
-                                        },
-                                        backButtonLabel = "Close",
-                                    )
-                                }
-                                Surface(
-                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-                                    shape = MaterialTheme.shapes.extraLarge,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
-                                        verticalAlignment = Alignment.CenterVertically,
+                            val horizontalMargin = if (maxWidth < 720.dp) 12.dp else 28.dp
+                            val verticalMargin = if (maxHeight < 720.dp) 12.dp else 24.dp
+                            val dialogWidth = ((maxHeight - verticalMargin * 2) * 1.32f)
+                                .coerceAtMost(maxWidth - horizontalMargin * 2)
+                                .coerceAtLeast(320.dp)
+                            val dialogHeight = (maxHeight - verticalMargin * 2).coerceAtLeast(360.dp)
+
+                            Surface(
+                                modifier = Modifier
+                                    .width(dialogWidth)
+                                    .height(dialogHeight),
+                                shape = MaterialTheme.shapes.extraLarge,
+                                tonalElevation = 10.dp,
+                                color = MaterialTheme.colorScheme.surface,
+                            ) {
+                                Column(modifier = Modifier.fillMaxSize()) {
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        ViewerScreen(
+                                            runtime = runtime,
+                                            item = previewItem,
+                                            onBack = appState::closePreview,
+                                            onToggleFavorite = { appState.toggleFavorite(previewItem.id) },
+                                            onPageChanged = { pageIndex ->
+                                                appState.updateViewerProgress(previewItem.id, pageIndex)
+                                            },
+                                            onPageCountResolved = { pageCount ->
+                                                appState.updateViewerPageCount(previewItem.id, pageCount)
+                                            },
+                                            backButtonLabel = "Close",
+                                        )
+                                    }
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                                        shape = MaterialTheme.shapes.extraLarge,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                                     ) {
-                                        androidx.compose.material3.OutlinedButton(
-                                            onClick = appState::closePreview,
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+                                            verticalAlignment = Alignment.CenterVertically,
                                         ) {
-                                            Text("Close")
-                                        }
-                                        androidx.compose.material3.Button(
-                                            onClick = { appState.openFullscreen(previewItem.id) },
-                                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                                                containerColor = Color(0xFF1F4F6B),
-                                            ),
-                                        ) {
-                                            Text("View Fullscreen", color = Color.White)
+                                            androidx.compose.material3.OutlinedButton(
+                                                onClick = appState::closePreview,
+                                            ) {
+                                                Text("Close")
+                                            }
+                                            androidx.compose.material3.Button(
+                                                onClick = { appState.openFullscreen(previewItem.id) },
+                                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                                    containerColor = Color(0xFF1F4F6B),
+                                                ),
+                                            ) {
+                                                Text("View Fullscreen", color = Color.White)
+                                            }
                                         }
                                     }
                                 }

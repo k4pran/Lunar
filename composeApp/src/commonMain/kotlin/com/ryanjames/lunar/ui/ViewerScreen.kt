@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,8 +55,7 @@ import com.ryanjames.lunar.platform.RenderedPdfPage
 private const val MinZoom = 0.2f
 private const val MaxZoom = 4.0f
 private const val ZoomStep = 0.2f
-private const val SinglePageBaseWidth = 680
-private const val SpreadPageBaseWidth = 500
+private const val FitZoom = 1f
 private const val PageGap = 20
 
 @Composable
@@ -169,8 +169,10 @@ fun ViewerScreen(
                 }
                 CompactNavButton("-", zoom > MinZoom) { zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom) }
                 CompactNavButton("+", zoom < MaxZoom) { zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom) }
+                CompactNavButton("Fit", zoom != FitZoom) { zoom = FitZoom }
                 CompactNavButton(if (twoPageMode) "1-Up" else "2-Up", true) {
                     twoPageMode = !twoPageMode
+                    zoom = FitZoom
                 }
                 Text(
                     text = if (item.isFavorite) "*" else "o",
@@ -196,7 +198,7 @@ fun ViewerScreen(
         ) {
             when {
                 isLoading -> CircularProgressIndicator(color = Color(0xFFA7C6ED))
-                renderedPages.isNotEmpty() -> PdfPageCanvas(pages = renderedPages, zoom = zoom, twoPageMode = twoPageMode)
+                renderedPages.isNotEmpty() -> PdfPageCanvas(pages = renderedPages, zoom = zoom)
                 else -> ViewerMessage(
                     title = "Viewer unavailable",
                     body = errorMessage ?: "The viewer could not load this PDF page.",
@@ -285,7 +287,6 @@ fun FullscreenViewerScreen(
             renderedPages.isNotEmpty() -> PdfPageCanvas(
                 pages = renderedPages,
                 zoom = zoom,
-                twoPageMode = twoPageMode,
             )
             else -> ViewerMessage(
                 title = "Viewer unavailable",
@@ -394,6 +395,13 @@ fun FullscreenViewerScreen(
                                 Text("Zoom -")
                             }
                             FilledTonalButton(
+                                onClick = { zoom = FitZoom },
+                                enabled = zoom != FitZoom,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("Best Fit")
+                            }
+                            FilledTonalButton(
                                 onClick = { zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom) },
                                 enabled = zoom < MaxZoom,
                                 modifier = Modifier.weight(1f),
@@ -407,7 +415,10 @@ fun FullscreenViewerScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             FilledTonalButton(
-                                onClick = { twoPageMode = !twoPageMode },
+                                onClick = {
+                                    twoPageMode = !twoPageMode
+                                    zoom = FitZoom
+                                },
                                 modifier = Modifier.weight(1f),
                             ) {
                                 Text(if (twoPageMode) "Single Page" else "Two Pages")
@@ -494,36 +505,51 @@ private fun FullscreenToolbarButton(
 private fun PdfPageCanvas(
     pages: List<RenderedPdfPage>,
     zoom: Float,
-    twoPageMode: Boolean,
 ) {
     val verticalScroll = rememberScrollState()
     val horizontalScroll = rememberScrollState()
-    val pageWidth = if (twoPageMode) SpreadPageBaseWidth else SinglePageBaseWidth
-
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .clip(MaterialTheme.shapes.large)
-            .horizontalScroll(horizontalScroll)
-            .verticalScroll(verticalScroll),
+            .clip(MaterialTheme.shapes.large),
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(PageGap.dp),
-            verticalAlignment = Alignment.Top,
+        val horizontalPadding = if (maxWidth < 720.dp) 12.dp else 20.dp
+        val verticalPadding = if (maxHeight < 720.dp) 12.dp else 20.dp
+        val pageSpacing = if (pages.size > 1) PageGap.dp else 0.dp
+        val availableWidth = (maxWidth - (horizontalPadding * 2) - (pageSpacing * (pages.size - 1)))
+            .coerceAtLeast(120.dp)
+        val availableHeight = (maxHeight - (verticalPadding * 2)).coerceAtLeast(160.dp)
+        val totalAspectRatio = pages
+            .sumOf { page -> page.aspectRatio.coerceAtLeast(0.1f).toDouble() }
+            .toFloat()
+            .coerceAtLeast(0.1f)
+        val fitPageHeight = availableHeight.coerceAtMost(availableWidth / totalAspectRatio)
+        val scaledPageHeight = fitPageHeight * zoom
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .horizontalScroll(horizontalScroll)
+                .verticalScroll(verticalScroll),
+            contentAlignment = Alignment.Center,
         ) {
-            pages.forEach { page ->
-                val scaledWidth = (pageWidth * zoom).dp
-                val scaledHeight = ((pageWidth / page.aspectRatio.coerceAtLeast(0.1f)) * zoom).dp
-                Image(
-                    bitmap = page.image,
-                    contentDescription = "Sheet music page ${page.pageIndex + 1}",
-                    modifier = Modifier
-                        .background(Color.White)
-                        .width(scaledWidth)
-                        .height(scaledHeight),
-                    contentScale = ContentScale.Fit,
-                )
+            Row(
+                modifier = Modifier.padding(horizontal = horizontalPadding, vertical = verticalPadding),
+                horizontalArrangement = Arrangement.spacedBy(pageSpacing),
+                verticalAlignment = Alignment.Top,
+            ) {
+                pages.forEach { page ->
+                    val aspectRatio = page.aspectRatio.coerceAtLeast(0.1f)
+                    Image(
+                        bitmap = page.image,
+                        contentDescription = "Sheet music page ${page.pageIndex + 1}",
+                        modifier = Modifier
+                            .background(Color.White)
+                            .width(scaledPageHeight * aspectRatio)
+                            .height(scaledPageHeight),
+                        contentScale = ContentScale.Fit,
+                    )
+                }
             }
         }
     }

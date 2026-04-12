@@ -7,6 +7,7 @@ data class PdfDocumentReference(
     val storedPath: String,
     val originalFileName: String,
     val sourceUri: String? = null,
+    val contentFingerprint: String? = null,
     val mimeType: String = "application/pdf",
 )
 
@@ -40,6 +41,7 @@ data class ImportedPdfDescriptor(
     val storedPath: String,
     val originalFileName: String,
     val sourceUri: String? = null,
+    val contentFingerprint: String? = null,
     val pageCount: Int? = null,
     val suggestedTitle: String = originalFileName.substringBeforeLast('.'),
 )

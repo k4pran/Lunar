@@ -7,6 +7,7 @@ import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.JsonLibraryStorage
 import com.ryanjames.lunar.library.data.OkioStoredDocumentCleaner
 import com.ryanjames.lunar.library.data.JsonSourceRegistry
+import com.ryanjames.lunar.library.data.StoredDocumentFingerprinter
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.sync.LibrarySyncManager
 import com.ryanjames.lunar.sync.ManagedPdfStore
@@ -22,8 +23,7 @@ import okio.Path.Companion.toPath
 import org.apache.pdfbox.Loader
 import org.apache.pdfbox.rendering.PDFRenderer
 import java.io.File
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import javax.swing.JFileChooser
 import javax.swing.filechooser.FileNameExtensionFilter
 import kotlin.math.max
@@ -48,6 +48,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
                 metadataPath = metadataPath,
             ),
             storedDocumentCleaner = OkioStoredDocumentCleaner(FileSystem.SYSTEM),
+            storedDocumentFingerprinter = DesktopStoredDocumentFingerprinter(),
         )
     }
     val renderer = remember { DesktopPdfPageRenderer() }
@@ -78,8 +79,16 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             sourcesPath = sourcesPath,
         )
     }
+    val cacheInspector = remember(appRoot, metadataPath, sourcesPath, scoresDirectory) {
+        DesktopLibraryCacheInspector(
+            appRoot = appRoot,
+            metadataFile = File(appRoot, "metadata/library.json"),
+            sourcesFile = File(appRoot, "sources/sources.json"),
+            scoresDirectory = scoresDirectory,
+        )
+    }
 
-    return remember(repository, importer, renderer, syncManager, sourceRegistry, googleDriveOAuth, appRoot) {
+    return remember(repository, importer, renderer, syncManager, sourceRegistry, googleDriveOAuth, appRoot, cacheInspector) {
         PlatformRuntime(
             platformName = System.getProperty("os.name") ?: "Desktop JVM",
             capabilities = PlatformCapabilities(
@@ -95,6 +104,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             syncManager = syncManager,
             sourceRegistry = sourceRegistry,
             googleDriveOAuth = googleDriveOAuth,
+            cacheInspector = cacheInspector,
         )
     }
 }
@@ -165,10 +175,9 @@ private class DesktopPdfImporter(
             "${System.currentTimeMillis()}_${Random.nextInt(1000, 9999)}_$safeStem.pdf",
         )
 
-        Files.copy(
-            file.toPath(),
-            destination.toPath(),
-            StandardCopyOption.REPLACE_EXISTING,
+        val contentFingerprint = copyToManagedPdf(
+            source = file,
+            destination = destination,
         )
 
         val pageCount = renderer.inspect(destination.absolutePath)?.pageCount
@@ -177,9 +186,29 @@ private class DesktopPdfImporter(
             storedPath = destination.absolutePath,
             originalFileName = file.name,
             sourceUri = file.toURI().toString(),
+            contentFingerprint = contentFingerprint,
             pageCount = pageCount,
             suggestedTitle = file.nameWithoutExtension,
         )
+    }
+
+    private fun copyToManagedPdf(
+        source: File,
+        destination: File,
+    ): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        source.inputStream().use { input ->
+            destination.outputStream().use { output ->
+                val buffer = ByteArray(COPY_BUFFER_SIZE_BYTES)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read <= 0) break
+                    digest.update(buffer, 0, read)
+                    output.write(buffer, 0, read)
+                }
+            }
+        }
+        return digest.digest().toHexString()
     }
 
     private fun selectFiles(): List<File> {
@@ -325,6 +354,52 @@ private class DesktopSyncHttpClient : SyncHttpClient {
     }
 }
 
+private class DesktopStoredDocumentFingerprinter : StoredDocumentFingerprinter {
+    override suspend fun fingerprint(storedPath: String): String? = withContext(Dispatchers.IO) {
+        val file = File(storedPath)
+        if (!file.exists()) {
+            return@withContext null
+        }
+
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(COPY_BUFFER_SIZE_BYTES)
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        digest.digest().toHexString()
+    }
+}
+
+private class DesktopLibraryCacheInspector(
+    private val appRoot: File,
+    private val metadataFile: File,
+    private val sourcesFile: File,
+    private val scoresDirectory: File,
+) : LibraryCacheInspector {
+    override suspend fun inspect(): LibraryCacheSnapshot = withContext(Dispatchers.IO) {
+        val cachedPdfFiles = if (scoresDirectory.exists()) {
+            scoresDirectory.walkTopDown()
+                .filter { it.isFile && it.extension.equals("pdf", ignoreCase = true) }
+                .toList()
+        } else {
+            emptyList()
+        }
+
+        LibraryCacheSnapshot(
+            storageLabel = "Desktop filesystem cache",
+            cacheRootPath = appRoot.absolutePath,
+            metadataCached = metadataFile.exists(),
+            sourceRegistryCached = sourcesFile.exists(),
+            cachedPdfCount = cachedPdfFiles.size,
+            cachedPdfBytes = cachedPdfFiles.sumOf(File::length),
+        )
+    }
+}
+
 private class DesktopManagedPdfStore(
     private val scoresDirectory: File,
 ) : ManagedPdfStore {
@@ -364,3 +439,9 @@ private fun safeFileStem(fileName: String): String = fileName
     .replace(Regex("[^A-Za-z0-9_-]+"), "_")
     .trim('_')
     .ifEmpty { "score" }
+
+private const val COPY_BUFFER_SIZE_BYTES = 8_192
+
+private fun ByteArray.toHexString(): String = joinToString(separator = "") { byte ->
+    byte.toUByte().toString(16).padStart(2, '0')
+}

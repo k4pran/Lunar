@@ -54,6 +54,14 @@ object NoOpStoredDocumentCleaner : StoredDocumentCleaner {
     override suspend fun deleteStoredDocument(storedPath: String) = Unit
 }
 
+interface StoredDocumentFingerprinter {
+    suspend fun fingerprint(storedPath: String): String?
+}
+
+object NoOpStoredDocumentFingerprinter : StoredDocumentFingerprinter {
+    override suspend fun fingerprint(storedPath: String): String? = null
+}
+
 class OkioStoredDocumentCleaner(
     private val fileSystem: FileSystem,
 ) : StoredDocumentCleaner {
@@ -87,17 +95,27 @@ data class SyncedSheetMusicDescriptor(
     val dateAddedEpochMillis: Long? = null,
 )
 
+data class SkippedImportDocument(
+    val originalFileName: String,
+    val reason: String,
+)
+
+data class DocumentImportResult(
+    val importedItems: List<SheetMusicItem> = emptyList(),
+    val skippedDocuments: List<SkippedImportDocument> = emptyList(),
+)
+
 interface SheetMusicRepository {
     val library: StateFlow<LibrarySnapshot>
 
     suspend fun initialize()
 
-    suspend fun importDocuments(documents: List<ImportedPdfDescriptor>): List<SheetMusicItem>
+    suspend fun importDocuments(documents: List<ImportedPdfDescriptor>): DocumentImportResult
 
     suspend fun importDocumentsForSource(
         sourceId: String?,
         documents: List<ImportedPdfDescriptor>,
-    ): List<SheetMusicItem>
+    ): DocumentImportResult
 
     suspend fun removeItemsBySource(sourceId: String)
 
@@ -132,6 +150,7 @@ class DefaultSheetMusicRepository(
     private val storage: LibraryStorage,
     private val syncGateway: LibrarySyncGateway = LocalOnlySyncGateway,
     private val storedDocumentCleaner: StoredDocumentCleaner = NoOpStoredDocumentCleaner,
+    private val storedDocumentFingerprinter: StoredDocumentFingerprinter = NoOpStoredDocumentFingerprinter,
     private val clock: Clock = Clock.System,
 ) : SheetMusicRepository {
     private val mutationLock = Mutex()
@@ -155,37 +174,76 @@ class DefaultSheetMusicRepository(
         }
     }
 
-    override suspend fun importDocuments(documents: List<ImportedPdfDescriptor>): List<SheetMusicItem> {
+    override suspend fun importDocuments(documents: List<ImportedPdfDescriptor>): DocumentImportResult {
         return importDocumentsForSource(sourceId = null, documents = documents)
     }
 
     override suspend fun importDocumentsForSource(
         sourceId: String?,
         documents: List<ImportedPdfDescriptor>,
-    ): List<SheetMusicItem> {
+    ): DocumentImportResult {
         ensureInitialized()
         if (documents.isEmpty()) {
-            return emptyList()
+            return DocumentImportResult()
         }
 
         val importedAt = clock.now().toEpochMilliseconds()
-        val importedItems = documents.mapIndexed { index, document ->
-            SheetMusicItem(
-                id = buildStableId(importedAt, index),
-                title = normalizeTitle(document.suggestedTitle, document.originalFileName),
-                document = PdfDocumentReference(
-                    storedPath = document.storedPath,
-                    originalFileName = document.originalFileName,
-                    sourceUri = document.sourceUri,
-                ),
-                pageCount = document.pageCount,
-                dateAddedEpochMillis = importedAt + index,
-                sourceId = sourceId,
-            )
+        val existingFingerprints = loadExistingFingerprints()
+        val importedFingerprints = mutableSetOf<String>()
+        val stalePaths = mutableListOf<String>()
+        val skippedDocuments = mutableListOf<SkippedImportDocument>()
+        val importedItems = buildList {
+            documents.forEach { document ->
+                val fingerprint = normalizeContentFingerprint(document.contentFingerprint)
+                val duplicateReason = when {
+                    fingerprint != null && fingerprint in existingFingerprints ->
+                        "matching file contents already exist in the library."
+
+                    fingerprint != null && !importedFingerprints.add(fingerprint) ->
+                        "matching file contents were already selected in this import."
+
+                    else -> null
+                }
+
+                if (duplicateReason != null) {
+                    skippedDocuments += SkippedImportDocument(
+                        originalFileName = document.originalFileName,
+                        reason = duplicateReason,
+                    )
+                    stalePaths += document.storedPath
+                    return@forEach
+                }
+
+                val importIndex = size
+                add(
+                    SheetMusicItem(
+                        id = buildStableId(importedAt, importIndex),
+                        title = normalizeTitle(document.suggestedTitle, document.originalFileName),
+                        document = PdfDocumentReference(
+                            storedPath = document.storedPath,
+                            originalFileName = document.originalFileName,
+                            sourceUri = document.sourceUri,
+                            contentFingerprint = fingerprint,
+                        ),
+                        pageCount = document.pageCount,
+                        dateAddedEpochMillis = importedAt + importIndex,
+                        sourceId = sourceId,
+                    )
+                )
+            }
         }
 
         mutateItems { items -> items + importedItems }
-        return importedItems
+        stalePaths
+            .distinct()
+            .forEach { stalePath ->
+                runCatching { storedDocumentCleaner.deleteStoredDocument(stalePath) }
+            }
+
+        return DocumentImportResult(
+            importedItems = importedItems,
+            skippedDocuments = skippedDocuments,
+        )
     }
 
     override suspend fun removeItemsBySource(sourceId: String) {
@@ -358,6 +416,29 @@ class DefaultSheetMusicRepository(
         }
     }
 
+    private suspend fun loadExistingFingerprints(): Set<String> {
+        val fingerprintBackfills = mutableMapOf<String, String>()
+        val fingerprints = _library.value.items.mapNotNullTo(mutableSetOf()) { item ->
+            val normalized = normalizeContentFingerprint(item.document.contentFingerprint)
+                ?: normalizeContentFingerprint(
+                    storedDocumentFingerprinter.fingerprint(item.document.storedPath)
+                )?.also { fingerprintBackfills[item.id] = it }
+            normalized
+        }
+        if (fingerprintBackfills.isNotEmpty()) {
+            mutateItems { items ->
+                items.map { item ->
+                    fingerprintBackfills[item.id]?.let { fingerprint ->
+                        item.copy(
+                            document = item.document.copy(contentFingerprint = fingerprint)
+                        )
+                    } ?: item
+                }
+            }
+        }
+        return fingerprints
+    }
+
     private suspend fun mutateItem(
         itemId: String,
         transform: (SheetMusicItem) -> SheetMusicItem,
@@ -394,6 +475,11 @@ private fun normalizeTitle(
 ): String = suggestedTitle.trim()
     .ifEmpty { originalFileName.substringBeforeLast('.') }
     .ifEmpty { "Untitled score" }
+
+private fun normalizeContentFingerprint(fingerprint: String?): String? = fingerprint
+    ?.trim()
+    ?.lowercase()
+    ?.ifEmpty { null }
 
 private fun normalizeTags(tags: List<String>): List<String> = tags
     .map(String::trim)

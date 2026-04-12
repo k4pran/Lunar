@@ -4,11 +4,14 @@ import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
 import com.ryanjames.lunar.library.data.SheetMusicMetadataInput
 import com.ryanjames.lunar.library.data.SyncedSheetMusicDescriptor
+import com.ryanjames.lunar.library.data.StoredDocumentFingerprinter
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.library.model.LibraryQuery
 import com.ryanjames.lunar.library.model.LibrarySortOption
 import com.ryanjames.lunar.library.model.SortDirection
 import com.ryanjames.lunar.library.model.applyLibraryQuery
+import com.ryanjames.lunar.library.model.collectionDuplicateKey
+import com.ryanjames.lunar.library.model.composerDuplicateKey
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -28,7 +31,7 @@ class SharedCommonTest {
                     pageCount = 6,
                 )
             )
-        )
+        ).importedItems
 
         repository.updateMetadata(
             itemId = imported.single().id,
@@ -106,7 +109,7 @@ class SharedCommonTest {
                     originalFileName = "Delete Me.pdf",
                 )
             )
-        )
+        ).importedItems
 
         repository.deleteItem(imported.single().id)
 
@@ -183,6 +186,92 @@ class SharedCommonTest {
 
         val titles = repository.library.value.items.map { it.title }.sorted()
         assertEquals(listOf("Cloud A", "Cloud B"), titles)
+    }
+
+    @Test
+    fun duplicateKeysAreCaseInsensitiveAndRequireMetadataPairing() {
+        assertEquals(
+            "moonlight sonata|beethoven",
+            composerDuplicateKey(" Moonlight Sonata ", " Beethoven "),
+        )
+        assertEquals(
+            "moonlight sonata|recital",
+            collectionDuplicateKey(" Moonlight Sonata ", " Recital "),
+        )
+        assertNull(composerDuplicateKey("Moonlight Sonata", null))
+        assertNull(collectionDuplicateKey("Moonlight Sonata", " "))
+    }
+
+    @Test
+    fun repositorySkipsDuplicateLocalDocumentsByContentFingerprint() = runBlocking {
+        val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
+
+        repository.initialize()
+        val firstImport = repository.importDocuments(
+            listOf(
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/moonlight-a.pdf",
+                    originalFileName = "Moonlight Sonata.pdf",
+                    contentFingerprint = "abc123",
+                )
+            )
+        )
+        val secondImport = repository.importDocuments(
+            listOf(
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/moonlight-b.pdf",
+                    originalFileName = "Moonlight Sonata Copy.pdf",
+                    contentFingerprint = "abc123",
+                )
+            )
+        )
+
+        assertEquals(1, firstImport.importedItems.size)
+        assertEquals(0, secondImport.importedItems.size)
+        assertEquals(1, secondImport.skippedDocuments.size)
+        assertEquals("Moonlight Sonata Copy.pdf", secondImport.skippedDocuments.single().originalFileName)
+        assertEquals(1, repository.library.value.items.size)
+    }
+
+    @Test
+    fun repositoryBackfillsLegacyFingerprintsDuringDuplicateCheck() = runBlocking {
+        val repository = DefaultSheetMusicRepository(
+            storage = InMemoryLibraryStorage(
+                initialItems = listOf(
+                    testItem(
+                        id = "legacy",
+                        title = "Moonlight Sonata",
+                        composer = "Beethoven",
+                        tags = emptyList(),
+                        dateAddedEpochMillis = 1L,
+                    )
+                )
+            ),
+            storedDocumentFingerprinter = object : StoredDocumentFingerprinter {
+                override suspend fun fingerprint(storedPath: String): String? = when (storedPath) {
+                    "/scores/legacy.pdf" -> "legacy-hash"
+                    else -> null
+                }
+            },
+        )
+
+        repository.initialize()
+        val importResult = repository.importDocuments(
+            listOf(
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/new-copy.pdf",
+                    originalFileName = "Moonlight Duplicate.pdf",
+                    contentFingerprint = "legacy-hash",
+                )
+            )
+        )
+
+        assertEquals(0, importResult.importedItems.size)
+        assertEquals(1, importResult.skippedDocuments.size)
+        assertEquals(
+            "legacy-hash",
+            repository.library.value.items.single().document.contentFingerprint,
+        )
     }
 }
 

@@ -11,6 +11,7 @@ import com.ryanjames.lunar.library.data.CloudLibrarySource
 import com.ryanjames.lunar.library.data.LocalFilesSource
 import com.ryanjames.lunar.library.data.LocalFolderSource
 import com.ryanjames.lunar.library.data.SheetMusicMetadataInput
+import com.ryanjames.lunar.library.data.SkippedImportDocument
 import com.ryanjames.lunar.library.data.generateSourceId
 import com.ryanjames.lunar.library.model.LibraryQuery
 import com.ryanjames.lunar.library.model.LibrarySortOption
@@ -70,6 +71,21 @@ class LunarAppState(
         private set
 
     var importInProgress: Boolean by mutableStateOf(false)
+        private set
+
+    var importActivityStep: String? by mutableStateOf(null)
+        private set
+
+    var importDiscoveredResources: Int by mutableStateOf(0)
+        private set
+
+    var importProcessedResources: Int by mutableStateOf(0)
+        private set
+
+    var importSkippedResources: Int by mutableStateOf(0)
+        private set
+
+    var importActivityLog: List<String> by mutableStateOf(emptyList())
         private set
 
     var bannerMessage: String? by mutableStateOf(null)
@@ -173,7 +189,7 @@ class LunarAppState(
         scope.launch {
             runtime.sourceRegistry.addSource(source)
         }
-        runImportForSource(sourceId) { runtime.importer.importPdfFiles() }
+        runImportForSource(sourceId, source.label) { runtime.importer.importPdfFiles() }
     }
 
     fun addLocalFolderSource(label: String) {
@@ -186,7 +202,7 @@ class LunarAppState(
         scope.launch {
             runtime.sourceRegistry.addSource(source)
         }
-        runImportForSource(sourceId) { runtime.importer.importPdfFolder() }
+        runImportForSource(sourceId, source.label) { runtime.importer.importPdfFolder() }
     }
 
     fun addCloudSource(source: CloudLibrarySource) {
@@ -329,9 +345,33 @@ class LunarAppState(
 
         scope.launch {
             importInProgress = true
+            startImportActivity("Starting local import.")
             try {
+                appendImportActivity(
+                    message = "Opening file picker.",
+                    currentStep = "Selecting local PDFs",
+                )
                 val result = importerAction()
-                val imported = runtime.repository.importDocuments(result.documents)
+                appendImportActivity(
+                    message = "Importer returned ${result.documents.size} PDF${if (result.documents.size == 1) "" else "s"}.",
+                    currentStep = "Importing local PDFs",
+                    discoveredDelta = result.documents.size,
+                )
+                val importResult = runtime.repository.importDocuments(result.documents)
+                val imported = importResult.importedItems
+                if (importResult.skippedDocuments.isNotEmpty()) {
+                    appendSkippedImportActivity(
+                        skippedDocuments = importResult.skippedDocuments,
+                        sourceLabel = "Local import",
+                    )
+                }
+                if (imported.isNotEmpty()) {
+                    appendImportActivity(
+                        message = "Imported ${imported.size} PDF${if (imported.size == 1) "" else "s"} into the library.",
+                        currentStep = "Import complete",
+                        processedDelta = imported.size,
+                    )
+                }
                 bannerMessage = when {
                     imported.isNotEmpty() -> {
                         selectedSection = AppSection.LIBRARY
@@ -343,7 +383,15 @@ class LunarAppState(
                     !result.notice.isNullOrBlank() -> result.notice
                     else -> null
                 }
+                finishImportActivity(
+                    summary = when {
+                        imported.isNotEmpty() -> "Local import complete."
+                        !result.notice.isNullOrBlank() -> result.notice
+                        else -> "No local PDFs were added."
+                    }
+                )
             } catch (error: Throwable) {
+                finishImportActivity(error.message ?: "Local import failed.")
                 bannerMessage = error.message ?: "Import failed."
             } finally {
                 importInProgress = false
@@ -353,15 +401,33 @@ class LunarAppState(
 
     private fun runImportForSource(
         sourceId: String,
+        sourceLabel: String,
         importerAction: suspend () -> ImportRequestResult,
     ) {
         if (importInProgress) return
 
         scope.launch {
             importInProgress = true
+            startImportActivity("Starting import for $sourceLabel.")
             try {
+                appendImportActivity(
+                    message = "Opening picker for $sourceLabel.",
+                    currentStep = "Selecting local PDFs",
+                )
                 val result = importerAction()
-                val imported = runtime.repository.importDocumentsForSource(sourceId, result.documents)
+                appendImportActivity(
+                    message = "$sourceLabel picker returned ${result.documents.size} PDF${if (result.documents.size == 1) "" else "s"}.",
+                    currentStep = "Importing local PDFs",
+                    discoveredDelta = result.documents.size,
+                )
+                val importResult = runtime.repository.importDocumentsForSource(sourceId, result.documents)
+                val imported = importResult.importedItems
+                if (importResult.skippedDocuments.isNotEmpty()) {
+                    appendSkippedImportActivity(
+                        skippedDocuments = importResult.skippedDocuments,
+                        sourceLabel = sourceLabel,
+                    )
+                }
 
                 if (imported.isEmpty() && result.documents.isEmpty()) {
                     runtime.sourceRegistry.removeSource(sourceId)
@@ -386,13 +452,26 @@ class LunarAppState(
                         selectedSection = AppSection.LIBRARY
                         clearFilters()
                         val scores = imported.size
+                        appendImportActivity(
+                            message = "$sourceLabel imported $scores PDF${if (scores == 1) "" else "s"} into the library.",
+                            currentStep = "Import complete",
+                            processedDelta = scores,
+                        )
                         "$scores PDF${if (scores == 1) "" else "s"} added to your library."
                     }
 
                     !result.notice.isNullOrBlank() -> result.notice
                     else -> null
                 }
+                finishImportActivity(
+                    summary = when {
+                        imported.isNotEmpty() -> "$sourceLabel import complete."
+                        !result.notice.isNullOrBlank() -> result.notice
+                        else -> "No PDFs were added from $sourceLabel."
+                    }
+                )
             } catch (error: Throwable) {
+                finishImportActivity(error.message ?: "Import failed.")
                 bannerMessage = error.message ?: "Import failed."
             } finally {
                 importInProgress = false
@@ -424,6 +503,77 @@ class LunarAppState(
             ),
         )
     }
+
+    private fun startImportActivity(initialMessage: String) {
+        importActivityStep = "Preparing import"
+        importDiscoveredResources = 0
+        importProcessedResources = 0
+        importSkippedResources = 0
+        importActivityLog = listOf(initialMessage)
+    }
+
+    private fun appendImportActivity(
+        message: String,
+        currentStep: String? = null,
+        discoveredDelta: Int = 0,
+        processedDelta: Int = 0,
+        skippedDelta: Int = 0,
+    ) {
+        appendImportActivities(
+            messages = listOf(message),
+            currentStep = currentStep,
+            discoveredDelta = discoveredDelta,
+            processedDelta = processedDelta,
+            skippedDelta = skippedDelta,
+        )
+    }
+
+    private fun appendImportActivities(
+        messages: List<String>,
+        currentStep: String? = null,
+        discoveredDelta: Int = 0,
+        processedDelta: Int = 0,
+        skippedDelta: Int = 0,
+    ) {
+        val trimmedMessages = messages
+            .map(String::trim)
+            .filter(String::isNotBlank)
+        if (
+            trimmedMessages.isEmpty() &&
+            currentStep == null &&
+            discoveredDelta == 0 &&
+            processedDelta == 0 &&
+            skippedDelta == 0
+        ) {
+            return
+        }
+        importActivityStep = currentStep ?: importActivityStep
+        importDiscoveredResources = (importDiscoveredResources + discoveredDelta).coerceAtLeast(0)
+        importProcessedResources = (importProcessedResources + processedDelta).coerceAtLeast(0)
+        importSkippedResources = (importSkippedResources + skippedDelta).coerceAtLeast(0)
+        if (trimmedMessages.isNotEmpty()) {
+            importActivityLog = (importActivityLog + trimmedMessages).takeLast(MAX_IMPORT_ACTIVITY_ENTRIES)
+        }
+    }
+
+    private fun finishImportActivity(summary: String?) {
+        importActivityStep = summary?.takeIf(String::isNotBlank) ?: "Import complete"
+        summary?.takeIf(String::isNotBlank)?.let { appendImportActivity(it) }
+    }
+
+    private fun appendSkippedImportActivity(
+        skippedDocuments: List<SkippedImportDocument>,
+        sourceLabel: String,
+    ) {
+        val prefix = sourceLabel.ifBlank { "Local import" }
+        appendImportActivities(
+            messages = skippedDocuments.map { skipped ->
+                "$prefix skipped duplicate PDF \"${skipped.originalFileName}\" because ${skipped.reason}"
+            },
+            currentStep = "Importing local PDFs",
+            skippedDelta = skippedDocuments.size,
+        )
+    }
 }
 
 @Composable
@@ -433,3 +583,5 @@ fun rememberLunarAppState(runtime: PlatformRuntime): LunarAppState {
         LunarAppState(runtime = runtime, scope = scope)
     }
 }
+
+private const val MAX_IMPORT_ACTIVITY_ENTRIES = 150

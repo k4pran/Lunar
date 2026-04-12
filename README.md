@@ -88,13 +88,31 @@ The project is split into a shared core plus thin platform integrations.
 Lunar currently uses local-first storage.
 
 - Metadata is stored as JSON through the shared repository layer.
+- Source configuration is stored as JSON through the shared source registry layer.
 - Imported PDFs are copied into app-managed storage.
+- Cloud-synced PDFs are also copied into app-managed storage and reused on later launches.
 - Android stores app data under app-private storage and tracks persisted SAF permissions for imported documents/folders.
 - Desktop stores app data under:
   - `%APPDATA%\Lunar` on Windows
   - `~/.lunar` as a fallback when `APPDATA` is unavailable
 
 This keeps the first milestone simple while preserving a clean seam for future sync work.
+
+### On-disk cache and offline behavior
+
+Lunar already uses an on-disk filesystem cache rather than a database for the first milestone.
+
+- `library.json` stores the aggregated library metadata
+- `sources.json` stores configured local/cloud sources
+- `scores/` stores managed PDF copies for imported and synced scores
+
+This means:
+
+- the library can open from disk even when the network is unavailable
+- cached PDFs can still be viewed offline
+- cloud refreshes reuse the existing local PDF when the remote version has not changed
+
+The app now surfaces cache details in the **Sources** screen so you can inspect how many PDFs are cached locally and how much disk space they use.
 
 ## Cloud Sync
 
@@ -105,6 +123,12 @@ Lunar supports multiple library sources that can be mixed and matched:
 - **Cloud sources** — connect to a Supabase Storage bucket
 
 Multiple sources of any type can be active at the same time. The library aggregates scores from all configured sources. Each source can be removed individually, which also cleans up its contributed scores.
+
+Even for cloud-backed libraries, Lunar remains local-first:
+
+- synced PDFs are stored on disk locally
+- the shared library metadata stays on disk locally
+- later refreshes check for changes, but unchanged PDFs are reused from the local cache
 
 ### Cloud provider: Supabase public storage
 
