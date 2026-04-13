@@ -13,6 +13,7 @@ import com.ryanjames.lunar.library.data.LocalFolderSource
 import com.ryanjames.lunar.library.data.SheetMusicMetadataInput
 import com.ryanjames.lunar.library.data.SkippedImportDocument
 import com.ryanjames.lunar.library.data.generateSourceId
+import com.ryanjames.lunar.library.model.LibrarySetlist
 import com.ryanjames.lunar.library.model.LibraryQuery
 import com.ryanjames.lunar.library.model.LibrarySortOption
 import com.ryanjames.lunar.library.model.SheetMusicItem
@@ -129,16 +130,15 @@ class LunarAppState(
         selectedSection = section
         if (section != AppSection.LIBRARY) {
             clearScoreSelection()
-            randomSetlistBuilderVisible = false
-            saveTemporarySetlistDialogVisible = false
+            dismissLibraryTransientUi()
         }
     }
 
     fun updateSearchText(searchText: String) {
-        if (query.searchText != searchText) {
-            clearScoreSelection()
+        if (query.searchText == searchText) {
+            return
         }
-        query = query.copy(searchText = searchText)
+        updateQuery { copy(searchText = searchText) }
     }
 
     fun updateSortOption(sortOption: LibrarySortOption) {
@@ -150,23 +150,20 @@ class LunarAppState(
     }
 
     fun toggleFavoriteFilter() {
-        clearScoreSelection()
-        query = query.copy(favoritesOnly = !query.favoritesOnly)
+        updateQuery { copy(favoritesOnly = !favoritesOnly) }
     }
 
     fun toggleTag(tag: String) {
-        clearScoreSelection()
         val selectedTags = query.selectedTags.toMutableSet()
         if (!selectedTags.add(tag)) {
             selectedTags.remove(tag)
         }
-        query = query.copy(selectedTags = selectedTags)
+        updateQuery { copy(selectedTags = selectedTags) }
     }
 
     fun selectCollection(collection: String?) {
-        clearScoreSelection()
         val nextCollection = if (query.selectedCollection == collection) null else collection
-        query = query.copy(selectedCollection = nextCollection)
+        updateQuery { copy(selectedCollection = nextCollection) }
         if (
             browseMode == LibraryBrowseMode.BY_COLLECTION &&
             selectedGroup != null &&
@@ -178,21 +175,18 @@ class LunarAppState(
     }
 
     fun clearRefinements() {
-        clearScoreSelection()
-        query = query.copy(
-            selectedTags = emptySet(),
-            selectedCollection = null,
-            favoritesOnly = false,
-        )
+        updateQuery {
+            copy(
+                selectedTags = emptySet(),
+                selectedCollection = null,
+                favoritesOnly = false,
+            )
+        }
     }
 
     fun updateLayoutMode(layoutMode: LibraryLayoutMode) {
         this.layoutMode = layoutMode
-        scope.launch {
-            runtime.settingsStore.updateSettings { settings ->
-                settings.copy(defaultLibraryLayout = layoutMode.toPreference())
-            }
-        }
+        updateStoredSettings { settings -> settings.copy(defaultLibraryLayout = layoutMode.toPreference()) }
     }
 
     fun updateBrowseMode(mode: LibraryBrowseMode) {
@@ -200,8 +194,7 @@ class LunarAppState(
         browseMode = mode
         selectedGroup = null
         if (mode != LibraryBrowseMode.SETLISTS) {
-            selectedSetlistId = null
-            temporarySetlistOpen = false
+            closeSetlistDetail()
         }
     }
 
@@ -216,13 +209,14 @@ class LunarAppState(
     }
 
     fun clearFilters() {
-        clearScoreSelection()
-        query = query.copy(
-            searchText = "",
-            selectedTags = emptySet(),
-            selectedCollection = null,
-            favoritesOnly = false,
-        )
+        updateQuery {
+            copy(
+                searchText = "",
+                selectedTags = emptySet(),
+                selectedCollection = null,
+                favoritesOnly = false,
+            )
+        }
     }
 
     fun toggleScoreSelection(itemId: String) {
@@ -252,17 +246,11 @@ class LunarAppState(
     }
 
     fun openSetlist(setlistId: String) {
-        clearScoreSelection()
-        saveTemporarySetlistDialogVisible = false
-        browseMode = LibraryBrowseMode.SETLISTS
-        selectedGroup = null
-        temporarySetlistOpen = false
-        selectedSetlistId = setlistId
+        showSavedSetlist(setlistId)
     }
 
     fun closeSetlist() {
-        selectedSetlistId = null
-        temporarySetlistOpen = false
+        closeSetlistDetail()
     }
 
     fun openTemporarySetlist() {
@@ -270,17 +258,13 @@ class LunarAppState(
             bannerMessage = "Create a random setlist first."
             return
         }
-        clearScoreSelection()
-        browseMode = LibraryBrowseMode.SETLISTS
-        selectedGroup = null
-        selectedSetlistId = null
-        temporarySetlistOpen = true
+        showTemporarySetlist()
     }
 
     fun discardTemporarySetlist() {
         val hadTemporarySetlist = temporarySetlist != null
         temporarySetlist = null
-        temporarySetlistOpen = false
+        closeSetlistDetail()
         saveTemporarySetlistDialogVisible = false
         if (hadTemporarySetlist) {
             bannerMessage = "Temporary setlist discarded."
@@ -332,18 +316,13 @@ class LunarAppState(
             return
         }
 
-        clearScoreSelection()
-        selectedSection = AppSection.LIBRARY
-        selectedGroup = null
-        selectedSetlistId = null
-        browseMode = LibraryBrowseMode.SETLISTS
         temporarySetlist = TemporarySetlistSession(
             itemIds = shuffledItems.map { it.id },
             createdAtEpochMillis = Clock.System.now().toEpochMilliseconds(),
         )
-        temporarySetlistOpen = true
-        randomSetlistBuilderVisible = false
-        saveTemporarySetlistDialogVisible = false
+        selectSection(AppSection.LIBRARY)
+        showTemporarySetlist()
+        dismissLibraryTransientUi()
         val scoreCount = shuffledItems.size
         bannerMessage = "Built a temporary $scoreCount score${if (scoreCount == 1) "" else "s"} for sight reading."
     }
@@ -383,59 +362,31 @@ class LunarAppState(
     }
 
     fun updateDefaultViewerPageMode(mode: ViewerPageModePreference) {
-        scope.launch {
-            runtime.settingsStore.updateSettings { settings ->
-                settings.copy(defaultViewerPageMode = mode)
-            }
-        }
+        updateStoredSettings { settings -> settings.copy(defaultViewerPageMode = mode) }
     }
 
     fun updateTheme(theme: AppColorTheme) {
-        scope.launch {
-            runtime.settingsStore.updateSettings { settings ->
-                settings.copy(theme = theme)
-            }
-        }
+        updateStoredSettings { settings -> settings.copy(theme = theme) }
     }
 
     fun updateRefreshOnLaunch(enabled: Boolean) {
-        scope.launch {
-            runtime.settingsStore.updateSettings { settings ->
-                settings.copy(refreshOnLaunch = enabled)
-            }
-        }
+        updateStoredSettings { settings -> settings.copy(refreshOnLaunch = enabled) }
     }
 
     fun updateAutoRefreshSchedule(schedule: AutoRefreshSchedule) {
-        scope.launch {
-            runtime.settingsStore.updateSettings { settings ->
-                settings.copy(autoRefreshSchedule = schedule)
-            }
-        }
+        updateStoredSettings { settings -> settings.copy(autoRefreshSchedule = schedule) }
     }
 
     fun updateCacheLimit(limit: CacheLimitPreset) {
-        scope.launch {
-            runtime.settingsStore.updateSettings { settings ->
-                settings.copy(cacheLimit = limit)
-            }
-        }
+        updateStoredSettings { settings -> settings.copy(cacheLimit = limit) }
     }
 
     fun updateCloudConnectTimeout(seconds: Int) {
-        scope.launch {
-            runtime.settingsStore.updateSettings { settings ->
-                settings.copy(cloudConnectTimeoutSeconds = seconds)
-            }
-        }
+        updateStoredSettings { settings -> settings.copy(cloudConnectTimeoutSeconds = seconds) }
     }
 
     fun updateCloudReadTimeout(seconds: Int) {
-        scope.launch {
-            runtime.settingsStore.updateSettings { settings ->
-                settings.copy(cloudReadTimeoutSeconds = seconds)
-            }
-        }
+        updateStoredSettings { settings -> settings.copy(cloudReadTimeoutSeconds = seconds) }
     }
 
     fun resetGlobalSettings() {
@@ -529,7 +480,7 @@ class LunarAppState(
     }
 
     fun openPreview(item: SheetMusicItem) {
-        selectedSection = AppSection.LIBRARY
+        focusLibrarySection()
         previewItemId = item.id
         scope.launch {
             runtime.repository.recordOpened(item.id, item.lastViewedPage)
@@ -541,14 +492,14 @@ class LunarAppState(
     }
 
     fun openFullscreen(itemId: String) {
-        selectedSection = AppSection.LIBRARY
+        focusLibrarySection()
         previewItemId = null
         fullscreenItemId = itemId
     }
 
     fun closeFullscreen() {
         fullscreenItemId = null
-        selectedSection = AppSection.LIBRARY
+        focusLibrarySection()
     }
 
     fun toggleFavorite(itemId: String) {
@@ -608,11 +559,10 @@ class LunarAppState(
         scope.launch {
             try {
                 val setlist = runtime.repository.createSetlist(name, itemIds)
-                clearScoreSelection()
-                setlistPickerVisible = false
-                browseMode = LibraryBrowseMode.SETLISTS
-                selectedSetlistId = setlist.id
-                bannerMessage = "Saved \"${setlist.name}\"."
+                showSavedSetlist(
+                    setlist = setlist,
+                    banner = "Saved \"${setlist.name}\".",
+                )
             } catch (error: Throwable) {
                 bannerMessage = error.message ?: "Could not save the setlist."
             }
@@ -623,11 +573,10 @@ class LunarAppState(
         scope.launch {
             try {
                 val setlist = runtime.repository.addItemsToSetlist(setlistId, itemIds)
-                clearScoreSelection()
-                setlistPickerVisible = false
-                browseMode = LibraryBrowseMode.SETLISTS
-                selectedSetlistId = setlist.id
-                bannerMessage = "Updated \"${setlist.name}\"."
+                showSavedSetlist(
+                    setlist = setlist,
+                    banner = "Updated \"${setlist.name}\".",
+                )
             } catch (error: Throwable) {
                 bannerMessage = error.message ?: "Could not update the setlist."
             }
@@ -652,11 +601,10 @@ class LunarAppState(
             try {
                 val setlist = runtime.repository.createSetlist(name, session.itemIds)
                 temporarySetlist = null
-                temporarySetlistOpen = false
-                saveTemporarySetlistDialogVisible = false
-                browseMode = LibraryBrowseMode.SETLISTS
-                selectedSetlistId = setlist.id
-                bannerMessage = "Saved \"${setlist.name}\"."
+                showSavedSetlist(
+                    setlist = setlist,
+                    banner = "Saved \"${setlist.name}\".",
+                )
             } catch (error: Throwable) {
                 bannerMessage = error.message ?: "Could not save the temporary setlist."
             }
@@ -673,6 +621,56 @@ class LunarAppState(
         scope.launch {
             runtime.repository.updatePageCount(itemId, pageCount)
         }
+    }
+
+    private fun focusLibrarySection() {
+        selectedSection = AppSection.LIBRARY
+    }
+
+    private fun dismissLibraryTransientUi() {
+        randomSetlistBuilderVisible = false
+        saveTemporarySetlistDialogVisible = false
+    }
+
+    private inline fun updateQuery(transform: LibraryQuery.() -> LibraryQuery) {
+        clearScoreSelection()
+        query = query.transform()
+    }
+
+    private fun updateStoredSettings(transform: (AppSettings) -> AppSettings) {
+        scope.launch {
+            runtime.settingsStore.updateSettings(transform)
+        }
+    }
+
+    private fun closeSetlistDetail() {
+        selectedSetlistId = null
+        temporarySetlistOpen = false
+    }
+
+    private fun showSavedSetlist(setlistId: String) {
+        clearScoreSelection()
+        saveTemporarySetlistDialogVisible = false
+        browseMode = LibraryBrowseMode.SETLISTS
+        selectedGroup = null
+        temporarySetlistOpen = false
+        selectedSetlistId = setlistId
+    }
+
+    private fun showSavedSetlist(
+        setlist: LibrarySetlist,
+        banner: String,
+    ) {
+        showSavedSetlist(setlist.id)
+        bannerMessage = banner
+    }
+
+    private fun showTemporarySetlist() {
+        clearScoreSelection()
+        browseMode = LibraryBrowseMode.SETLISTS
+        selectedGroup = null
+        selectedSetlistId = null
+        temporarySetlistOpen = true
     }
 
     private fun runImport(

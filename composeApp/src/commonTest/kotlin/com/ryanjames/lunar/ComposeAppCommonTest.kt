@@ -6,20 +6,33 @@ import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.GoogleDriveImportRoot
 import com.ryanjames.lunar.library.data.GoogleDriveStorageSettings
 import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
+import com.ryanjames.lunar.library.data.InMemorySourceRegistry
+import com.ryanjames.lunar.platform.PlatformCapabilities
+import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.PdfDocumentInfo
 import com.ryanjames.lunar.platform.PdfPageRenderer
 import com.ryanjames.lunar.platform.RenderedPdfPage
+import com.ryanjames.lunar.platform.UnavailablePdfPageRenderer
+import com.ryanjames.lunar.platform.UnsupportedLibraryCacheInspector
+import com.ryanjames.lunar.platform.UnsupportedPdfImporter
 import com.ryanjames.lunar.settings.AppColorTheme
 import com.ryanjames.lunar.settings.AutoRefreshSchedule
 import com.ryanjames.lunar.settings.InMemoryAppSettingsStore
 import com.ryanjames.lunar.sync.LibrarySyncManager
 import com.ryanjames.lunar.sync.ManagedPdfStore
 import com.ryanjames.lunar.sync.SyncHttpClient
+import com.ryanjames.lunar.sync.UnsupportedGoogleDriveOAuthCoordinator
+import com.ryanjames.lunar.sync.rememberNoOpLibrarySyncManager
+import com.ryanjames.lunar.ui.AppSection
+import com.ryanjames.lunar.ui.LibraryBrowseMode
+import com.ryanjames.lunar.ui.LunarAppState
 import com.ryanjames.lunar.ui.buildRandomSightReadingSelection
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.runBlocking
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ComposeAppCommonTest {
@@ -120,6 +133,57 @@ class ComposeAppCommonTest {
 
         assertTrue(result.isEmpty())
     }
+
+    @Test
+    fun leavingSetlistsBrowseClosesOpenSetlistDetail() = runBlocking {
+        val appState = createTestLunarAppState(this)
+
+        appState.openSetlist("saved-setlist")
+        appState.updateBrowseMode(LibraryBrowseMode.BY_COLLECTION)
+
+        assertEquals(LibraryBrowseMode.BY_COLLECTION, appState.browseMode)
+        assertEquals(null, appState.selectedSetlistId)
+        assertFalse(appState.temporarySetlistOpen)
+    }
+
+    @Test
+    fun openingTemporarySetlistClearsSavedSetlistSelection() = runBlocking {
+        val appState = createTestLunarAppState(this)
+
+        appState.createTemporaryRandomSetlist(
+            items = listOf(randomSightReadingItem("one"), randomSightReadingItem("two")),
+            requestedCount = 2,
+        )
+        appState.openSetlist("saved-setlist")
+
+        appState.openTemporarySetlist()
+
+        assertEquals(LibraryBrowseMode.SETLISTS, appState.browseMode)
+        assertEquals(null, appState.selectedSetlistId)
+        assertTrue(appState.temporarySetlistOpen)
+    }
+
+    @Test
+    fun leavingLibraryClosesTransientSelectionAndDialogs() = runBlocking {
+        val appState = createTestLunarAppState(this)
+
+        appState.toggleScoreSelection("score-1")
+        appState.showSetlistPicker()
+        appState.createTemporaryRandomSetlist(
+            items = listOf(randomSightReadingItem("one")),
+            requestedCount = 1,
+        )
+        appState.showRandomSetlistBuilder()
+        appState.showSaveTemporarySetlistDialog()
+
+        appState.selectSection(AppSection.IMPORT)
+
+        assertEquals(AppSection.IMPORT, appState.selectedSection)
+        assertTrue(appState.selectedScoreIds.isEmpty())
+        assertFalse(appState.setlistPickerVisible)
+        assertFalse(appState.randomSetlistBuilderVisible)
+        assertFalse(appState.saveTemporarySetlistDialogVisible)
+    }
 }
 
 private class FakeGoogleDriveHttpClient : SyncHttpClient {
@@ -184,3 +248,26 @@ private fun randomSightReadingItem(id: String) = com.ryanjames.lunar.library.mod
     ),
     dateAddedEpochMillis = 1L,
 )
+
+private suspend fun createTestLunarAppState(scope: CoroutineScope): LunarAppState {
+    val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
+    repository.initialize()
+
+    val runtime = PlatformRuntime(
+        platformName = "Test",
+        capabilities = PlatformCapabilities(),
+        repository = repository,
+        importer = UnsupportedPdfImporter("Import unavailable in tests."),
+        renderer = UnavailablePdfPageRenderer,
+        syncManager = rememberNoOpLibrarySyncManager(
+            repository = repository,
+            renderer = UnavailablePdfPageRenderer,
+        ),
+        sourceRegistry = InMemorySourceRegistry(),
+        settingsStore = InMemoryAppSettingsStore(),
+        googleDriveOAuth = UnsupportedGoogleDriveOAuthCoordinator,
+        cacheInspector = UnsupportedLibraryCacheInspector("Test cache"),
+    )
+
+    return LunarAppState(runtime = runtime, scope = scope)
+}
