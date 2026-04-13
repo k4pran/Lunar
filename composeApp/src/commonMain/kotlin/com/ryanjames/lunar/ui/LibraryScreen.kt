@@ -178,11 +178,18 @@ private fun HeaderPanel(
     snapshot: LibrarySnapshot,
     visibleCount: Int,
 ) {
+    val themePalette = lunarThemePalette()
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .background(
-                Brush.linearGradient(listOf(Color(0xFF1F4F6B), Color(0xFF176A8A))),
+                Brush.linearGradient(
+                    listOf(
+                        themePalette.headerGradientStart,
+                        themePalette.headerGradientEnd,
+                    )
+                ),
                 shape = MaterialTheme.shapes.extraLarge,
             )
             .padding(horizontal = 18.dp, vertical = 12.dp),
@@ -198,7 +205,7 @@ private fun HeaderPanel(
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.SemiBold,
                 ),
-                color = Color.White,
+                color = themePalette.headerForeground,
                 modifier = Modifier.weight(1f),
             )
             SummaryPill("${snapshot.items.size} scores")
@@ -211,15 +218,17 @@ private fun HeaderPanel(
 
 @Composable
 private fun SummaryPill(text: String) {
+    val themePalette = lunarThemePalette()
+
     Surface(
-        color = Color.White.copy(alpha = 0.22f),
+        color = themePalette.headerForeground.copy(alpha = 0.18f),
         shape = MaterialTheme.shapes.large,
     ) {
         Text(
             text = text,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             style = MaterialTheme.typography.labelLarge,
-            color = Color.White,
+            color = themePalette.headerForeground,
         )
     }
 }
@@ -246,8 +255,12 @@ private fun BrowseModeSwitcher(appState: LunarAppState) {
 
 @Composable
 private fun BrowseModeTab(label: String, selected: Boolean, onClick: () -> Unit) {
-    val bg = if (selected) Color(0xFF1F4F6B) else Color(0xFFA7C6ED).copy(alpha = 0.25f)
-    val fg = if (selected) Color.White else Color(0xFF1A3E4F)
+    val bg = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f)
+    }
+    val fg = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
     Surface(
         color = bg,
         shape = MaterialTheme.shapes.large,
@@ -308,6 +321,8 @@ private fun GroupList(
 
 @Composable
 private fun GroupCard(name: String, scoreCount: Int, onClick: () -> Unit) {
+    val themePalette = lunarThemePalette()
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -326,7 +341,12 @@ private fun GroupCard(name: String, scoreCount: Int, onClick: () -> Unit) {
                     .heightIn(min = 64.dp)
                     .fillMaxHeight()
                     .background(
-                        Brush.verticalGradient(listOf(Color(0xFF2A6E7C), Color(0xFF4C8FD5)))
+                        Brush.verticalGradient(
+                            listOf(
+                                themePalette.accentGradientStart,
+                                themePalette.accentGradientEnd,
+                            )
+                        )
                     ),
             )
             Row(
@@ -343,7 +363,7 @@ private fun GroupCard(name: String, scoreCount: Int, onClick: () -> Unit) {
                             fontFamily = FontFamily.Serif,
                             fontWeight = FontWeight.SemiBold,
                         ),
-                        color = Color(0xFF1A3E4F),
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         text = "$scoreCount score${if (scoreCount == 1) "" else "s"}",
@@ -354,7 +374,7 @@ private fun GroupCard(name: String, scoreCount: Int, onClick: () -> Unit) {
                 Text(
                     text = "▸",
                     style = MaterialTheme.typography.titleLarge,
-                    color = Color(0xFF4D7C99),
+                    color = MaterialTheme.colorScheme.secondary,
                 )
             }
         }
@@ -381,7 +401,7 @@ private fun DrillDownScoreList(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(
-                color = Color(0xFF1F4F6B).copy(alpha = 0.10f),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
                 shape = MaterialTheme.shapes.large,
                 modifier = Modifier.clickable(onClick = onBack),
             ) {
@@ -389,7 +409,7 @@ private fun DrillDownScoreList(
                     text = "◂  Back",
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.labelLarge,
-                    color = Color(0xFF1F4F6B),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             }
             Text(
@@ -398,7 +418,7 @@ private fun DrillDownScoreList(
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.SemiBold,
                 ),
-                color = Color(0xFF1A3E4F),
+                color = MaterialTheme.colorScheme.onSurface,
             )
             SummaryPillDark("${items.size} scores")
         }
@@ -422,14 +442,14 @@ private fun DrillDownScoreList(
 @Composable
 private fun SummaryPillDark(text: String) {
     Surface(
-        color = Color(0xFF1F4F6B).copy(alpha = 0.12f),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
         shape = MaterialTheme.shapes.large,
     ) {
         Text(
             text = text,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             style = MaterialTheme.typography.labelMedium,
-            color = Color(0xFF1F4F6B),
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
         )
     }
 }
@@ -552,11 +572,11 @@ private fun LayoutButton(
     onClick: () -> Unit,
 ) {
     val containerColor = if (selected) {
-        Color(0xFF1F4F6B)
+        MaterialTheme.colorScheme.primary
     } else {
         MaterialTheme.colorScheme.surfaceVariant
     }
-    val textColor = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+    val textColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
 
     Surface(
         color = containerColor,
@@ -621,6 +641,8 @@ private fun LibraryCard(
     item: SheetMusicItem,
     appState: LunarAppState,
 ) {
+    val themePalette = lunarThemePalette()
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -641,7 +663,10 @@ private fun LibraryCard(
                     .fillMaxHeight()
                     .background(
                         Brush.verticalGradient(
-                            colors = listOf(Color(0xFF176A8A), Color(0xFF4C8FD5))
+                            colors = listOf(
+                                themePalette.accentGradientStart,
+                                themePalette.accentGradientEnd,
+                            )
                         )
                     ),
             )
@@ -666,7 +691,7 @@ private fun LibraryCard(
                                 fontFamily = FontFamily.Serif,
                                 fontWeight = FontWeight.SemiBold,
                             ),
-                            color = Color(0xFF1A3E4F),
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
                             text = item.composer ?: "Composer not set",
@@ -695,14 +720,14 @@ private fun LibraryCard(
                     ) {
                         item.tags.forEach { tag ->
                             Surface(
-                                color = Color(0xFFA7C6ED).copy(alpha = 0.5f),
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
                                 shape = MaterialTheme.shapes.large,
                             ) {
                                 Text(
                                     text = tag,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF1F4F6B),
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
                                 )
                             }
                         }
@@ -725,26 +750,25 @@ private fun LibraryCard(
                         ) {
                             Text(
                                 if (item.isFavorite) "★ Unfav" else "☆ Fav",
-                                color = if (item.isFavorite) Color(0xFF176A8A) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (item.isFavorite) {
+                                    MaterialTheme.colorScheme.secondary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                             )
                         }
                         androidx.compose.material3.TextButton(
                             onClick = { appState.startEditing(item.id) },
                         ) {
-                            Text("✎ Edit", color = Color(0xFF4D7C99))
+                            Text("✎ Edit", color = MaterialTheme.colorScheme.primary)
                         }
                         androidx.compose.material3.TextButton(
                             onClick = { appState.requestDelete(item.id) },
                         ) {
-                            Text("Delete", color = Color(0xFFB42318))
+                            Text("Delete", color = MaterialTheme.colorScheme.error)
                         }
-                        androidx.compose.material3.Button(
-                            onClick = { appState.openPreview(item) },
-                            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF1F4F6B),
-                            ),
-                        ) {
-                            Text("Open", color = Color.White)
+                        androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
+                            Text("Open")
                         }
                     }
                 }
@@ -773,7 +797,13 @@ private fun DeleteScoreDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onConfirm) {
+            Button(
+                onClick = onConfirm,
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+            ) {
                 Text("Delete")
             }
         },
@@ -782,8 +812,16 @@ private fun DeleteScoreDialog(
 
 @Composable
 private fun FavoriteMarker(isFavorite: Boolean) {
-    val bgColor = if (isFavorite) Color(0xFF176A8A).copy(alpha = 0.18f) else Color.Transparent
-    val textColor = if (isFavorite) Color(0xFF176A8A) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+    val bgColor = if (isFavorite) {
+        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.72f)
+    } else {
+        Color.Transparent
+    }
+    val textColor = if (isFavorite) {
+        MaterialTheme.colorScheme.onTertiaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+    }
     Surface(
         color = bgColor,
         shape = MaterialTheme.shapes.large,
@@ -800,14 +838,14 @@ private fun FavoriteMarker(isFavorite: Boolean) {
 @Composable
 private fun CollectionPill(text: String) {
     Surface(
-        color = Color(0xFF1F4F6B).copy(alpha = 0.12f),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
         shape = MaterialTheme.shapes.large,
     ) {
         Text(
             text = "📁 $text",
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
             style = MaterialTheme.typography.labelMedium,
-            color = Color(0xFF1F4F6B),
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
         )
     }
 }
@@ -815,14 +853,14 @@ private fun CollectionPill(text: String) {
 @Composable
 private fun PagesPill(text: String) {
     Surface(
-        color = Color(0xFF4C8FD5).copy(alpha = 0.12f),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
         shape = MaterialTheme.shapes.large,
     ) {
         Text(
             text = "📄 $text",
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
             style = MaterialTheme.typography.labelMedium,
-            color = Color(0xFF176A8A),
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
         )
     }
 }
@@ -844,7 +882,7 @@ private fun EmptyLibraryState(
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFFA7C6ED).copy(alpha = 0.3f),
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f),
                             Color.Transparent,
                         )
                     )
@@ -868,7 +906,7 @@ private fun EmptyLibraryState(
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.SemiBold,
                 ),
-                color = Color(0xFF1A3E4F),
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(top = 8.dp),
             )
             Text(
@@ -887,21 +925,15 @@ private fun EmptyLibraryState(
                 Button(
                     onClick = onOpenImport,
                     modifier = Modifier.padding(top = 18.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF1F4F6B),
-                    ),
                 ) {
-                    Text("Open import panel", color = Color.White)
+                    Text("Open import panel")
                 }
             } else {
                 Button(
                     onClick = onClearFilters,
                     modifier = Modifier.padding(top = 18.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF1F4F6B),
-                    ),
                 ) {
-                    Text("Clear filters", color = Color.White)
+                    Text("Clear filters")
                 }
             }
         }

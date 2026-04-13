@@ -77,6 +77,7 @@ fun ViewerScreen(
     var renderedPages by remember(item.id, currentPage, twoPageMode) { mutableStateOf<List<RenderedPdfPage>>(emptyList()) }
     var errorMessage by remember(item.id, currentPage) { mutableStateOf<String?>(null) }
     var isLoading by remember(item.id, currentPage) { mutableStateOf(true) }
+    val themePalette = lunarThemePalette()
 
     LaunchedEffect(item.id, currentPage, twoPageMode) {
         isLoading = true
@@ -130,7 +131,12 @@ fun ViewerScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(
-                    Brush.linearGradient(listOf(Color(0xFF1A3E4F), Color(0xFF176A8A)))
+                    Brush.linearGradient(
+                        listOf(
+                            themePalette.headerGradientStart,
+                            themePalette.headerGradientEnd,
+                        )
+                    )
                 )
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
@@ -143,7 +149,7 @@ fun ViewerScreen(
                     Text(
                         text = item.title,
                         style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Serif),
-                        color = Color.White,
+                        color = themePalette.headerForeground,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -151,7 +157,7 @@ fun ViewerScreen(
                         Text(
                             text = composer,
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.7f),
+                            color = themePalette.headerForeground.copy(alpha = 0.7f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -163,7 +169,7 @@ fun ViewerScreen(
                 Text(
                     text = buildPageLabel(currentPage, resolvedPageCount, renderedPages.size),
                     style = MaterialTheme.typography.labelMedium,
-                    color = Color.White.copy(alpha = 0.9f),
+                    color = themePalette.headerForeground.copy(alpha = 0.9f),
                 )
                 CompactNavButton(">", canGoNext) {
                     currentPage = nextPageIndex(currentPage, resolvedPageCount, pageStep)
@@ -178,7 +184,11 @@ fun ViewerScreen(
                 Text(
                     text = if (item.isFavorite) "*" else "o",
                     style = MaterialTheme.typography.titleMedium,
-                    color = if (item.isFavorite) Color(0xFFA7C6ED) else Color.White.copy(alpha = 0.55f),
+                    color = if (item.isFavorite) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        themePalette.headerForeground.copy(alpha = 0.55f)
+                    },
                     modifier = Modifier
                         .clickable(onClick = onToggleFavorite)
                         .padding(horizontal = 6.dp, vertical = 4.dp),
@@ -194,11 +204,11 @@ fun ViewerScreen(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .background(Color(0xFF1A1A2E)),
+                .background(themePalette.viewerBackdrop),
             contentAlignment = Alignment.Center,
         ) {
             when {
-                isLoading -> CircularProgressIndicator(color = Color(0xFFA7C6ED))
+                isLoading -> CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 renderedPages.isNotEmpty() -> PdfPageCanvas(pages = renderedPages, zoom = zoom)
                 else -> ViewerMessage(
                     title = "Viewer unavailable",
@@ -227,6 +237,7 @@ fun FullscreenViewerScreen(
     var errorMessage by remember(item.id, currentPage) { mutableStateOf<String?>(null) }
     var isLoading by remember(item.id, currentPage) { mutableStateOf(true) }
     var overlayVisible by remember { mutableStateOf(false) }
+    val themePalette = lunarThemePalette()
 
     LaunchedEffect(item.id, currentPage, twoPageMode) {
         isLoading = true
@@ -276,7 +287,7 @@ fun FullscreenViewerScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(themePalette.viewerBackdrop)
             .pointerInput(Unit) {
                 detectTapGestures(
                     onDoubleTap = { overlayVisible = !overlayVisible }
@@ -285,7 +296,7 @@ fun FullscreenViewerScreen(
         contentAlignment = Alignment.Center,
     ) {
         when {
-            isLoading -> CircularProgressIndicator(color = Color(0xFFA7C6ED))
+            isLoading -> CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
             renderedPages.isNotEmpty() -> PdfPageCanvas(
                 pages = renderedPages,
                 zoom = zoom,
@@ -307,7 +318,7 @@ fun FullscreenViewerScreen(
                     .fillMaxWidth()
                     .background(
                         Brush.verticalGradient(
-                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.88f))
+                            listOf(Color.Transparent, themePalette.viewerScrim)
                         )
                     )
                     .navigationBarsPadding()
@@ -315,7 +326,7 @@ fun FullscreenViewerScreen(
             ) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    color = Color(0xFF113243).copy(alpha = 0.96f),
+                    color = themePalette.viewerOverlay,
                     shape = MaterialTheme.shapes.extraLarge,
                     tonalElevation = 10.dp,
                 ) {
@@ -334,7 +345,7 @@ fun FullscreenViewerScreen(
                                 Text(
                                     text = item.title,
                                     style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Serif),
-                                    color = Color.White,
+                                    color = themePalette.viewerForeground,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -342,7 +353,7 @@ fun FullscreenViewerScreen(
                                     Text(
                                         text = composer,
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = Color.White.copy(alpha = 0.78f),
+                                        color = themePalette.viewerForeground.copy(alpha = 0.78f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
@@ -351,7 +362,7 @@ fun FullscreenViewerScreen(
                             Text(
                                 text = buildPageLabel(currentPage, resolvedPageCount, renderedPages.size),
                                 style = MaterialTheme.typography.labelLarge,
-                                color = Color.White.copy(alpha = 0.92f),
+                                color = themePalette.viewerForeground.copy(alpha = 0.92f),
                                 modifier = Modifier.padding(start = 12.dp),
                             )
                         }
@@ -373,13 +384,13 @@ fun FullscreenViewerScreen(
                                 },
                             )
                             Surface(
-                                color = Color.White.copy(alpha = 0.12f),
+                                color = themePalette.viewerForeground.copy(alpha = 0.12f),
                                 shape = MaterialTheme.shapes.large,
                             ) {
                                 Text(
                                     text = "Zoom $zoomLabel",
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = Color.White,
+                                    color = themePalette.viewerForeground,
                                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
                                 )
                             }
@@ -426,7 +437,7 @@ fun FullscreenViewerScreen(
                                 Text(if (twoPageMode) "Single Page" else "Two Pages")
                             }
                             Surface(
-                                color = Color.White.copy(alpha = 0.12f),
+                                color = themePalette.viewerForeground.copy(alpha = 0.12f),
                                 shape = MaterialTheme.shapes.large,
                                 modifier = Modifier.weight(1f),
                             ) {
@@ -439,7 +450,7 @@ fun FullscreenViewerScreen(
                                     Text(
                                         text = if (twoPageMode) "Spread view" else "Single view",
                                         style = MaterialTheme.typography.labelLarge,
-                                        color = Color.White,
+                                        color = themePalette.viewerForeground,
                                     )
                                 }
                             }
@@ -475,14 +486,24 @@ private fun CompactNavButton(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
+    val themePalette = lunarThemePalette()
+
     Text(
         text = label,
         style = MaterialTheme.typography.labelLarge,
-        color = if (enabled) Color.White else Color.White.copy(alpha = 0.3f),
+        color = if (enabled) {
+            themePalette.headerForeground
+        } else {
+            themePalette.headerForeground.copy(alpha = 0.3f)
+        },
         modifier = Modifier
             .clickable(enabled = enabled, onClick = onClick)
             .background(
-                if (enabled) Color.White.copy(alpha = 0.15f) else Color.Transparent,
+                if (enabled) {
+                    themePalette.headerForeground.copy(alpha = 0.15f)
+                } else {
+                    Color.Transparent
+                },
                 MaterialTheme.shapes.small,
             )
             .padding(horizontal = 10.dp, vertical = 5.dp),
@@ -562,6 +583,8 @@ private fun ViewerMessage(
     title: String,
     body: String,
 ) {
+    val themePalette = lunarThemePalette()
+
     Column(
         modifier = Modifier.padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -573,12 +596,12 @@ private fun ViewerMessage(
                 fontFamily = FontFamily.Serif,
                 fontWeight = FontWeight.SemiBold,
             ),
-            color = Color.White,
+            color = themePalette.viewerForeground,
         )
         Text(
             text = body,
             style = MaterialTheme.typography.bodyLarge,
-            color = Color.White.copy(alpha = 0.7f),
+            color = themePalette.viewerForeground.copy(alpha = 0.7f),
         )
     }
 }

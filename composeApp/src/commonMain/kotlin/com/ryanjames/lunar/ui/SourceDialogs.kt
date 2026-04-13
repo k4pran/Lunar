@@ -118,9 +118,8 @@ fun AddLocalSourceDialog(
         confirmButton = {
             Button(
                 onClick = { onConfirm(selectedType, label) },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F4F6B)),
             ) {
-                Text("Choose files", color = Color.White)
+                Text("Choose files")
             }
         },
         dismissButton = {
@@ -331,9 +330,8 @@ fun AddCloudSourceDialog(
                     onConfirm(source)
                 },
                 enabled = isValid,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F4F6B)),
             ) {
-                Text("Connect", color = if (isValid) Color.White else Color.White.copy(alpha = 0.5f))
+                Text("Connect")
             }
         },
         dismissButton = {
@@ -522,7 +520,7 @@ private fun GoogleDriveRootEditor(
 
         TextButton(
             onClick = onRemove,
-            colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFB71C1C)),
+            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
         ) {
             Text("Remove root")
         }

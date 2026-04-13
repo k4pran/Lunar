@@ -63,6 +63,7 @@ fun ImportScreen(
 ) {
     val sources by runtime.sourceRegistry.sources.collectAsState()
     val clipboardManager = LocalClipboardManager.current
+    val themePalette = lunarThemePalette()
 
     var showLocalDialog by remember { mutableStateOf(false) }
     var showCloudDialog by remember { mutableStateOf(false) }
@@ -99,8 +100,8 @@ fun ImportScreen(
                     .background(
                         Brush.linearGradient(
                             colors = listOf(
-                                Color(0xFF1F4F6B),
-                                Color(0xFF176A8A),
+                                themePalette.headerGradientStart,
+                                themePalette.headerGradientEnd,
                             )
                         ),
                         shape = MaterialTheme.shapes.extraLarge,
@@ -114,12 +115,12 @@ fun ImportScreen(
                         fontFamily = FontFamily.Serif,
                         fontWeight = FontWeight.SemiBold,
                     ),
-                    color = Color.White,
+                    color = themePalette.headerForeground,
                 )
                 Text(
                     text = "Add local or cloud sources to build your library. Each source contributes scores that are combined into a single browsable collection.",
                     style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White.copy(alpha = 0.82f),
+                    color = themePalette.headerForeground.copy(alpha = 0.82f),
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -132,7 +133,7 @@ fun ImportScreen(
                     Text(
                         text = message,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(alpha = 0.75f),
+                        color = themePalette.headerForeground.copy(alpha = 0.75f),
                     )
                 }
             }
@@ -147,34 +148,24 @@ fun ImportScreen(
                 onClick = { showLocalDialog = true },
                 modifier = Modifier.weight(1f),
                 enabled = runtime.capabilities.fileImportSupported && !appState.importInProgress,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF1F4F6B),
-                    disabledContainerColor = Color(0xFF4D7C99).copy(alpha = 0.38f),
-                ),
             ) {
-                Text(
-                    "Add local source",
-                    color = Color.White,
-                )
+                Text("Add local source")
             }
             Button(
                 onClick = { showCloudDialog = true },
                 modifier = Modifier.weight(1f),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF176A8A),
-                    disabledContainerColor = Color(0xFF4D7C99).copy(alpha = 0.38f),
+                    containerColor = MaterialTheme.colorScheme.secondary,
+                    contentColor = MaterialTheme.colorScheme.onSecondary,
                 ),
             ) {
-                Text(
-                    "Add cloud source",
-                    color = Color.White,
-                )
+                Text("Add cloud source")
             }
         }
 
         cacheSnapshot?.let { snapshot ->
             Surface(
-                color = Color(0xFF1F4F6B).copy(alpha = 0.08f),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
                 shape = MaterialTheme.shapes.large,
             ) {
                 Column(
@@ -189,7 +180,7 @@ fun ImportScreen(
                             fontFamily = FontFamily.Serif,
                             fontWeight = FontWeight.SemiBold,
                         ),
-                        color = Color(0xFF1A3E4F),
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         text = "Lunar uses a local-first filesystem cache. Library metadata stays on disk, and imported or synced PDFs are kept in managed storage for offline browsing and viewing.",
@@ -235,7 +226,7 @@ fun ImportScreen(
                             Text(
                                 text = "Current cache is ${formatStorageSize(snapshot.cachedPdfBytes - limitBytes)} over the preferred budget.",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFFB42318),
+                                color = MaterialTheme.colorScheme.error,
                             )
                         }
                     }
@@ -254,14 +245,14 @@ fun ImportScreen(
 
         cacheInspectionError?.takeIf(String::isNotBlank)?.let { error ->
             Surface(
-                color = Color(0xFFB71C1C).copy(alpha = 0.08f),
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
                 shape = MaterialTheme.shapes.medium,
             ) {
                 Text(
                     text = error,
                     modifier = Modifier.padding(12.dp),
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFB71C1C),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
                 )
             }
         }
@@ -287,7 +278,7 @@ fun ImportScreen(
                             fontFamily = FontFamily.Serif,
                             fontWeight = FontWeight.SemiBold,
                         ),
-                        color = Color(0xFF1A3E4F),
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         text = "Add a local or cloud source above to start building your library.",
@@ -314,10 +305,10 @@ fun ImportScreen(
         if (sources.any { it is CloudLibrarySource }) {
             val hasErrors = syncState.syncErrors.isNotEmpty()
             val statusBg = when {
-                hasErrors -> Color(0xFFB71C1C).copy(alpha = 0.08f)
-                syncState.isRefreshing -> Color(0xFF1F4F6B).copy(alpha = 0.08f)
-                !syncState.lastMessage.isNullOrBlank() -> Color(0xFF176A8A).copy(alpha = 0.10f)
-                else -> Color(0xFFA7C6ED).copy(alpha = 0.18f)
+                hasErrors -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f)
+                syncState.isRefreshing -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.48f)
+                !syncState.lastMessage.isNullOrBlank() -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.48f)
+                else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.82f)
             }
             Surface(color = statusBg, shape = MaterialTheme.shapes.medium) {
                 Column(
@@ -332,7 +323,11 @@ fun ImportScreen(
                             else -> "Cloud sources are configured. Press refresh to sync."
                         },
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = if (hasErrors) Color(0xFFB71C1C) else Color(0xFF1A3E4F),
+                        color = if (hasErrors) {
+                            MaterialTheme.colorScheme.onErrorContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
                     )
                     if (syncState.activeSourceLabels.isNotEmpty()) {
                         Text(
@@ -361,12 +356,16 @@ fun ImportScreen(
                     }
                     if (hasErrors) {
                         syncState.syncErrors.forEach { error ->
-                            Text(error, style = MaterialTheme.typography.bodySmall, color = Color(0xFFB71C1C))
+                            Text(
+                                error,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                            )
                         }
                     }
                     if (syncState.activityLog.isNotEmpty()) {
                         Surface(
-                            color = Color.White.copy(alpha = 0.5f),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
                             shape = MaterialTheme.shapes.medium,
                         ) {
                             Column(
@@ -378,7 +377,7 @@ fun ImportScreen(
                                 Text(
                                     text = "Activity log",
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = Color(0xFF1A3E4F),
+                                    color = MaterialTheme.colorScheme.onSurface,
                                 )
                                 syncState.activityLog.takeLast(12).forEach { entry ->
                                     Text(
@@ -407,21 +406,14 @@ fun ImportScreen(
             Button(
                 onClick = appState::refreshAllCloudSources,
                 enabled = !syncState.isRefreshing,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF1F4F6B),
-                    disabledContainerColor = Color(0xFF4D7C99).copy(alpha = 0.38f),
-                ),
             ) {
-                Text(
-                    if (syncState.isRefreshing) "Refreshing..." else "Refresh all cloud sources",
-                    color = if (syncState.isRefreshing) Color.White.copy(alpha = 0.5f) else Color.White,
-                )
+                Text(if (syncState.isRefreshing) "Refreshing..." else "Refresh all cloud sources")
             }
         }
 
         if (appState.importActivityLog.isNotEmpty() || appState.importInProgress) {
             Surface(
-                color = Color(0xFF176A8A).copy(alpha = 0.08f),
+                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f),
                 shape = MaterialTheme.shapes.medium,
             ) {
                 Column(
@@ -433,7 +425,7 @@ fun ImportScreen(
                     Text(
                         text = appState.importActivityStep ?: if (appState.importInProgress) "Importing..." else "Import activity",
                         style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = Color(0xFF1A3E4F),
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     if (
                         appState.importInProgress ||
@@ -453,7 +445,7 @@ fun ImportScreen(
                         }
                     }
                     Surface(
-                        color = Color.White.copy(alpha = 0.5f),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
                         shape = MaterialTheme.shapes.medium,
                     ) {
                         Column(
@@ -465,7 +457,7 @@ fun ImportScreen(
                             Text(
                                 text = "Import log",
                                 style = MaterialTheme.typography.labelLarge,
-                                color = Color(0xFF1A3E4F),
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
                             appState.importActivityLog.takeLast(12).forEach { entry ->
                                 Text(
@@ -564,12 +556,12 @@ private fun SourceCard(
                         fontFamily = FontFamily.Serif,
                         fontWeight = FontWeight.SemiBold,
                     ),
-                    color = Color(0xFF1A3E4F),
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
                     text = typeLabel,
                     style = MaterialTheme.typography.labelMedium,
-                    color = Color(0xFF176A8A),
+                    color = MaterialTheme.colorScheme.secondary,
                 )
             }
 
@@ -631,7 +623,7 @@ private fun SourceCard(
                 TextButton(
                     onClick = onRemove,
                     colors = ButtonDefaults.textButtonColors(
-                        contentColor = Color(0xFFB71C1C),
+                        contentColor = MaterialTheme.colorScheme.error,
                     ),
                 ) {
                     Text("Remove")
@@ -643,15 +635,17 @@ private fun SourceCard(
 
 @Composable
 private fun ImportSummaryPill(text: String) {
+    val themePalette = lunarThemePalette()
+
     Surface(
-        color = Color.White.copy(alpha = 0.22f),
+        color = themePalette.headerForeground.copy(alpha = 0.18f),
         shape = MaterialTheme.shapes.large,
     ) {
         Text(
             text = text,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             style = MaterialTheme.typography.labelLarge,
-            color = Color.White,
+            color = themePalette.headerForeground,
         )
     }
 }
@@ -659,14 +653,14 @@ private fun ImportSummaryPill(text: String) {
 @Composable
 private fun ImportSummaryPillDark(text: String) {
     Surface(
-        color = Color(0xFF1F4F6B).copy(alpha = 0.12f),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
         shape = MaterialTheme.shapes.large,
     ) {
         Text(
             text = text,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             style = MaterialTheme.typography.labelLarge,
-            color = Color(0xFF1A3E4F),
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
         )
     }
 }
