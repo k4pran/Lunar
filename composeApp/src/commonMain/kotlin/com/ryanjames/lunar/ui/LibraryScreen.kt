@@ -1,6 +1,7 @@
 package com.ryanjames.lunar.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -45,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ryanjames.lunar.library.data.LibrarySnapshot
 import com.ryanjames.lunar.library.data.SyncStatus
+import com.ryanjames.lunar.library.model.LibrarySetlist
 import com.ryanjames.lunar.library.model.LibrarySortOption
 import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.library.model.SortDirection
@@ -65,11 +67,26 @@ fun LibraryScreen(
     modifier: Modifier = Modifier,
 ) {
     val visibleItems = snapshot.items.applyLibraryQuery(appState.query)
+    val headerVisibleCount = if (appState.browseMode == LibraryBrowseMode.SETLISTS) {
+        snapshot.items.size
+    } else {
+        visibleItems.size
+    }
     val collections = snapshot.items.availableCollections()
     val composers = snapshot.items.availableComposers()
     val tags = snapshot.items.availableTags()
+    val itemsById = snapshot.items.associateBy { it.id }
+    val activeSetlist = snapshot.setlists.firstOrNull { it.id == appState.selectedSetlistId }
+    val activeSetlistItems = activeSetlist?.itemIds?.mapNotNull(itemsById::get).orEmpty()
+    val selectedItems = when {
+        activeSetlist != null && appState.browseMode == LibraryBrowseMode.SETLISTS ->
+            activeSetlistItems.filter { it.id in appState.selectedScoreIds }
+
+        else -> visibleItems.filter { it.id in appState.selectedScoreIds }
+    }
     val editingItem = snapshot.items.firstOrNull { it.id == appState.editingItemId }
     val deleteCandidate = snapshot.items.firstOrNull { it.id == appState.deleteCandidateItemId }
+    val deleteSetlistCandidate = snapshot.setlists.firstOrNull { it.id == appState.deleteCandidateSetlistId }
 
     Column(
         modifier = modifier
@@ -80,17 +97,26 @@ fun LibraryScreen(
         HeaderPanel(
             runtime = runtime,
             snapshot = snapshot,
-            visibleCount = visibleItems.size,
+            visibleCount = headerVisibleCount,
         )
         BrowseModeSwitcher(appState = appState)
-        SearchAndSortBar(appState = appState)
-        RefineLibraryPanel(
-            availableCollections = collections.toList(),
-            availableTags = tags.toList(),
-            visibleCount = visibleItems.size,
-            totalCount = snapshot.items.size,
-            appState = appState,
-        )
+        if (appState.browseMode != LibraryBrowseMode.SETLISTS) {
+            SearchAndSortBar(appState = appState)
+            RefineLibraryPanel(
+                availableCollections = collections.toList(),
+                availableTags = tags.toList(),
+                visibleCount = visibleItems.size,
+                totalCount = snapshot.items.size,
+                appState = appState,
+            )
+        }
+        if (selectedItems.isNotEmpty()) {
+            SelectionActionBar(
+                selectedCount = selectedItems.size,
+                onAddToSetlist = appState::showSetlistPicker,
+                onClear = appState::clearScoreSelection,
+            )
+        }
 
         // Main content area
         Box(modifier = Modifier.weight(1f)) {
@@ -150,6 +176,30 @@ fun LibraryScreen(
                         )
                     }
                 }
+
+                LibraryBrowseMode.SETLISTS -> {
+                    if (activeSetlist == null) {
+                        SetlistsOverview(
+                            setlists = snapshot.setlists,
+                            itemsById = itemsById,
+                            onOpenSetlist = appState::openSetlist,
+                            onDeleteSetlist = appState::requestDeleteSetlist,
+                            onOpenLibrary = {
+                                appState.updateBrowseMode(LibraryBrowseMode.ALL)
+                            },
+                        )
+                    } else {
+                        SetlistDetailView(
+                            setlist = activeSetlist,
+                            items = activeSetlistItems,
+                            appState = appState,
+                            onBack = appState::closeSetlist,
+                            onDeleteSetlist = {
+                                appState.requestDeleteSetlist(activeSetlist.id)
+                            },
+                        )
+                    }
+                }
             }
         }
     }
@@ -176,6 +226,34 @@ fun LibraryScreen(
             item = deleteCandidate,
             onDismiss = appState::dismissDeleteRequest,
             onConfirm = appState::confirmDelete,
+        )
+    }
+
+    if (appState.setlistPickerVisible && selectedItems.isNotEmpty()) {
+        AddToSetlistDialog(
+            selectedCount = selectedItems.size,
+            setlists = snapshot.setlists,
+            onDismiss = appState::dismissSetlistPicker,
+            onCreateSetlist = { name ->
+                appState.createSetlist(
+                    name = name,
+                    itemIds = selectedItems.map { it.id },
+                )
+            },
+            onAddToSetlist = { setlistId ->
+                appState.addSelectionToSetlist(
+                    setlistId = setlistId,
+                    itemIds = selectedItems.map { it.id },
+                )
+            },
+        )
+    }
+
+    if (deleteSetlistCandidate != null) {
+        DeleteSetlistDialog(
+            setlist = deleteSetlistCandidate,
+            onDismiss = appState::dismissDeleteSetlistRequest,
+            onConfirm = appState::confirmDeleteSetlist,
         )
     }
 }
@@ -257,6 +335,9 @@ private fun BrowseModeSwitcher(appState: LunarAppState) {
         }
         BrowseModeTab("Composers", appState.browseMode == LibraryBrowseMode.BY_COMPOSER) {
             appState.updateBrowseMode(LibraryBrowseMode.BY_COMPOSER)
+        }
+        BrowseModeTab("Setlists", appState.browseMode == LibraryBrowseMode.SETLISTS) {
+            appState.updateBrowseMode(LibraryBrowseMode.SETLISTS)
         }
     }
 }
@@ -459,6 +540,302 @@ private fun SummaryPillDark(text: String) {
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onPrimaryContainer,
         )
+    }
+}
+
+@Composable
+private fun SelectionActionBar(
+    selectedCount: Int,
+    onAddToSetlist: () -> Unit,
+    onClear: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = "${selectedCount.scoreLabel()} selected",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Text(
+                    text = "Add the current selection to a saved setlist or clear it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onClear) {
+                    Text("Clear", color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+                Button(onClick = onAddToSetlist) {
+                    Text("Add to setlist")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SetlistsOverview(
+    setlists: List<LibrarySetlist>,
+    itemsById: Map<String, SheetMusicItem>,
+    onOpenSetlist: (String) -> Unit,
+    onDeleteSetlist: (String) -> Unit,
+    onOpenLibrary: () -> Unit,
+) {
+    val orderedSetlists = setlists.sortedByDescending { it.updatedAtEpochMillis }
+
+    if (orderedSetlists.isEmpty()) {
+        EmptySetlistsState(onOpenLibrary = onOpenLibrary)
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(
+            count = orderedSetlists.size,
+            key = { index -> orderedSetlists[index].id },
+        ) { index ->
+            SetlistCard(
+                setlist = orderedSetlists[index],
+                itemsById = itemsById,
+                onOpen = { onOpenSetlist(orderedSetlists[index].id) },
+                onDelete = { onDeleteSetlist(orderedSetlists[index].id) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptySetlistsState(onOpenLibrary: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color.Transparent,
+        shape = MaterialTheme.shapes.extraLarge,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.36f),
+                            Color.Transparent,
+                        )
+                    )
+                )
+                .padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = "Setlists are empty",
+                style = MaterialTheme.typography.headlineSmall.copy(
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = "Select one or more scores from the library, then use Add to setlist. Saved setlists stay here until you delete them.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(top = 12.dp)
+                    .widthIn(max = 560.dp),
+            )
+            Button(
+                onClick = onOpenLibrary,
+                modifier = Modifier.padding(top = 18.dp),
+            ) {
+                Text("Browse scores")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SetlistCard(
+    setlist: LibrarySetlist,
+    itemsById: Map<String, SheetMusicItem>,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val themePalette = lunarThemePalette()
+    val previewTitles = setlist.itemIds
+        .mapNotNull(itemsById::get)
+        .take(3)
+        .joinToString("  •  ") { it.title }
+        .ifBlank { "No scores saved yet." }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen),
+        shape = MaterialTheme.shapes.large,
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .width(5.dp)
+                    .fillMaxHeight()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                themePalette.accentGradientStart,
+                                themePalette.accentGradientEnd,
+                            )
+                        )
+                    ),
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = setlist.name,
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontFamily = FontFamily.Serif,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "${setlist.itemIds.size.scoreLabel()}  |  Updated ${formatEpochMillis(setlist.updatedAtEpochMillis)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    SummaryPillDark("${setlist.itemIds.size.scoreLabel()}")
+                }
+                Text(
+                    text = previewTitles,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Open to browse the scores in order.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = onDelete) {
+                            Text("Delete", color = MaterialTheme.colorScheme.error)
+                        }
+                        Button(onClick = onOpen) {
+                            Text("Open")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SetlistDetailView(
+    setlist: LibrarySetlist,
+    items: List<SheetMusicItem>,
+    appState: LunarAppState,
+    onBack: () -> Unit,
+    onDeleteSetlist: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier.clickable(onClick = onBack),
+            ) {
+                Text(
+                    text = "Back",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = setlist.name,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = "Saved automatically. Delete it whenever you no longer need it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            SummaryPillDark("${items.size.scoreLabel()}")
+            TextButton(onClick = onDeleteSetlist) {
+                Text("Delete", color = MaterialTheme.colorScheme.error)
+            }
+        }
+        Box(modifier = Modifier.weight(1f)) {
+            if (items.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "This setlist is empty right now.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                FlatScoreList(items = items, appState = appState)
+            }
+        }
     }
 }
 
@@ -787,10 +1164,21 @@ private fun LibraryCard(
     appState: LunarAppState,
 ) {
     val themePalette = lunarThemePalette()
+    val isSelected = item.id in appState.selectedScoreIds
+    val selectedBorderColor = if (isSelected) {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+    } else {
+        Color.Transparent
+    }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = selectedBorderColor,
+                shape = MaterialTheme.shapes.large,
+            )
             .clickable { appState.openPreview(item) },
         shape = MaterialTheme.shapes.large,
         colors = androidx.compose.material3.CardDefaults.cardColors(
@@ -844,7 +1232,22 @@ private fun LibraryCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    FavoriteMarker(isFavorite = item.isFavorite)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (isSelected) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.82f),
+                                shape = MaterialTheme.shapes.large,
+                            ) {
+                                Text(
+                                    text = "Selected",
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            }
+                        }
+                        FavoriteMarker(isFavorite = item.isFavorite)
+                    }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -889,7 +1292,22 @@ private fun LibraryCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                         modifier = Modifier.weight(1f),
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.material3.TextButton(
+                            onClick = { appState.toggleScoreSelection(item.id) },
+                        ) {
+                            Text(
+                                if (isSelected) "Unselect" else "Select",
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
                         androidx.compose.material3.TextButton(
                             onClick = { appState.toggleFavorite(item.id) },
                         ) {
@@ -934,6 +1352,125 @@ private fun DeleteScoreDialog(
         text = {
             Text(
                 "Remove \"${item.title}\" from the library? Lunar will also delete its imported PDF copy for this score.",
+            )
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+            ) {
+                Text("Delete")
+            }
+        },
+    )
+}
+
+@Composable
+private fun AddToSetlistDialog(
+    selectedCount: Int,
+    setlists: List<LibrarySetlist>,
+    onDismiss: () -> Unit,
+    onCreateSetlist: (String) -> Unit,
+    onAddToSetlist: (String) -> Unit,
+) {
+    val orderedSetlists = setlists.sortedByDescending { it.updatedAtEpochMillis }
+    var newSetlistName by remember(selectedCount, setlists) { mutableStateOf("") }
+    var selectedSetlistId by remember(selectedCount, setlists) { mutableStateOf<String?>(null) }
+    val trimmedName = newSetlistName.trim()
+    val canConfirm = trimmedName.isNotEmpty() || selectedSetlistId != null
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add ${selectedCount.scoreLabel()} to a setlist") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = if (orderedSetlists.isEmpty()) {
+                        "Name this setlist. Lunar saves setlists automatically."
+                    } else {
+                        "Create a new setlist or choose an existing one to append these scores."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = newSetlistName,
+                    onValueChange = {
+                        newSetlistName = it
+                        if (it.isNotBlank()) {
+                            selectedSetlistId = null
+                        }
+                    },
+                    label = { Text("New setlist name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                if (orderedSetlists.isNotEmpty()) {
+                    FilterChipSection(
+                        title = "Saved setlists",
+                        supportingText = "Picking one appends only scores that are not already in that setlist.",
+                    ) {
+                        orderedSetlists.forEach { setlist ->
+                            FilterChip(
+                                selected = selectedSetlistId == setlist.id,
+                                onClick = {
+                                    selectedSetlistId = if (selectedSetlistId == setlist.id) {
+                                        null
+                                    } else {
+                                        newSetlistName = ""
+                                        setlist.id
+                                    }
+                                },
+                                label = { Text(setlist.name) },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = canConfirm,
+                onClick = {
+                    selectedSetlistId?.let(onAddToSetlist) ?: onCreateSetlist(trimmedName)
+                },
+            ) {
+                Text(if (selectedSetlistId != null) "Add" else "Save")
+            }
+        },
+    )
+}
+
+@Composable
+private fun DeleteSetlistDialog(
+    setlist: LibrarySetlist,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete setlist?") },
+        text = {
+            Text(
+                "Delete \"${setlist.name}\"? The saved score list will be removed, but the PDFs will stay in your library.",
             )
         },
         dismissButton = {

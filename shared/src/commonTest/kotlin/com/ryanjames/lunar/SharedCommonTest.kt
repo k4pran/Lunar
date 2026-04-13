@@ -158,6 +158,111 @@ class SharedCommonTest {
     }
 
     @Test
+    fun repositoryPersistsSetlistsAcrossInitializations() = runBlocking {
+        val storage = InMemoryLibraryStorage()
+        val firstRepository = DefaultSheetMusicRepository(storage)
+
+        firstRepository.initialize()
+        val importedItems = firstRepository.importDocuments(
+            listOf(
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/one.pdf",
+                    originalFileName = "One.pdf",
+                ),
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/two.pdf",
+                    originalFileName = "Two.pdf",
+                ),
+            )
+        ).importedItems
+        val createdSetlist = firstRepository.createSetlist(
+            name = "Friday rehearsal",
+            itemIds = importedItems.map { it.id },
+        )
+
+        val secondRepository = DefaultSheetMusicRepository(storage)
+        secondRepository.initialize()
+
+        assertEquals(1, secondRepository.library.value.setlists.size)
+        assertEquals(createdSetlist.name, secondRepository.library.value.setlists.single().name)
+        assertEquals(
+            importedItems.map { it.id },
+            secondRepository.library.value.setlists.single().itemIds,
+        )
+    }
+
+    @Test
+    fun repositoryAddItemsToSetlistKeepsOrderAndDeduplicates() = runBlocking {
+        val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
+
+        repository.initialize()
+        val importedItems = repository.importDocuments(
+            listOf(
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/a.pdf",
+                    originalFileName = "A.pdf",
+                ),
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/b.pdf",
+                    originalFileName = "B.pdf",
+                ),
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/c.pdf",
+                    originalFileName = "C.pdf",
+                ),
+            )
+        ).importedItems
+        val setlist = repository.createSetlist(
+            name = "Main set",
+            itemIds = listOf(importedItems[1].id, importedItems[0].id),
+        )
+
+        val updatedSetlist = repository.addItemsToSetlist(
+            setlistId = setlist.id,
+            itemIds = listOf(importedItems[0].id, importedItems[2].id),
+        )
+
+        assertEquals(
+            listOf(importedItems[1].id, importedItems[0].id, importedItems[2].id),
+            updatedSetlist.itemIds,
+        )
+    }
+
+    @Test
+    fun repositoryPrunesDeletedScoresAndDeletesSetlists() = runBlocking {
+        val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
+
+        repository.initialize()
+        val importedItems = repository.importDocuments(
+            listOf(
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/alpha.pdf",
+                    originalFileName = "Alpha.pdf",
+                ),
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/beta.pdf",
+                    originalFileName = "Beta.pdf",
+                ),
+            )
+        ).importedItems
+        val setlist = repository.createSetlist(
+            name = "Cleanup test",
+            itemIds = importedItems.map { it.id },
+        )
+
+        repository.deleteItem(importedItems.first().id)
+
+        assertEquals(
+            listOf(importedItems.last().id),
+            repository.library.value.setlists.single().itemIds,
+        )
+
+        repository.deleteSetlist(setlist.id)
+
+        assertEquals(emptyList(), repository.library.value.setlists)
+    }
+
+    @Test
     fun repositoryApplyRemoteSyncUpsertsProviderItems() = runBlocking {
         val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
 

@@ -37,6 +37,15 @@ data class SheetMusicItem(
     val sourceId: String? = null,
 )
 
+@Serializable
+data class LibrarySetlist(
+    val id: String,
+    val name: String,
+    val itemIds: List<String> = emptyList(),
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long,
+)
+
 data class ImportedPdfDescriptor(
     val storedPath: String,
     val originalFileName: String,

@@ -1,6 +1,7 @@
 package com.ryanjames.lunar.library.data
 
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
+import com.ryanjames.lunar.library.model.LibrarySetlist
 import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.library.model.RemoteSyncMetadata
 import com.ryanjames.lunar.library.model.SheetMusicItem
@@ -16,6 +17,7 @@ import kotlin.time.Clock
 
 data class LibrarySnapshot(
     val items: List<SheetMusicItem> = emptyList(),
+    val setlists: List<LibrarySetlist> = emptyList(),
     val syncStatus: SyncStatus = SyncStatus.LocalOnly,
 )
 
@@ -131,6 +133,12 @@ interface SheetMusicRepository {
 
     suspend fun deleteItem(itemId: String)
 
+    suspend fun createSetlist(name: String, itemIds: List<String>): LibrarySetlist
+
+    suspend fun addItemsToSetlist(setlistId: String, itemIds: List<String>): LibrarySetlist
+
+    suspend fun deleteSetlist(setlistId: String)
+
     suspend fun applyRemoteSync(
         providerId: String,
         providerName: String,
@@ -142,6 +150,8 @@ interface SheetMusicRepository {
     suspend fun updateSyncStatus(syncStatus: SyncStatus)
 
     fun getItem(itemId: String): SheetMusicItem?
+
+    fun getSetlist(setlistId: String): LibrarySetlist?
 
     fun itemCountForSource(sourceId: String): Int
 }
@@ -165,9 +175,19 @@ class DefaultSheetMusicRepository(
                 return
             }
 
-            val items = storage.readItems()
+            val storedLibrary = storage.readLibraryData()
+            val sanitizedSetlists = sanitizeSetlists(
+                setlists = storedLibrary.setlists,
+                items = storedLibrary.items,
+            )
+            if (sanitizedSetlists != storedLibrary.setlists) {
+                storage.writeLibraryData(
+                    storedLibrary.copy(setlists = sanitizedSetlists)
+                )
+            }
             _library.value = LibrarySnapshot(
-                items = items,
+                items = storedLibrary.items,
+                setlists = sanitizedSetlists,
                 syncStatus = syncGateway.currentStatus(),
             )
             initialized = true
@@ -318,6 +338,64 @@ class DefaultSheetMusicRepository(
         }
     }
 
+    override suspend fun createSetlist(name: String, itemIds: List<String>): LibrarySetlist {
+        ensureInitialized()
+
+        val createdAt = clock.now().toEpochMilliseconds()
+        var createdSetlist: LibrarySetlist? = null
+        mutateSetlists { setlists, items ->
+            val normalizedName = normalizeSetlistName(name)
+                ?: error("Setlist name cannot be blank.")
+            val validItemIds = items.mapTo(mutableSetOf()) { it.id }
+            val nextSetlist = LibrarySetlist(
+                id = buildSetlistId(createdAt),
+                name = normalizedName,
+                itemIds = sanitizeSetlistItemIds(itemIds, validItemIds),
+                createdAtEpochMillis = createdAt,
+                updatedAtEpochMillis = createdAt,
+            )
+            createdSetlist = nextSetlist
+            setlists + nextSetlist
+        }
+        return requireNotNull(createdSetlist)
+    }
+
+    override suspend fun addItemsToSetlist(
+        setlistId: String,
+        itemIds: List<String>,
+    ): LibrarySetlist {
+        ensureInitialized()
+
+        val updatedAt = clock.now().toEpochMilliseconds()
+        var updatedSetlist: LibrarySetlist? = null
+        mutateSetlists { setlists, items ->
+            val validItemIds = items.mapTo(mutableSetOf()) { it.id }
+            val sanitizedItems = sanitizeSetlistItemIds(itemIds, validItemIds)
+            setlists.map { setlist ->
+                if (setlist.id != setlistId) {
+                    setlist
+                } else {
+                    setlist.copy(
+                        itemIds = (setlist.itemIds + sanitizedItems).distinct(),
+                        updatedAtEpochMillis = updatedAt,
+                    ).also { updatedSetlist = it }
+                }
+            }.also {
+                if (updatedSetlist == null) {
+                    error("Setlist not found.")
+                }
+            }
+        }
+        return requireNotNull(updatedSetlist)
+    }
+
+    override suspend fun deleteSetlist(setlistId: String) {
+        ensureInitialized()
+        mutateSetlists { setlists, _ ->
+            setlists.filterNot { setlist -> setlist.id == setlistId }
+        }
+    }
+
     override suspend fun applyRemoteSync(
         providerId: String,
         providerName: String,
@@ -387,8 +465,17 @@ class DefaultSheetMusicRepository(
                 .forEach { stalePaths += it.document.storedPath }
 
             val updatedItems = keptLocalItems + syncedItems
-            storage.writeItems(updatedItems)
-            _library.value = _library.value.copy(items = updatedItems)
+            val updatedSetlists = sanitizeSetlists(_library.value.setlists, updatedItems)
+            storage.writeLibraryData(
+                StoredLibraryData(
+                    items = updatedItems,
+                    setlists = updatedSetlists,
+                )
+            )
+            _library.value = _library.value.copy(
+                items = updatedItems,
+                setlists = updatedSetlists,
+            )
         }
 
         stalePaths
@@ -406,6 +493,9 @@ class DefaultSheetMusicRepository(
     }
 
     override fun getItem(itemId: String): SheetMusicItem? = _library.value.items.firstOrNull { it.id == itemId }
+
+    override fun getSetlist(setlistId: String): LibrarySetlist? =
+        _library.value.setlists.firstOrNull { it.id == setlistId }
 
     override fun itemCountForSource(sourceId: String): Int =
         _library.value.items.count { it.sourceId == sourceId }
@@ -453,15 +543,48 @@ class DefaultSheetMusicRepository(
     private suspend fun mutateItems(
         transform: (List<SheetMusicItem>) -> List<SheetMusicItem>,
     ) {
+        mutateLibrary { snapshot ->
+            val updatedItems = transform(snapshot.items)
+            snapshot.copy(
+                items = updatedItems,
+                setlists = sanitizeSetlists(snapshot.setlists, updatedItems),
+            )
+        }
+    }
+
+    private suspend fun mutateSetlists(
+        transform: (List<LibrarySetlist>, List<SheetMusicItem>) -> List<LibrarySetlist>,
+    ) {
+        mutateLibrary { snapshot ->
+            snapshot.copy(
+                setlists = sanitizeSetlists(
+                    setlists = transform(snapshot.setlists, snapshot.items),
+                    items = snapshot.items,
+                )
+            )
+        }
+    }
+
+    private suspend fun mutateLibrary(
+        transform: (LibrarySnapshot) -> LibrarySnapshot,
+    ) {
         mutationLock.withLock {
-            val updatedItems = transform(_library.value.items)
-            storage.writeItems(updatedItems)
-            _library.value = _library.value.copy(items = updatedItems)
+            val updatedLibrary = transform(_library.value)
+            storage.writeLibraryData(
+                StoredLibraryData(
+                    items = updatedLibrary.items,
+                    setlists = updatedLibrary.setlists,
+                )
+            )
+            _library.value = updatedLibrary
         }
     }
 
     private fun buildStableId(importedAt: Long, index: Int): String =
         "${importedAt}_${index}_${Random.nextInt(1000, 9999)}"
+
+    private fun buildSetlistId(createdAt: Long): String =
+        "setlist_${createdAt}_${Random.nextInt(1000, 9999)}"
 
     private fun buildRemoteItemId(
         providerId: String,
@@ -480,6 +603,33 @@ private fun normalizeContentFingerprint(fingerprint: String?): String? = fingerp
     ?.trim()
     ?.lowercase()
     ?.ifEmpty { null }
+
+private fun normalizeSetlistName(name: String): String? = name
+    .trim()
+    .ifEmpty { null }
+
+private fun sanitizeSetlists(
+    setlists: List<LibrarySetlist>,
+    items: List<SheetMusicItem>,
+): List<LibrarySetlist> {
+    val validItemIds = items.mapTo(mutableSetOf()) { it.id }
+    return setlists.mapNotNull { setlist ->
+        val normalizedName = normalizeSetlistName(setlist.name) ?: return@mapNotNull null
+        setlist.copy(
+            name = normalizedName,
+            itemIds = sanitizeSetlistItemIds(setlist.itemIds, validItemIds),
+        )
+    }
+}
+
+private fun sanitizeSetlistItemIds(
+    itemIds: List<String>,
+    validItemIds: Set<String>,
+): List<String> = itemIds
+    .map(String::trim)
+    .filter(String::isNotEmpty)
+    .filter { it in validItemIds }
+    .distinct()
 
 private fun normalizeTags(tags: List<String>): List<String> = tags
     .map(String::trim)

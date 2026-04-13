@@ -38,6 +38,7 @@ enum class LibraryBrowseMode {
     ALL,
     BY_COLLECTION,
     BY_COMPOSER,
+    SETLISTS,
 }
 
 enum class AppSection {
@@ -67,6 +68,12 @@ class LunarAppState(
     var selectedGroup: String? by mutableStateOf(null)
         private set
 
+    var selectedSetlistId: String? by mutableStateOf(null)
+        private set
+
+    var selectedScoreIds: Set<String> by mutableStateOf(emptySet())
+        private set
+
     var editingItemId: String? by mutableStateOf(null)
         private set
 
@@ -77,6 +84,12 @@ class LunarAppState(
         private set
 
     var deleteCandidateItemId: String? by mutableStateOf(null)
+        private set
+
+    var deleteCandidateSetlistId: String? by mutableStateOf(null)
+        private set
+
+    var setlistPickerVisible: Boolean by mutableStateOf(false)
         private set
 
     var importInProgress: Boolean by mutableStateOf(false)
@@ -102,9 +115,15 @@ class LunarAppState(
 
     fun selectSection(section: AppSection) {
         selectedSection = section
+        if (section != AppSection.LIBRARY) {
+            clearScoreSelection()
+        }
     }
 
     fun updateSearchText(searchText: String) {
+        if (query.searchText != searchText) {
+            clearScoreSelection()
+        }
         query = query.copy(searchText = searchText)
     }
 
@@ -117,10 +136,12 @@ class LunarAppState(
     }
 
     fun toggleFavoriteFilter() {
+        clearScoreSelection()
         query = query.copy(favoritesOnly = !query.favoritesOnly)
     }
 
     fun toggleTag(tag: String) {
+        clearScoreSelection()
         val selectedTags = query.selectedTags.toMutableSet()
         if (!selectedTags.add(tag)) {
             selectedTags.remove(tag)
@@ -129,6 +150,7 @@ class LunarAppState(
     }
 
     fun selectCollection(collection: String?) {
+        clearScoreSelection()
         val nextCollection = if (query.selectedCollection == collection) null else collection
         query = query.copy(selectedCollection = nextCollection)
         if (
@@ -142,6 +164,7 @@ class LunarAppState(
     }
 
     fun clearRefinements() {
+        clearScoreSelection()
         query = query.copy(
             selectedTags = emptySet(),
             selectedCollection = null,
@@ -159,25 +182,77 @@ class LunarAppState(
     }
 
     fun updateBrowseMode(mode: LibraryBrowseMode) {
+        clearScoreSelection()
         browseMode = mode
         selectedGroup = null
+        if (mode != LibraryBrowseMode.SETLISTS) {
+            selectedSetlistId = null
+        }
     }
 
     fun selectGroup(groupName: String) {
+        clearScoreSelection()
         selectedGroup = groupName
     }
 
     fun clearGroupSelection() {
+        clearScoreSelection()
         selectedGroup = null
     }
 
     fun clearFilters() {
+        clearScoreSelection()
         query = query.copy(
             searchText = "",
             selectedTags = emptySet(),
             selectedCollection = null,
             favoritesOnly = false,
         )
+    }
+
+    fun toggleScoreSelection(itemId: String) {
+        selectedScoreIds = selectedScoreIds.toMutableSet().apply {
+            if (!add(itemId)) {
+                remove(itemId)
+            }
+        }.toSet()
+        if (selectedScoreIds.isEmpty()) {
+            setlistPickerVisible = false
+        }
+    }
+
+    fun clearScoreSelection() {
+        selectedScoreIds = emptySet()
+        setlistPickerVisible = false
+    }
+
+    fun showSetlistPicker() {
+        if (selectedScoreIds.isNotEmpty()) {
+            setlistPickerVisible = true
+        }
+    }
+
+    fun dismissSetlistPicker() {
+        setlistPickerVisible = false
+    }
+
+    fun openSetlist(setlistId: String) {
+        clearScoreSelection()
+        browseMode = LibraryBrowseMode.SETLISTS
+        selectedGroup = null
+        selectedSetlistId = setlistId
+    }
+
+    fun closeSetlist() {
+        selectedSetlistId = null
+    }
+
+    fun requestDeleteSetlist(setlistId: String) {
+        deleteCandidateSetlistId = setlistId
+    }
+
+    fun dismissDeleteSetlistRequest() {
+        deleteCandidateSetlistId = null
     }
 
     fun startEditing(itemId: String) {
@@ -407,6 +482,10 @@ class LunarAppState(
         val itemId = deleteCandidateItemId ?: return
         scope.launch {
             runtime.repository.deleteItem(itemId)
+            selectedScoreIds = selectedScoreIds - itemId
+            if (selectedScoreIds.isEmpty()) {
+                setlistPickerVisible = false
+            }
             if (previewItemId == itemId) {
                 previewItemId = null
             }
@@ -419,6 +498,48 @@ class LunarAppState(
             deleteCandidateItemId = null
             selectedSection = AppSection.LIBRARY
             bannerMessage = "Score removed from your library."
+        }
+    }
+
+    fun createSetlist(name: String, itemIds: List<String>) {
+        scope.launch {
+            try {
+                val setlist = runtime.repository.createSetlist(name, itemIds)
+                clearScoreSelection()
+                setlistPickerVisible = false
+                browseMode = LibraryBrowseMode.SETLISTS
+                selectedSetlistId = setlist.id
+                bannerMessage = "Saved \"${setlist.name}\"."
+            } catch (error: Throwable) {
+                bannerMessage = error.message ?: "Could not save the setlist."
+            }
+        }
+    }
+
+    fun addSelectionToSetlist(setlistId: String, itemIds: List<String>) {
+        scope.launch {
+            try {
+                val setlist = runtime.repository.addItemsToSetlist(setlistId, itemIds)
+                clearScoreSelection()
+                setlistPickerVisible = false
+                browseMode = LibraryBrowseMode.SETLISTS
+                selectedSetlistId = setlist.id
+                bannerMessage = "Updated \"${setlist.name}\"."
+            } catch (error: Throwable) {
+                bannerMessage = error.message ?: "Could not update the setlist."
+            }
+        }
+    }
+
+    fun confirmDeleteSetlist() {
+        val setlistId = deleteCandidateSetlistId ?: return
+        scope.launch {
+            runtime.repository.deleteSetlist(setlistId)
+            if (selectedSetlistId == setlistId) {
+                selectedSetlistId = null
+            }
+            deleteCandidateSetlistId = null
+            bannerMessage = "Setlist deleted."
         }
     }
 
