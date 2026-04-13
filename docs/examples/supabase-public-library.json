@@ -1,0 +1,17 @@
+{
+  "_note": "This file is kept for reference only. Lunar no longer uses a JSON manifest for Supabase sync.",
+  "_migration": "Delete this file from your bucket. Instead, organise your PDFs in folders and choose a layout strategy in the Lunar Import tab.",
+  "_strategies": {
+    "FLAT":                "root/*.pdf",
+    "COMPOSER":            "root/{Composer}/*.pdf",
+    "COLLECTION":          "root/{Collection}/*.pdf",
+    "COMPOSER_COLLECTION": "root/{Composer}/{Collection}/*.pdf",
+    "INSTRUMENT":          "root/{Instrument}/*.pdf",
+    "DATE_ADDED":          "root/{YYYY-MM}/*.pdf"
+  },
+  "_example_composer_layout": [
+    "scores/Beethoven/Für Elise.pdf",
+    "scores/Chopin/Nocturne Op.9 No.2.pdf",
+    "scores/Beethoven/Piano Sonatas/Moonlight Sonata.pdf"
+  ]
+}
