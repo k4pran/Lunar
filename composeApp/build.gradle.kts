@@ -121,7 +121,13 @@ compose.desktop {
         mainClass = "com.ryanjames.lunar.MainKt"
 
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
+            targetFormats(
+                TargetFormat.AppImage,
+                TargetFormat.Deb,
+                TargetFormat.Dmg,
+                TargetFormat.Exe,
+                TargetFormat.Msi,
+            )
             packageName = lunarAppName
             packageVersion = lunarDesktopPackageVersion
             description = "Cross-platform sheet music library and PDF viewer."

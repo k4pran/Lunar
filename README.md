@@ -17,11 +17,14 @@ Yes.
 This repo includes a desktop JVM target, and on Windows you can:
 
 - run the app directly during development with `.\gradlew.bat :composeApp:run`
-- build a Windows installer with `.\gradlew.bat :composeApp:packageReleaseMsi`
+- build a self-contained release folder with `.\gradlew.bat :composeApp:createReleaseDistributable`
+- build a Windows `EXE` installer with `.\gradlew.bat :composeApp:packageReleaseExe`
+- build a Windows `MSI` installer with `.\gradlew.bat :composeApp:packageReleaseMsi`
 
 Desktop packaging is currently configured for:
 
-- `MSI` on Windows
+- self-contained release folders on the current OS
+- `EXE` and `MSI` on Windows
 - `DEB` on Linux
 - `DMG` on macOS
 
@@ -30,8 +33,9 @@ Desktop packaging is currently configured for:
 | Target | Status | Notes |
 | --- | --- | --- |
 | Android | Active | First-class target. PDF import, folder import, SAF permission tracking, library UI, dialog preview, and fullscreen viewer are wired. |
-| Desktop JVM (Windows) | Active | First-class target. File/folder import, local storage, library UI, dialog preview, fullscreen viewer, and MSI packaging are wired. |
-| Desktop JVM (Linux) | Active | Same shared desktop app flow as Windows. `DEB` packaging is configured. |
+| Desktop JVM (Windows) | Active | First-class target. File/folder import, local storage, library UI, dialog preview, fullscreen viewer, self-contained release folders, and `EXE`/`MSI` packaging are wired. |
+| Desktop JVM (macOS) | Active | Same shared desktop app flow as Windows. `DMG` packaging is configured on macOS runners. |
+| Desktop JVM (Linux) | Active | Same shared desktop app flow as Windows. Self-contained release folders and `DEB` packaging are configured. |
 | iOS | Preview shell | Build targets exist, but PDF import/viewing are not fully wired yet. |
 | Web / Wasm | Preview shell | Build targets exist, but PDF import/viewing are not fully wired yet. |
 | Server | Placeholder | Ktor module exists for future sync/back-end work, but it is not part of the current app flow. |
@@ -289,16 +293,22 @@ Release Android App Bundle:
 
 ### Desktop artifacts
 
-Build a distributable for the current OS:
+Build a self-contained release folder for the current OS:
 
 ```powershell
-.\gradlew.bat :composeApp:packageDistributionForCurrentOS
+.\gradlew.bat :composeApp:createReleaseDistributable
 ```
 
-Build release distributables for the current OS:
+Build all configured release artifacts for the current OS in one go:
 
 ```powershell
 .\gradlew.bat :composeApp:packageReleaseDistributionForCurrentOS
+```
+
+Windows EXE:
+
+```powershell
+.\gradlew.bat :composeApp:packageReleaseExe
 ```
 
 Windows MSI:
@@ -319,11 +329,48 @@ macOS DMG:
 ./gradlew :composeApp:packageReleaseDmg
 ```
 
-Desktop outputs are written under `composeApp/build/compose/`.
+Desktop outputs are written under `composeApp/build/compose/binaries/main-release/`.
+
+The most useful output folders are:
+
+- `app/` - self-contained desktop runnable for the current OS
+- `exe/` - Windows `EXE` installer
+- `msi/` - Windows `MSI` installer
+- `deb/` - Linux `DEB` package
+- `dmg/` - macOS `DMG` installer
+
+## CI Artifacts
+
+GitHub Actions now builds release artifacts automatically with [`.github/workflows/build-artifacts.yml`](.github/workflows/build-artifacts.yml).
+
+The workflow runs on:
+
+- pull requests
+- pushes to `main`
+- tags matching `v*`
+- manual runs through `workflow_dispatch`
+
+Each workflow run uploads artifacts you can download from the Actions UI:
+
+- Windows
+  - self-contained release folder
+  - `EXE` installer
+  - `MSI` installer
+- macOS
+  - self-contained release folder
+  - `DMG` installer
+- Linux
+  - self-contained release folder
+  - `DEB` package
+- Android
+  - release `APK`
+  - release `AAB`
+
+The workflow does not currently produce an `IPA`. iOS is still built as frameworks for Xcode rather than a store-ready app package.
 
 ## How to Publish / Distribute
 
-There is not yet an automated publishing pipeline for app stores or package repositories.
+GitHub Actions now builds and uploads runnable artifacts automatically, but store publishing and signed release delivery are still separate steps.
 
 Current practical distribution options are:
 
@@ -331,16 +378,20 @@ Current practical distribution options are:
   - build a signed `APK` for direct distribution, or
   - build a signed `AAB` for Google Play submission later
 - Windows
+  - distribute the generated self-contained folder
+  - distribute the generated `EXE`
   - distribute the generated `MSI`
 - Linux
+  - distribute the generated self-contained folder
   - distribute the generated `DEB`
 - macOS
+  - distribute the generated self-contained folder
   - distribute the generated `DMG`
 
 What still needs to be added for production publishing:
 
 - release signing configuration and secret management
-- CI/CD build automation
+- GitHub Releases or package repository publishing automation
 - store-specific metadata and release workflows
 - installer signing and notarization where required
 - update delivery strategy
@@ -354,7 +405,7 @@ Release metadata is centralized in `gradle.properties`.
 - `lunar.versionCode`
   - Android version code
 - `lunar.desktopPackageVersion`
-  - desktop package version used for `MSI`, `DEB`, and `DMG` packaging
+  - desktop package version used for desktop distributables and native installers such as `EXE`, `MSI`, `DEB`, and `DMG`
 - `lunar.windowsUpgradeUuid`
   - stable Windows installer identity used for upgrade-aware MSI installs
 
@@ -373,8 +424,10 @@ Keep `lunar.windowsUpgradeUuid` unchanged once Windows installers are distribute
 
 ### Packaging
 
+- `:composeApp:createReleaseDistributable`
 - `:composeApp:packageDistributionForCurrentOS`
 - `:composeApp:packageReleaseDistributionForCurrentOS`
+- `:composeApp:packageReleaseExe`
 - `:composeApp:packageReleaseMsi`
 - `:composeApp:packageReleaseDeb`
 - `:composeApp:packageReleaseDmg`
