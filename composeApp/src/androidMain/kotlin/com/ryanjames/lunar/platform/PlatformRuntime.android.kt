@@ -25,6 +25,8 @@ import com.ryanjames.lunar.library.data.OkioStoredDocumentCleaner
 import com.ryanjames.lunar.library.data.JsonSourceRegistry
 import com.ryanjames.lunar.library.data.StoredDocumentFingerprinter
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
+import com.ryanjames.lunar.settings.AppSettings
+import com.ryanjames.lunar.settings.JsonAppSettingsStore
 import com.ryanjames.lunar.sync.LibrarySyncManager
 import com.ryanjames.lunar.sync.ManagedPdfStore
 import com.ryanjames.lunar.sync.SyncHttpClient
@@ -66,6 +68,12 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
     val sourcesPath = remember(sourcesFile) {
         sourcesFile.absolutePath.toPath()
     }
+    val settingsFile = remember(context) {
+        File(appRoot, "settings/app_settings.json")
+    }
+    val settingsPath = remember(settingsFile) {
+        settingsFile.absolutePath.toPath()
+    }
     val repository = remember(context) {
         DefaultSheetMusicRepository(
             storage = JsonLibraryStorage(
@@ -80,7 +88,17 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
     val pdfStore = remember(scoresDirectory) {
         AndroidManagedPdfStore(scoresDirectory = scoresDirectory)
     }
-    val syncHttpClient = remember { AndroidSyncHttpClient() }
+    val settingsStore = remember(settingsPath) {
+        JsonAppSettingsStore(
+            fileSystem = FileSystem.SYSTEM,
+            settingsPath = settingsPath,
+        )
+    }
+    val syncHttpClient = remember(settingsStore) {
+        AndroidSyncHttpClient(
+            settingsProvider = { settingsStore.settings.value }
+        )
+    }
     val syncManager = remember(repository, renderer, pdfStore, syncHttpClient) {
         LibrarySyncManager(
             repository = repository,
@@ -126,7 +144,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
         )
     }
 
-    return remember(repository, importer, renderer, syncManager, sourceRegistry, cacheInspector) {
+    return remember(repository, importer, renderer, syncManager, sourceRegistry, settingsStore, cacheInspector) {
         PlatformRuntime(
             platformName = "Android",
             capabilities = PlatformCapabilities(
@@ -141,6 +159,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             renderer = renderer,
             syncManager = syncManager,
             sourceRegistry = sourceRegistry,
+            settingsStore = settingsStore,
             googleDriveOAuth = UnsupportedGoogleDriveOAuthCoordinator,
             cacheInspector = cacheInspector,
         )
@@ -435,12 +454,15 @@ private class AndroidPdfPageRenderer : PdfPageRenderer {
     }
 }
 
-private class AndroidSyncHttpClient : SyncHttpClient {
+private class AndroidSyncHttpClient(
+    private val settingsProvider: () -> AppSettings,
+) : SyncHttpClient {
     override suspend fun getText(url: String, headers: Map<String, String>): String = withContext(Dispatchers.IO) {
+        val settings = settingsProvider()
         val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
         connection.apply {
-            connectTimeout = 15_000
-            readTimeout = 30_000
+            connectTimeout = settings.cloudConnectTimeoutMillis
+            readTimeout = settings.cloudReadTimeoutMillis
             headers.forEach { (key, value) -> setRequestProperty(key, value) }
         }
         val responseCode = connection.responseCode
@@ -452,10 +474,11 @@ private class AndroidSyncHttpClient : SyncHttpClient {
     }
 
     override suspend fun getBytes(url: String, headers: Map<String, String>): ByteArray = withContext(Dispatchers.IO) {
+        val settings = settingsProvider()
         val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
         connection.apply {
-            connectTimeout = 15_000
-            readTimeout = 60_000
+            connectTimeout = settings.cloudConnectTimeoutMillis
+            readTimeout = settings.cloudReadTimeoutMillis
             headers.forEach { (key, value) -> setRequestProperty(key, value) }
         }
         val responseCode = connection.responseCode
@@ -467,14 +490,15 @@ private class AndroidSyncHttpClient : SyncHttpClient {
     }
 
     override suspend fun postJson(url: String, jsonBody: String, headers: Map<String, String>): String = withContext(Dispatchers.IO) {
+        val settings = settingsProvider()
         val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
         connection.apply {
             requestMethod = "POST"
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Accept", "application/json")
             headers.forEach { (key, value) -> setRequestProperty(key, value) }
-            connectTimeout = 15_000
-            readTimeout = 30_000
+            connectTimeout = settings.cloudConnectTimeoutMillis
+            readTimeout = settings.cloudReadTimeoutMillis
             doOutput = true
         }
         connection.outputStream.bufferedWriter().use { it.write(jsonBody) }
@@ -487,13 +511,14 @@ private class AndroidSyncHttpClient : SyncHttpClient {
     }
 
     override suspend fun postForm(url: String, formBody: String, headers: Map<String, String>): String = withContext(Dispatchers.IO) {
+        val settings = settingsProvider()
         val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
         connection.apply {
             requestMethod = "POST"
             setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
             headers.forEach { (key, value) -> setRequestProperty(key, value) }
-            connectTimeout = 15_000
-            readTimeout = 30_000
+            connectTimeout = settings.cloudConnectTimeoutMillis
+            readTimeout = settings.cloudReadTimeoutMillis
             doOutput = true
         }
         connection.outputStream.bufferedWriter().use { it.write(formBody) }

@@ -19,6 +19,12 @@ import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.library.model.SortDirection
 import com.ryanjames.lunar.platform.ImportRequestResult
 import com.ryanjames.lunar.platform.PlatformRuntime
+import com.ryanjames.lunar.settings.AppColorTheme
+import com.ryanjames.lunar.settings.AppSettings
+import com.ryanjames.lunar.settings.AutoRefreshSchedule
+import com.ryanjames.lunar.settings.CacheLimitPreset
+import com.ryanjames.lunar.settings.LibraryLayoutPreference
+import com.ryanjames.lunar.settings.ViewerPageModePreference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.time.Clock
@@ -37,6 +43,7 @@ enum class LibraryBrowseMode {
 enum class AppSection {
     IMPORT,
     LIBRARY,
+    SETTINGS,
 }
 
 class LunarAppState(
@@ -49,7 +56,9 @@ class LunarAppState(
     var query: LibraryQuery by mutableStateOf(LibraryQuery())
         private set
 
-    var layoutMode: LibraryLayoutMode by mutableStateOf(LibraryLayoutMode.LIST)
+    var layoutMode: LibraryLayoutMode by mutableStateOf(
+        runtime.settingsStore.settings.value.defaultLibraryLayout.toLayoutMode()
+    )
         private set
 
     var browseMode: LibraryBrowseMode by mutableStateOf(LibraryBrowseMode.ALL)
@@ -127,6 +136,11 @@ class LunarAppState(
 
     fun updateLayoutMode(layoutMode: LibraryLayoutMode) {
         this.layoutMode = layoutMode
+        scope.launch {
+            runtime.settingsStore.updateSettings { settings ->
+                settings.copy(defaultLibraryLayout = layoutMode.toPreference())
+            }
+        }
     }
 
     fun updateBrowseMode(mode: LibraryBrowseMode) {
@@ -169,6 +183,73 @@ class LunarAppState(
 
     fun clearBanner() {
         bannerMessage = null
+    }
+
+    fun applySettings(settings: AppSettings) {
+        layoutMode = settings.defaultLibraryLayout.toLayoutMode()
+    }
+
+    fun updateDefaultViewerPageMode(mode: ViewerPageModePreference) {
+        scope.launch {
+            runtime.settingsStore.updateSettings { settings ->
+                settings.copy(defaultViewerPageMode = mode)
+            }
+        }
+    }
+
+    fun updateTheme(theme: AppColorTheme) {
+        scope.launch {
+            runtime.settingsStore.updateSettings { settings ->
+                settings.copy(theme = theme)
+            }
+        }
+    }
+
+    fun updateRefreshOnLaunch(enabled: Boolean) {
+        scope.launch {
+            runtime.settingsStore.updateSettings { settings ->
+                settings.copy(refreshOnLaunch = enabled)
+            }
+        }
+    }
+
+    fun updateAutoRefreshSchedule(schedule: AutoRefreshSchedule) {
+        scope.launch {
+            runtime.settingsStore.updateSettings { settings ->
+                settings.copy(autoRefreshSchedule = schedule)
+            }
+        }
+    }
+
+    fun updateCacheLimit(limit: CacheLimitPreset) {
+        scope.launch {
+            runtime.settingsStore.updateSettings { settings ->
+                settings.copy(cacheLimit = limit)
+            }
+        }
+    }
+
+    fun updateCloudConnectTimeout(seconds: Int) {
+        scope.launch {
+            runtime.settingsStore.updateSettings { settings ->
+                settings.copy(cloudConnectTimeoutSeconds = seconds)
+            }
+        }
+    }
+
+    fun updateCloudReadTimeout(seconds: Int) {
+        scope.launch {
+            runtime.settingsStore.updateSettings { settings ->
+                settings.copy(cloudReadTimeoutSeconds = seconds)
+            }
+        }
+    }
+
+    fun resetGlobalSettings() {
+        scope.launch {
+            runtime.settingsStore.reset()
+            bannerMessage = "Settings reset to recommended defaults."
+        }
     }
 
     fun importFiles() {
@@ -585,3 +666,13 @@ fun rememberLunarAppState(runtime: PlatformRuntime): LunarAppState {
 }
 
 private const val MAX_IMPORT_ACTIVITY_ENTRIES = 150
+
+private fun LibraryLayoutPreference.toLayoutMode(): LibraryLayoutMode = when (this) {
+    LibraryLayoutPreference.LIST -> LibraryLayoutMode.LIST
+    LibraryLayoutPreference.GRID -> LibraryLayoutMode.GRID
+}
+
+private fun LibraryLayoutMode.toPreference(): LibraryLayoutPreference = when (this) {
+    LibraryLayoutMode.LIST -> LibraryLayoutPreference.LIST
+    LibraryLayoutMode.GRID -> LibraryLayoutPreference.GRID
+}

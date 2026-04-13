@@ -9,6 +9,9 @@ import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
 import com.ryanjames.lunar.platform.PdfDocumentInfo
 import com.ryanjames.lunar.platform.PdfPageRenderer
 import com.ryanjames.lunar.platform.RenderedPdfPage
+import com.ryanjames.lunar.settings.AppColorTheme
+import com.ryanjames.lunar.settings.AutoRefreshSchedule
+import com.ryanjames.lunar.settings.InMemoryAppSettingsStore
 import com.ryanjames.lunar.sync.LibrarySyncManager
 import com.ryanjames.lunar.sync.ManagedPdfStore
 import com.ryanjames.lunar.sync.SyncHttpClient
@@ -18,6 +21,29 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class ComposeAppCommonTest {
+
+    @Test
+    fun settingsStoreUpdatesAndResets() = runBlocking {
+        val store = InMemoryAppSettingsStore()
+
+        store.updateSettings {
+            it.copy(
+                theme = AppColorTheme.FOREST,
+                autoRefreshSchedule = AutoRefreshSchedule.HOURLY,
+                cloudConnectTimeoutSeconds = 30,
+            )
+        }
+
+        assertEquals(AppColorTheme.FOREST, store.settings.value.theme)
+        assertEquals(AutoRefreshSchedule.HOURLY, store.settings.value.autoRefreshSchedule)
+        assertEquals(30, store.settings.value.cloudConnectTimeoutSeconds)
+
+        store.reset()
+
+        assertEquals(AppColorTheme.OCEAN, store.settings.value.theme)
+        assertEquals(AutoRefreshSchedule.MINUTES_15, store.settings.value.autoRefreshSchedule)
+        assertEquals(15, store.settings.value.cloudConnectTimeoutSeconds)
+    }
 
     @Test
     fun googleDriveRefreshContinuesAfterSinglePdfFailure() = runBlocking {

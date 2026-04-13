@@ -66,13 +66,14 @@ fun ViewerScreen(
     onToggleFavorite: () -> Unit,
     onPageChanged: (Int) -> Unit,
     onPageCountResolved: (Int) -> Unit,
+    defaultTwoPageMode: Boolean = false,
     onEnterFullscreen: (() -> Unit)? = null,
     backButtonLabel: String = "Back to library",
     modifier: Modifier = Modifier,
 ) {
     var currentPage by remember(item.id) { mutableIntStateOf(item.lastViewedPage.coerceAtLeast(0)) }
     var zoom by remember(item.id) { mutableFloatStateOf(1f) }
-    var twoPageMode by remember(item.id) { mutableStateOf(false) }
+    var twoPageMode by remember(item.id, defaultTwoPageMode) { mutableStateOf(defaultTwoPageMode) }
     var renderedPages by remember(item.id, currentPage, twoPageMode) { mutableStateOf<List<RenderedPdfPage>>(emptyList()) }
     var errorMessage by remember(item.id, currentPage) { mutableStateOf<String?>(null) }
     var isLoading by remember(item.id, currentPage) { mutableStateOf(true) }
@@ -216,11 +217,12 @@ fun FullscreenViewerScreen(
     onToggleFavorite: () -> Unit,
     onPageChanged: (Int) -> Unit,
     onPageCountResolved: (Int) -> Unit,
+    defaultTwoPageMode: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var currentPage by remember(item.id) { mutableIntStateOf(item.lastViewedPage.coerceAtLeast(0)) }
     var zoom by remember(item.id) { mutableFloatStateOf(1f) }
-    var twoPageMode by remember(item.id) { mutableStateOf(false) }
+    var twoPageMode by remember(item.id, defaultTwoPageMode) { mutableStateOf(defaultTwoPageMode) }
     var renderedPages by remember(item.id, currentPage, twoPageMode) { mutableStateOf<List<RenderedPdfPage>>(emptyList()) }
     var errorMessage by remember(item.id, currentPage) { mutableStateOf<String?>(null) }
     var isLoading by remember(item.id, currentPage) { mutableStateOf(true) }

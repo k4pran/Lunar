@@ -12,6 +12,8 @@ import com.ryanjames.lunar.library.data.SheetMusicRepository
 import com.ryanjames.lunar.library.data.SourceRegistry
 import com.ryanjames.lunar.sync.GoogleDriveOAuthCoordinator
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
+import com.ryanjames.lunar.settings.AppSettingsStore
+import com.ryanjames.lunar.settings.InMemoryAppSettingsStore
 import com.ryanjames.lunar.sync.LibrarySyncManager
 import com.ryanjames.lunar.sync.UnsupportedGoogleDriveOAuthCoordinator
 import com.ryanjames.lunar.sync.rememberNoOpLibrarySyncManager
@@ -28,6 +30,7 @@ data class PlatformRuntime(
     val renderer: PdfPageRenderer,
     val syncManager: LibrarySyncManager,
     val sourceRegistry: SourceRegistry,
+    val settingsStore: AppSettingsStore,
     val googleDriveOAuth: GoogleDriveOAuthCoordinator,
     val cacheInspector: LibraryCacheInspector,
 )
@@ -187,6 +190,7 @@ fun rememberUnsupportedPlatformRuntime(
             renderer = UnavailablePdfPageRenderer,
             syncManager = syncManager,
             sourceRegistry = InMemorySourceRegistry(),
+            settingsStore = InMemoryAppSettingsStore(),
             googleDriveOAuth = UnsupportedGoogleDriveOAuthCoordinator,
             cacheInspector = UnsupportedLibraryCacheInspector(statusLine),
         )
@@ -196,7 +200,7 @@ fun rememberUnsupportedPlatformRuntime(
 @Composable
 expect fun rememberPlatformRuntime(): PlatformRuntime
 
-private fun formatStorageSize(bytes: Long): String {
+fun formatStorageSize(bytes: Long): String {
     if (bytes <= 0L) return "0 B"
 
     val units = listOf("B", "KB", "MB", "GB", "TB")

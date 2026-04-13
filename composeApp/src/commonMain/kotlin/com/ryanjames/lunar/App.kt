@@ -41,8 +41,12 @@ import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.FullscreenViewerScreen
 import com.ryanjames.lunar.ui.ImportScreen
 import com.ryanjames.lunar.ui.LibraryScreen
+import com.ryanjames.lunar.ui.SettingsScreen
 import com.ryanjames.lunar.ui.ViewerScreen
 import com.ryanjames.lunar.ui.rememberLunarAppState
+import com.ryanjames.lunar.settings.AppColorTheme
+import com.ryanjames.lunar.settings.ViewerPageModePreference
+import com.ryanjames.lunar.settings.intervalMillis
 import kotlinx.coroutines.delay
 
 @Composable
@@ -52,21 +56,33 @@ fun App() {
     val snapshot by runtime.repository.library.collectAsState()
     val importerState by runtime.importer.state.collectAsState()
     val syncState by runtime.syncManager.state.collectAsState()
+    val appSettings by runtime.settingsStore.settings.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val previewItem = snapshot.items.firstOrNull { it.id == appState.previewItemId }
     val fullscreenItem = snapshot.items.firstOrNull { it.id == appState.fullscreenItemId }
+    val defaultTwoPageMode = appSettings.defaultViewerPageMode == ViewerPageModePreference.TWO_PAGE
 
-    LaunchedEffect(runtime.repository, runtime.syncManager, runtime.sourceRegistry) {
+    LaunchedEffect(runtime.repository, runtime.syncManager, runtime.sourceRegistry, runtime.settingsStore) {
         runtime.repository.initialize()
         runtime.sourceRegistry.initialize()
+        runtime.settingsStore.initialize()
         runtime.syncManager.initialize()
-        runtime.syncManager.refreshAllSources(
-            sources = runtime.sourceRegistry.sources.value,
-            force = false,
-        )
+        if (runtime.settingsStore.settings.value.refreshOnLaunch) {
+            runtime.syncManager.refreshAllSources(
+                sources = runtime.sourceRegistry.sources.value,
+                force = false,
+            )
+        }
+    }
 
+    LaunchedEffect(appSettings.defaultLibraryLayout) {
+        appState.applySettings(appSettings)
+    }
+
+    LaunchedEffect(appSettings.autoRefreshSchedule, runtime.syncManager, runtime.sourceRegistry) {
+        val intervalMillis = appSettings.autoRefreshSchedule.intervalMillis ?: return@LaunchedEffect
         while (true) {
-            delay(runtime.syncManager.automaticRefreshIntervalMillis())
+            delay(intervalMillis)
             runtime.syncManager.refreshAllSources(
                 sources = runtime.sourceRegistry.sources.value,
                 force = false,
@@ -80,7 +96,7 @@ fun App() {
         appState.clearBanner()
     }
 
-    LunarTheme {
+    LunarTheme(theme = appSettings.theme) {
         if (fullscreenItem != null) {
             FullscreenViewerScreen(
                 runtime = runtime,
@@ -93,6 +109,7 @@ fun App() {
                 onPageCountResolved = { pageCount ->
                     appState.updateViewerPageCount(fullscreenItem.id, pageCount)
                 },
+                defaultTwoPageMode = defaultTwoPageMode,
             )
         } else {
             Box(
@@ -122,6 +139,7 @@ fun App() {
                             runtime = runtime,
                             importerState = importerState,
                             syncState = syncState,
+                            settings = appSettings,
                             libraryCount = snapshot.items.size,
                             appState = appState,
                             modifier = Modifier.padding(innerPadding),
@@ -130,6 +148,12 @@ fun App() {
                         AppSection.LIBRARY -> LibraryScreen(
                             runtime = runtime,
                             snapshot = snapshot,
+                            appState = appState,
+                            modifier = Modifier.padding(innerPadding),
+                        )
+
+                        AppSection.SETTINGS -> SettingsScreen(
+                            settings = appSettings,
                             appState = appState,
                             modifier = Modifier.padding(innerPadding),
                         )
@@ -175,6 +199,7 @@ fun App() {
                                             onPageCountResolved = { pageCount ->
                                                 appState.updateViewerPageCount(previewItem.id, pageCount)
                                             },
+                                            defaultTwoPageMode = defaultTwoPageMode,
                                             backButtonLabel = "Close",
                                         )
                                     }
@@ -198,10 +223,10 @@ fun App() {
                                             androidx.compose.material3.Button(
                                                 onClick = { appState.openFullscreen(previewItem.id) },
                                                 colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                                                    containerColor = Color(0xFF1F4F6B),
+                                                    containerColor = MaterialTheme.colorScheme.primary,
                                                 ),
                                             ) {
-                                                Text("View Fullscreen", color = Color.White)
+                                                Text("View Fullscreen", color = MaterialTheme.colorScheme.onPrimary)
                                             }
                                         }
                                     }
@@ -240,6 +265,11 @@ private fun BottomNavigationPanel(
                 title = "Library",
                 selected = selectedSection == AppSection.LIBRARY,
                 onClick = { onSelectSection(AppSection.LIBRARY) },
+            )
+            BottomNavItem(
+                title = "Settings",
+                selected = selectedSection == AppSection.SETTINGS,
+                onClick = { onSelectSection(AppSection.SETTINGS) },
             )
         }
     }
@@ -285,28 +315,77 @@ private fun RowScope.BottomNavItem(
 }
 
 @Composable
-private fun LunarTheme(content: @Composable () -> Unit) {
-    val colorScheme = lightColorScheme(
-        primary = Color(0xFF1F4F6B),
-        onPrimary = Color(0xFFFFFFFF),
-        primaryContainer = Color(0xFFA7C6ED),
-        onPrimaryContainer = Color(0xFF0D2B36),
-        secondary = Color(0xFF4D7C99),
-        onSecondary = Color(0xFFFFFFFF),
-        secondaryContainer = Color(0xFF6A9BD1),
-        onSecondaryContainer = Color(0xFF0D2B36),
-        tertiary = Color(0xFF176A8A),
-        onTertiary = Color(0xFFFFFFFF),
-        tertiaryContainer = Color(0xFFB8D8EC),
-        onTertiaryContainer = Color(0xFF0D2B36),
-        background = Color(0xFFE8F2FA),
-        onBackground = Color(0xFF0D2B36),
-        surface = Color(0xFFF0F7FC),
-        onSurface = Color(0xFF1A3E4F),
-        surfaceVariant = Color(0xFFCCDDE9),
-        onSurfaceVariant = Color(0xFF2A6E7C),
-        outline = Color(0xFF4C8FD5),
-    )
+private fun LunarTheme(
+    theme: AppColorTheme,
+    content: @Composable () -> Unit,
+) {
+    val colorScheme = when (theme) {
+        AppColorTheme.OCEAN -> lightColorScheme(
+            primary = Color(0xFF1F4F6B),
+            onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = Color(0xFFA7C6ED),
+            onPrimaryContainer = Color(0xFF0D2B36),
+            secondary = Color(0xFF4D7C99),
+            onSecondary = Color(0xFFFFFFFF),
+            secondaryContainer = Color(0xFF6A9BD1),
+            onSecondaryContainer = Color(0xFF0D2B36),
+            tertiary = Color(0xFF176A8A),
+            onTertiary = Color(0xFFFFFFFF),
+            tertiaryContainer = Color(0xFFB8D8EC),
+            onTertiaryContainer = Color(0xFF0D2B36),
+            background = Color(0xFFE8F2FA),
+            onBackground = Color(0xFF0D2B36),
+            surface = Color(0xFFF0F7FC),
+            onSurface = Color(0xFF1A3E4F),
+            surfaceVariant = Color(0xFFCCDDE9),
+            onSurfaceVariant = Color(0xFF2A6E7C),
+            outline = Color(0xFF4C8FD5),
+        )
+
+        AppColorTheme.FOREST -> lightColorScheme(
+            primary = Color(0xFF27543B),
+            onPrimary = Color.White,
+            primaryContainer = Color(0xFFC6E3CF),
+            onPrimaryContainer = Color(0xFF10311F),
+            secondary = Color(0xFF5E7B62),
+            onSecondary = Color.White,
+            secondaryContainer = Color(0xFFD4E6D2),
+            onSecondaryContainer = Color(0xFF203425),
+            tertiary = Color(0xFF8E6A2C),
+            onTertiary = Color.White,
+            tertiaryContainer = Color(0xFFF0DEB8),
+            onTertiaryContainer = Color(0xFF3C2800),
+            background = Color(0xFFF1F6F0),
+            onBackground = Color(0xFF173021),
+            surface = Color(0xFFF7FBF6),
+            onSurface = Color(0xFF1E3527),
+            surfaceVariant = Color(0xFFDCE7DC),
+            onSurfaceVariant = Color(0xFF4A6250),
+            outline = Color(0xFF7D9A84),
+        )
+
+        AppColorTheme.SUNSET -> lightColorScheme(
+            primary = Color(0xFF8A3E24),
+            onPrimary = Color.White,
+            primaryContainer = Color(0xFFF7C6AE),
+            onPrimaryContainer = Color(0xFF3A1308),
+            secondary = Color(0xFF9B5A33),
+            onSecondary = Color.White,
+            secondaryContainer = Color(0xFFF0D1BF),
+            onSecondaryContainer = Color(0xFF41210E),
+            tertiary = Color(0xFF7A4F7E),
+            onTertiary = Color.White,
+            tertiaryContainer = Color(0xFFE7D0E8),
+            onTertiaryContainer = Color(0xFF311538),
+            background = Color(0xFFFEF3EC),
+            onBackground = Color(0xFF3A2318),
+            surface = Color(0xFFFFF8F4),
+            onSurface = Color(0xFF44291E),
+            surfaceVariant = Color(0xFFF2DDD0),
+            onSurfaceVariant = Color(0xFF6C5348),
+            outline = Color(0xFFC08361),
+        )
+    }
 
     MaterialTheme(
         colorScheme = colorScheme,

@@ -42,9 +42,13 @@ import com.ryanjames.lunar.library.data.CloudSupabaseSource
 import com.ryanjames.lunar.library.data.LibrarySource
 import com.ryanjames.lunar.library.data.LocalFilesSource
 import com.ryanjames.lunar.library.data.LocalFolderSource
+import com.ryanjames.lunar.platform.formatStorageSize
 import com.ryanjames.lunar.platform.ImporterState
 import com.ryanjames.lunar.platform.LibraryCacheSnapshot
 import com.ryanjames.lunar.platform.PlatformRuntime
+import com.ryanjames.lunar.settings.AppSettings
+import com.ryanjames.lunar.settings.CacheLimitPreset
+import com.ryanjames.lunar.settings.limitBytes
 import com.ryanjames.lunar.sync.CloudSyncState
 
 @Composable
@@ -52,6 +56,7 @@ fun ImportScreen(
     runtime: PlatformRuntime,
     importerState: ImporterState,
     syncState: CloudSyncState,
+    settings: AppSettings,
     libraryCount: Int,
     appState: LunarAppState,
     modifier: Modifier = Modifier,
@@ -197,6 +202,7 @@ fun ImportScreen(
                     ) {
                         ImportSummaryPillDark("${snapshot.cachedPdfCount} cached PDF${if (snapshot.cachedPdfCount == 1) "" else "s"}")
                         ImportSummaryPillDark(snapshot.cachedPdfBytesLabel)
+                        ImportSummaryPillDark("Budget ${settings.cacheLimit.label()}")
                     }
                     Text(
                         text = buildString {
@@ -224,10 +230,19 @@ fun ImportScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    settings.cacheLimit.limitBytes?.let { limitBytes ->
+                        if (snapshot.cachedPdfBytes > limitBytes) {
+                            Text(
+                                text = "Current cache is ${formatStorageSize(snapshot.cachedPdfBytes - limitBytes)} over the preferred budget.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color(0xFFB42318),
+                            )
+                        }
+                    }
                     TextButton(
                         onClick = {
                             clipboardManager.setText(
-                                AnnotatedString(buildCacheDetails(snapshot))
+                                AnnotatedString(buildCacheDetails(snapshot, settings))
                             )
                         },
                     ) {
@@ -686,7 +701,10 @@ private fun buildSyncDetails(syncState: CloudSyncState): String = buildString {
     }
 }
 
-private fun buildCacheDetails(cacheSnapshot: LibraryCacheSnapshot): String = buildString {
+private fun buildCacheDetails(
+    cacheSnapshot: LibraryCacheSnapshot,
+    settings: AppSettings,
+): String = buildString {
     appendLine("Storage: ${cacheSnapshot.storageLabel}")
     cacheSnapshot.cacheRootPath?.takeIf(String::isNotBlank)?.let { cachePath ->
         appendLine("Cache root: $cachePath")
@@ -695,8 +713,18 @@ private fun buildCacheDetails(cacheSnapshot: LibraryCacheSnapshot): String = bui
     appendLine("Source registry cached: ${cacheSnapshot.sourceRegistryCached}")
     appendLine("Cached PDFs: ${cacheSnapshot.cachedPdfCount}")
     appendLine("Cached PDF size: ${cacheSnapshot.cachedPdfBytesLabel}")
+    appendLine("Preferred cache budget: ${settings.cacheLimit.label()}")
     appendLine("Offline library ready: ${cacheSnapshot.offlineLibraryReady}")
     appendLine("Offline viewer ready: ${cacheSnapshot.offlineViewerReady}")
+}
+
+private fun CacheLimitPreset.label(): String = when (this) {
+    CacheLimitPreset.MB_512 -> "512 MB"
+    CacheLimitPreset.GB_1 -> "1 GB"
+    CacheLimitPreset.GB_2 -> "2 GB"
+    CacheLimitPreset.GB_4 -> "4 GB"
+    CacheLimitPreset.GB_8 -> "8 GB"
+    CacheLimitPreset.UNLIMITED -> "Unlimited"
 }
 
 private fun buildImportDetails(appState: LunarAppState): String = buildString {
