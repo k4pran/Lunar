@@ -71,6 +71,12 @@ class LunarAppState(
     var selectedSetlistId: String? by mutableStateOf(null)
         private set
 
+    var temporarySetlist: TemporarySetlistSession? by mutableStateOf(null)
+        private set
+
+    var temporarySetlistOpen: Boolean by mutableStateOf(false)
+        private set
+
     var selectedScoreIds: Set<String> by mutableStateOf(emptySet())
         private set
 
@@ -90,6 +96,12 @@ class LunarAppState(
         private set
 
     var setlistPickerVisible: Boolean by mutableStateOf(false)
+        private set
+
+    var randomSetlistBuilderVisible: Boolean by mutableStateOf(false)
+        private set
+
+    var saveTemporarySetlistDialogVisible: Boolean by mutableStateOf(false)
         private set
 
     var importInProgress: Boolean by mutableStateOf(false)
@@ -117,6 +129,8 @@ class LunarAppState(
         selectedSection = section
         if (section != AppSection.LIBRARY) {
             clearScoreSelection()
+            randomSetlistBuilderVisible = false
+            saveTemporarySetlistDialogVisible = false
         }
     }
 
@@ -187,6 +201,7 @@ class LunarAppState(
         selectedGroup = null
         if (mode != LibraryBrowseMode.SETLISTS) {
             selectedSetlistId = null
+            temporarySetlistOpen = false
         }
     }
 
@@ -238,13 +253,38 @@ class LunarAppState(
 
     fun openSetlist(setlistId: String) {
         clearScoreSelection()
+        saveTemporarySetlistDialogVisible = false
         browseMode = LibraryBrowseMode.SETLISTS
         selectedGroup = null
+        temporarySetlistOpen = false
         selectedSetlistId = setlistId
     }
 
     fun closeSetlist() {
         selectedSetlistId = null
+        temporarySetlistOpen = false
+    }
+
+    fun openTemporarySetlist() {
+        if (temporarySetlist == null) {
+            bannerMessage = "Create a random setlist first."
+            return
+        }
+        clearScoreSelection()
+        browseMode = LibraryBrowseMode.SETLISTS
+        selectedGroup = null
+        selectedSetlistId = null
+        temporarySetlistOpen = true
+    }
+
+    fun discardTemporarySetlist() {
+        val hadTemporarySetlist = temporarySetlist != null
+        temporarySetlist = null
+        temporarySetlistOpen = false
+        saveTemporarySetlistDialogVisible = false
+        if (hadTemporarySetlist) {
+            bannerMessage = "Temporary setlist discarded."
+        }
     }
 
     fun requestDeleteSetlist(setlistId: String) {
@@ -253,6 +293,69 @@ class LunarAppState(
 
     fun dismissDeleteSetlistRequest() {
         deleteCandidateSetlistId = null
+    }
+
+    fun openRandomSheet(items: List<SheetMusicItem>) {
+        val randomItem = buildRandomSightReadingSelection(
+            items = items,
+            requestedCount = 1,
+        ).firstOrNull()
+
+        if (randomItem == null) {
+            bannerMessage = "No scores are available for a random pick."
+            return
+        }
+
+        openPreview(randomItem)
+        bannerMessage = "Opening a random sheet."
+    }
+
+    fun showRandomSetlistBuilder() {
+        randomSetlistBuilderVisible = true
+    }
+
+    fun dismissRandomSetlistBuilder() {
+        randomSetlistBuilderVisible = false
+    }
+
+    fun createTemporaryRandomSetlist(
+        items: List<SheetMusicItem>,
+        requestedCount: Int,
+    ) {
+        val shuffledItems = buildRandomSightReadingSelection(
+            items = items,
+            requestedCount = requestedCount,
+        )
+        if (shuffledItems.isEmpty()) {
+            randomSetlistBuilderVisible = false
+            bannerMessage = "No scores are available for a random setlist."
+            return
+        }
+
+        clearScoreSelection()
+        selectedSection = AppSection.LIBRARY
+        selectedGroup = null
+        selectedSetlistId = null
+        browseMode = LibraryBrowseMode.SETLISTS
+        temporarySetlist = TemporarySetlistSession(
+            itemIds = shuffledItems.map { it.id },
+            createdAtEpochMillis = Clock.System.now().toEpochMilliseconds(),
+        )
+        temporarySetlistOpen = true
+        randomSetlistBuilderVisible = false
+        saveTemporarySetlistDialogVisible = false
+        val scoreCount = shuffledItems.size
+        bannerMessage = "Built a temporary $scoreCount score${if (scoreCount == 1) "" else "s"} for sight reading."
+    }
+
+    fun showSaveTemporarySetlistDialog() {
+        if (temporarySetlist != null) {
+            saveTemporarySetlistDialogVisible = true
+        }
+    }
+
+    fun dismissSaveTemporarySetlistDialog() {
+        saveTemporarySetlistDialogVisible = false
     }
 
     fun startEditing(itemId: String) {
@@ -540,6 +643,23 @@ class LunarAppState(
             }
             deleteCandidateSetlistId = null
             bannerMessage = "Setlist deleted."
+        }
+    }
+
+    fun saveTemporarySetlist(name: String) {
+        val session = temporarySetlist ?: return
+        scope.launch {
+            try {
+                val setlist = runtime.repository.createSetlist(name, session.itemIds)
+                temporarySetlist = null
+                temporarySetlistOpen = false
+                saveTemporarySetlistDialogVisible = false
+                browseMode = LibraryBrowseMode.SETLISTS
+                selectedSetlistId = setlist.id
+                bannerMessage = "Saved \"${setlist.name}\"."
+            } catch (error: Throwable) {
+                bannerMessage = error.message ?: "Could not save the temporary setlist."
+            }
         }
     }
 

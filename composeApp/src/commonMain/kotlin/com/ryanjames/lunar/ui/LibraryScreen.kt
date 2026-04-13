@@ -76,14 +76,50 @@ fun LibraryScreen(
     val composers = snapshot.items.availableComposers()
     val tags = snapshot.items.availableTags()
     val itemsById = snapshot.items.associateBy { it.id }
+    val temporarySetlist = appState.temporarySetlist
+    val activeTemporarySetlist = temporarySetlist.takeIf { appState.temporarySetlistOpen }
     val activeSetlist = snapshot.setlists.firstOrNull { it.id == appState.selectedSetlistId }
+    val activeTemporarySetlistItems = activeTemporarySetlist?.itemIds?.mapNotNull(itemsById::get).orEmpty()
     val activeSetlistItems = activeSetlist?.itemIds?.mapNotNull(itemsById::get).orEmpty()
-    val selectedItems = when {
-        activeSetlist != null && appState.browseMode == LibraryBrowseMode.SETLISTS ->
-            activeSetlistItems.filter { it.id in appState.selectedScoreIds }
-
-        else -> visibleItems.filter { it.id in appState.selectedScoreIds }
+    val currentScopeItems = when (appState.browseMode) {
+        LibraryBrowseMode.ALL -> visibleItems
+        LibraryBrowseMode.BY_COLLECTION -> {
+            val group = appState.selectedGroup
+            if (group == null) {
+                visibleItems
+            } else {
+                visibleItems.filter { item ->
+                    item.collection?.trim().equals(group, ignoreCase = true)
+                }
+            }
+        }
+        LibraryBrowseMode.BY_COMPOSER -> {
+            val group = appState.selectedGroup
+            if (group == null) {
+                visibleItems
+            } else {
+                visibleItems.filter { item ->
+                    item.composer?.trim().equals(group, ignoreCase = true)
+                }
+            }
+        }
+        LibraryBrowseMode.SETLISTS -> when {
+            activeTemporarySetlist != null -> activeTemporarySetlistItems
+            activeSetlist != null -> activeSetlistItems
+            else -> snapshot.items
+        }
     }
+    val sightReadingScopeLabel = when (appState.browseMode) {
+        LibraryBrowseMode.ALL -> "the current library view"
+        LibraryBrowseMode.BY_COLLECTION -> appState.selectedGroup?.let { "\"$it\"" } ?: "the current library view"
+        LibraryBrowseMode.BY_COMPOSER -> appState.selectedGroup?.let { "\"$it\"" } ?: "the current library view"
+        LibraryBrowseMode.SETLISTS -> when {
+            activeTemporarySetlist != null -> "this temporary setlist"
+            activeSetlist != null -> "\"${activeSetlist.name}\""
+            else -> "the full library"
+        }
+    }
+    val selectedItems = currentScopeItems.filter { it.id in appState.selectedScoreIds }
     val editingItem = snapshot.items.firstOrNull { it.id == appState.editingItemId }
     val deleteCandidate = snapshot.items.firstOrNull { it.id == appState.deleteCandidateItemId }
     val deleteSetlistCandidate = snapshot.setlists.firstOrNull { it.id == appState.deleteCandidateSetlistId }
@@ -108,6 +144,14 @@ fun LibraryScreen(
                 visibleCount = visibleItems.size,
                 totalCount = snapshot.items.size,
                 appState = appState,
+            )
+        }
+        if (snapshot.items.isNotEmpty()) {
+            SightReadingPanel(
+                availableCount = currentScopeItems.size,
+                scopeLabel = sightReadingScopeLabel,
+                onOpenRandomSheet = { appState.openRandomSheet(currentScopeItems) },
+                onCreateRandomSetlist = appState::showRandomSetlistBuilder,
             )
         }
         if (selectedItems.isNotEmpty()) {
@@ -178,10 +222,23 @@ fun LibraryScreen(
                 }
 
                 LibraryBrowseMode.SETLISTS -> {
-                    if (activeSetlist == null) {
+                    if (activeTemporarySetlist != null) {
+                        TemporarySetlistDetailView(
+                            session = activeTemporarySetlist,
+                            items = activeTemporarySetlistItems,
+                            appState = appState,
+                            onBack = appState::closeSetlist,
+                            onSave = appState::showSaveTemporarySetlistDialog,
+                            onDiscard = appState::discardTemporarySetlist,
+                        )
+                    } else if (activeSetlist == null) {
                         SetlistsOverview(
+                            temporarySetlist = temporarySetlist,
                             setlists = snapshot.setlists,
                             itemsById = itemsById,
+                            onOpenTemporarySetlist = appState::openTemporarySetlist,
+                            onSaveTemporarySetlist = appState::showSaveTemporarySetlistDialog,
+                            onDiscardTemporarySetlist = appState::discardTemporarySetlist,
                             onOpenSetlist = appState::openSetlist,
                             onDeleteSetlist = appState::requestDeleteSetlist,
                             onOpenLibrary = {
@@ -246,6 +303,28 @@ fun LibraryScreen(
                     itemIds = selectedItems.map { it.id },
                 )
             },
+        )
+    }
+
+    if (appState.randomSetlistBuilderVisible) {
+        RandomSetlistDialog(
+            availableCount = currentScopeItems.size,
+            scopeLabel = sightReadingScopeLabel,
+            onDismiss = appState::dismissRandomSetlistBuilder,
+            onCreate = { count ->
+                appState.createTemporaryRandomSetlist(
+                    items = currentScopeItems,
+                    requestedCount = count,
+                )
+            },
+        )
+    }
+
+    if (appState.saveTemporarySetlistDialogVisible && temporarySetlist != null) {
+        SaveTemporarySetlistDialog(
+            session = temporarySetlist,
+            onDismiss = appState::dismissSaveTemporarySetlistDialog,
+            onSave = appState::saveTemporarySetlist,
         )
     }
 
@@ -544,6 +623,66 @@ private fun SummaryPillDark(text: String) {
 }
 
 @Composable
+private fun SightReadingPanel(
+    availableCount: Int,
+    scopeLabel: String,
+    onOpenRandomSheet: () -> Unit,
+    onCreateRandomSetlist: () -> Unit,
+) {
+    val hasScores = availableCount > 0
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.52f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = "Sight reading",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Text(
+                    text = if (hasScores) {
+                        "Shuffle $scopeLabel and jump into something unexpected. ${availableCount.scoreLabel()} available."
+                    } else {
+                        "There are no scores available in $scopeLabel right now."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    enabled = hasScores,
+                    onClick = onOpenRandomSheet,
+                ) {
+                    Text("Open random sheet")
+                }
+                Button(
+                    enabled = hasScores,
+                    onClick = onCreateRandomSetlist,
+                ) {
+                    Text("Create random setlist")
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SelectionActionBar(
     selectedCount: Int,
     onAddToSetlist: () -> Unit,
@@ -594,15 +733,19 @@ private fun SelectionActionBar(
 
 @Composable
 private fun SetlistsOverview(
+    temporarySetlist: TemporarySetlistSession?,
     setlists: List<LibrarySetlist>,
     itemsById: Map<String, SheetMusicItem>,
+    onOpenTemporarySetlist: () -> Unit,
+    onSaveTemporarySetlist: () -> Unit,
+    onDiscardTemporarySetlist: () -> Unit,
     onOpenSetlist: (String) -> Unit,
     onDeleteSetlist: (String) -> Unit,
     onOpenLibrary: () -> Unit,
 ) {
     val orderedSetlists = setlists.sortedByDescending { it.updatedAtEpochMillis }
 
-    if (orderedSetlists.isEmpty()) {
+    if (temporarySetlist == null && orderedSetlists.isEmpty()) {
         EmptySetlistsState(onOpenLibrary = onOpenLibrary)
         return
     }
@@ -611,6 +754,17 @@ private fun SetlistsOverview(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (temporarySetlist != null) {
+            item(key = "temporary_setlist") {
+                TemporarySetlistCard(
+                    session = temporarySetlist,
+                    itemsById = itemsById,
+                    onOpen = onOpenTemporarySetlist,
+                    onSave = onSaveTemporarySetlist,
+                    onDiscard = onDiscardTemporarySetlist,
+                )
+            }
+        }
         items(
             count = orderedSetlists.size,
             key = { index -> orderedSetlists[index].id },
@@ -656,7 +810,7 @@ private fun EmptySetlistsState(onOpenLibrary: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = "Select one or more scores from the library, then use Add to setlist. Saved setlists stay here until you delete them.",
+                text = "Select one or more scores from the library, use Add to setlist, or build a temporary random setlist for a quick sight-reading session.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
@@ -668,6 +822,118 @@ private fun EmptySetlistsState(onOpenLibrary: () -> Unit) {
                 modifier = Modifier.padding(top = 18.dp),
             ) {
                 Text("Browse scores")
+            }
+        }
+    }
+}
+
+@Composable
+private fun TemporarySetlistCard(
+    session: TemporarySetlistSession,
+    itemsById: Map<String, SheetMusicItem>,
+    onOpen: () -> Unit,
+    onSave: () -> Unit,
+    onDiscard: () -> Unit,
+) {
+    val themePalette = lunarThemePalette()
+    val previewTitles = session.itemIds
+        .mapNotNull(itemsById::get)
+        .take(3)
+        .joinToString("  •  ") { it.title }
+        .ifBlank { "No scores are left in this temporary mix." }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpen),
+        shape = MaterialTheme.shapes.large,
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f),
+        ),
+        elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .width(5.dp)
+                    .fillMaxHeight()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                themePalette.headerGradientStart,
+                                themePalette.headerGradientEnd,
+                            )
+                        )
+                    ),
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = session.title,
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontFamily = FontFamily.Serif,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                        Text(
+                            text = "${session.itemIds.size.scoreLabel()}  |  Temporary session",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                        )
+                    }
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.16f),
+                        shape = MaterialTheme.shapes.large,
+                    ) {
+                        Text(
+                            text = "Temporary",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
+                Text(
+                    text = previewTitles,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.84f),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Keep it temporary, or save it as a regular setlist if it clicks.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = onDiscard) {
+                            Text("Discard", color = MaterialTheme.colorScheme.error)
+                        }
+                        OutlinedButton(onClick = onSave) {
+                            Text("Save")
+                        }
+                        Button(onClick = onOpen) {
+                            Text("Open")
+                        }
+                    }
+                }
             }
         }
     }
@@ -766,6 +1032,78 @@ private fun SetlistCard(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TemporarySetlistDetailView(
+    session: TemporarySetlistSession,
+    items: List<SheetMusicItem>,
+    appState: LunarAppState,
+    onBack: () -> Unit,
+    onSave: () -> Unit,
+    onDiscard: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier.clickable(onClick = onBack),
+            ) {
+                Text(
+                    text = "Back",
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = session.title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = "Temporary sight-reading mix. Save it if you want to keep this run.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            SummaryPillDark("${items.size.scoreLabel()}")
+            OutlinedButton(onClick = onSave) {
+                Text("Save")
+            }
+            TextButton(onClick = onDiscard) {
+                Text("Discard", color = MaterialTheme.colorScheme.error)
+            }
+        }
+        Box(modifier = Modifier.weight(1f)) {
+            if (items.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "This temporary setlist no longer has any available scores.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                FlatScoreList(items = items, appState = appState)
             }
         }
     }
@@ -1368,6 +1706,121 @@ private fun DeleteScoreDialog(
                 ),
             ) {
                 Text("Delete")
+            }
+        },
+    )
+}
+
+@Composable
+private fun RandomSetlistDialog(
+    availableCount: Int,
+    scopeLabel: String,
+    onDismiss: () -> Unit,
+    onCreate: (Int) -> Unit,
+) {
+    var requestedCountText by remember(availableCount, scopeLabel) {
+        mutableStateOf(minOf(5, availableCount).coerceAtLeast(1).toString())
+    }
+    val requestedCount = requestedCountText.toIntOrNull()
+    val canConfirm = availableCount > 0 && requestedCount != null && requestedCount > 0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Create a random setlist") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = if (availableCount > 0) {
+                        "Build a temporary sight-reading setlist from $scopeLabel. Lunar will clamp the size to the ${availableCount.scoreLabel()} currently available."
+                    } else {
+                        "There are no scores available in $scopeLabel right now."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = requestedCountText,
+                    onValueChange = { value ->
+                        requestedCountText = value.filter(Char::isDigit)
+                    },
+                    label = { Text("How many scores?") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    enabled = availableCount > 0,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = canConfirm,
+                onClick = {
+                    requestedCount?.let(onCreate)
+                },
+            ) {
+                Text("Shuffle")
+            }
+        },
+    )
+}
+
+@Composable
+private fun SaveTemporarySetlistDialog(
+    session: TemporarySetlistSession,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var setlistName by remember(session.createdAtEpochMillis) {
+        mutableStateOf(session.title)
+    }
+    val trimmedName = setlistName.trim()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Save temporary setlist") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = "Save this ${session.itemIds.size.scoreLabel()} as a regular setlist so it stays in your library.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = setlistName,
+                    onValueChange = { setlistName = it },
+                    label = { Text("Setlist name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = trimmedName.isNotEmpty(),
+                onClick = {
+                    onSave(trimmedName)
+                },
+            ) {
+                Text("Save")
             }
         },
     )

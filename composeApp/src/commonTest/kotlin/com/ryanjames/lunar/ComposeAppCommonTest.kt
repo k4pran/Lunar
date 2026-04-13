@@ -15,7 +15,9 @@ import com.ryanjames.lunar.settings.InMemoryAppSettingsStore
 import com.ryanjames.lunar.sync.LibrarySyncManager
 import com.ryanjames.lunar.sync.ManagedPdfStore
 import com.ryanjames.lunar.sync.SyncHttpClient
+import com.ryanjames.lunar.ui.buildRandomSightReadingSelection
 import kotlinx.coroutines.runBlocking
+import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -89,6 +91,35 @@ class ComposeAppCommonTest {
             "Expected the successful file to keep syncing after the failed one.",
         )
     }
+
+    @Test
+    fun randomSightReadingSelectionClampsRequestedSize() {
+        val items = listOf(
+            randomSightReadingItem("one"),
+            randomSightReadingItem("two"),
+            randomSightReadingItem("three"),
+        )
+
+        val result = buildRandomSightReadingSelection(
+            items = items,
+            requestedCount = 10,
+            random = Random(7),
+        )
+
+        assertEquals(3, result.size)
+        assertEquals(3, result.map { it.id }.distinct().size)
+    }
+
+    @Test
+    fun randomSightReadingSelectionReturnsEmptyForEmptyLibrary() {
+        val result = buildRandomSightReadingSelection(
+            items = emptyList(),
+            requestedCount = 4,
+            random = Random(7),
+        )
+
+        assertTrue(result.isEmpty())
+    }
 }
 
 private class FakeGoogleDriveHttpClient : SyncHttpClient {
@@ -142,3 +173,14 @@ private class FakePdfPageRenderer : PdfPageRenderer {
         targetWidth: Int,
     ): RenderedPdfPage? = null
 }
+
+private fun randomSightReadingItem(id: String) = com.ryanjames.lunar.library.model.SheetMusicItem(
+    id = id,
+    title = id.replaceFirstChar(Char::uppercase),
+    composer = "Composer",
+    document = com.ryanjames.lunar.library.model.PdfDocumentReference(
+        storedPath = "/scores/$id.pdf",
+        originalFileName = "$id.pdf",
+    ),
+    dateAddedEpochMillis = 1L,
+)
