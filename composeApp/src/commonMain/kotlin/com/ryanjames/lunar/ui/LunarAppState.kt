@@ -129,8 +129,23 @@ class LunarAppState(
     }
 
     fun selectCollection(collection: String?) {
+        val nextCollection = if (query.selectedCollection == collection) null else collection
+        query = query.copy(selectedCollection = nextCollection)
+        if (
+            browseMode == LibraryBrowseMode.BY_COLLECTION &&
+            selectedGroup != null &&
+            nextCollection != null &&
+            selectedGroup?.equals(nextCollection, ignoreCase = true) != true
+        ) {
+            selectedGroup = null
+        }
+    }
+
+    fun clearRefinements() {
         query = query.copy(
-            selectedCollection = if (query.selectedCollection == collection) null else collection,
+            selectedTags = emptySet(),
+            selectedCollection = null,
+            favoritesOnly = false,
         )
     }
 

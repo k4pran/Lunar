@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -83,6 +84,13 @@ fun LibraryScreen(
         )
         BrowseModeSwitcher(appState = appState)
         SearchAndSortBar(appState = appState)
+        RefineLibraryPanel(
+            availableCollections = collections.toList(),
+            availableTags = tags.toList(),
+            visibleCount = visibleItems.size,
+            totalCount = snapshot.items.size,
+            appState = appState,
+        )
 
         // Main content area
         Box(modifier = Modifier.weight(1f)) {
@@ -533,6 +541,143 @@ private fun SortMenuButton(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun RefineLibraryPanel(
+    availableCollections: List<String>,
+    availableTags: List<String>,
+    visibleCount: Int,
+    totalCount: Int,
+    appState: LunarAppState,
+) {
+    val hasAvailableFilters = availableCollections.isNotEmpty() || availableTags.isNotEmpty()
+    val hasActiveRefinements = appState.query.selectedCollection != null ||
+        appState.query.selectedTags.isNotEmpty() ||
+        appState.query.favoritesOnly
+
+    if (!hasAvailableFilters && !hasActiveRefinements) {
+        return
+    }
+
+    val selectedTags = appState.query.selectedTags
+    val orderedCollections = availableCollections.sortedWith(String.CASE_INSENSITIVE_ORDER)
+    val orderedTags = availableTags.sortedWith(
+        compareBy<String> { if (it in selectedTags) 0 else 1 }
+            .then(String.CASE_INSENSITIVE_ORDER)
+    )
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "Refine library",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                    )
+                    Text(
+                        text = if (visibleCount == totalCount) {
+                            "Browsing ${totalCount.scoreLabel()}. Narrow the library by collection or tag."
+                        } else {
+                            "Showing ${visibleCount.scoreLabel()} out of ${totalCount.scoreLabel()}."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (hasActiveRefinements) {
+                    TextButton(onClick = appState::clearRefinements) {
+                        Text("Clear filters")
+                    }
+                }
+            }
+
+            if (orderedCollections.isNotEmpty()) {
+                FilterChipSection(
+                    title = "Collection",
+                    supportingText = "Choose one collection at a time.",
+                ) {
+                    FilterChip(
+                        selected = appState.query.selectedCollection == null,
+                        onClick = { appState.selectCollection(null) },
+                        label = { Text("All collections") },
+                    )
+                    orderedCollections.forEach { collection ->
+                        FilterChip(
+                            selected = appState.query.selectedCollection.equals(collection, ignoreCase = true),
+                            onClick = { appState.selectCollection(collection) },
+                            label = { Text(collection) },
+                        )
+                    }
+                }
+            }
+
+            if (orderedTags.isNotEmpty()) {
+                FilterChipSection(
+                    title = "Tags",
+                    supportingText = if (selectedTags.size > 1) {
+                        "Selected tags use AND matching."
+                    } else {
+                        "Choose one or more tags to narrow the list."
+                    },
+                ) {
+                    orderedTags.forEach { tag ->
+                        FilterChip(
+                            selected = tag in selectedTags,
+                            onClick = { appState.toggleTag(tag) },
+                            label = { Text(tag) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilterChipSection(
+    title: String,
+    supportingText: String,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelLarge,
+        )
+        Text(
+            text = supportingText,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            content = content,
+        )
     }
 }
 
@@ -1024,6 +1169,8 @@ private fun buildDetailsLine(item: SheetMusicItem): String {
     }
     return parts.joinToString("  |  ")
 }
+
+private fun Int.scoreLabel(): String = "$this score${if (this == 1) "" else "s"}"
 
 private fun formatEpochMillis(value: Long): String {
     val date = Instant.fromEpochMilliseconds(value)

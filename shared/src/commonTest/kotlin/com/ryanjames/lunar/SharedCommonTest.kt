@@ -98,6 +98,46 @@ class SharedCommonTest {
     }
 
     @Test
+    fun libraryQueryRequiresAllSelectedTagsWhenMultipleTagsAreChosen() {
+        val items = listOf(
+            testItem(
+                id = "1",
+                title = "Moon River",
+                composer = "Mancini",
+                tags = listOf("jazz"),
+                collection = "Standards",
+                dateAddedEpochMillis = 10L,
+            ),
+            testItem(
+                id = "2",
+                title = "Take Five",
+                composer = "Desmond",
+                tags = listOf("jazz", "quartet"),
+                collection = "Standards",
+                dateAddedEpochMillis = 20L,
+            ),
+            testItem(
+                id = "3",
+                title = "Blue Rondo",
+                composer = "Brubeck",
+                tags = listOf("quartet"),
+                collection = "Standards",
+                dateAddedEpochMillis = 30L,
+            ),
+        )
+
+        val result = items.applyLibraryQuery(
+            LibraryQuery(
+                selectedTags = setOf("jazz", "quartet"),
+                sortOption = LibrarySortOption.TITLE,
+                sortDirection = SortDirection.ASCENDING,
+            )
+        )
+
+        assertEquals(listOf("Take Five"), result.map { it.title })
+    }
+
+    @Test
     fun repositoryDeleteRemovesStoredItem() = runBlocking {
         val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
 

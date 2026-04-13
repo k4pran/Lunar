@@ -27,7 +27,7 @@ fun List<SheetMusicItem>.applyLibraryQuery(query: LibraryQuery): List<SheetMusic
 
         if (normalizedTags.isNotEmpty()) {
             val itemTags = item.tags.map { it.trim().lowercase() }.toSet()
-            if (itemTags.intersect(normalizedTags).isEmpty()) {
+            if (!normalizedTags.all(itemTags::contains)) {
                 return@filter false
             }
         }
