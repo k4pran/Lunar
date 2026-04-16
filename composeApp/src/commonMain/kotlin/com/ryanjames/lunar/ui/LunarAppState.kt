@@ -324,7 +324,7 @@ class LunarAppState(
         showTemporarySetlist()
         dismissLibraryTransientUi()
         val scoreCount = shuffledItems.size
-        bannerMessage = "Built a temporary $scoreCount score${if (scoreCount == 1) "" else "s"} for sight reading."
+        bannerMessage = "Built a temporary random setlist with $scoreCount score${if (scoreCount == 1) "" else "s"}."
     }
 
     fun showSaveTemporarySetlistDialog() {

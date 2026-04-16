@@ -1,19 +1,24 @@
 package com.ryanjames.lunar.ui
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -36,11 +41,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -80,6 +90,13 @@ fun LibraryScreen(
             visibleCount = screenModel.headerVisibleCount,
         )
         BrowseModeSwitcher(appState = appState)
+        if (snapshot.items.isNotEmpty()) {
+            RandomLibraryActionsRow(
+                availableCount = screenModel.currentScopeItems.size,
+                onOpenRandomSheet = { appState.openRandomSheet(screenModel.currentScopeItems) },
+                onCreateRandomSetlist = appState::showRandomSetlistBuilder,
+            )
+        }
         if (appState.browseMode != LibraryBrowseMode.SETLISTS) {
             SearchAndSortBar(appState = appState)
             RefineLibraryPanel(
@@ -88,14 +105,6 @@ fun LibraryScreen(
                 visibleCount = screenModel.visibleItems.size,
                 totalCount = snapshot.items.size,
                 appState = appState,
-            )
-        }
-        if (snapshot.items.isNotEmpty()) {
-            SightReadingPanel(
-                availableCount = screenModel.currentScopeItems.size,
-                scopeLabel = screenModel.sightReadingScopeLabel,
-                onOpenRandomSheet = { appState.openRandomSheet(screenModel.currentScopeItems) },
-                onCreateRandomSetlist = appState::showRandomSetlistBuilder,
             )
         }
         if (screenModel.selectedItems.isNotEmpty()) {
@@ -256,7 +265,7 @@ fun LibraryScreen(
     if (appState.randomSetlistBuilderVisible) {
         RandomSetlistDialog(
             availableCount = screenModel.currentScopeItems.size,
-            scopeLabel = screenModel.sightReadingScopeLabel,
+            scopeLabel = screenModel.randomScopeLabel,
             onDismiss = appState::dismissRandomSetlistBuilder,
             onCreate = { count ->
                 appState.createTemporaryRandomSetlist(
@@ -570,61 +579,30 @@ private fun SummaryPillDark(text: String) {
 }
 
 @Composable
-private fun SightReadingPanel(
+private fun RandomLibraryActionsRow(
     availableCount: Int,
-    scopeLabel: String,
     onOpenRandomSheet: () -> Unit,
     onCreateRandomSetlist: () -> Unit,
 ) {
     val hasScores = availableCount > 0
 
-    Card(
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        colors = androidx.compose.material3.CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.52f),
-        ),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+        OutlinedButton(
+            modifier = Modifier.weight(1f),
+            enabled = hasScores,
+            onClick = onOpenRandomSheet,
         ) {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    text = "Sight reading",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontFamily = FontFamily.Serif,
-                        fontWeight = FontWeight.SemiBold,
-                    ),
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                )
-                Text(
-                    text = if (hasScores) {
-                        "Shuffle $scopeLabel and jump into something unexpected. ${availableCount.scoreLabel()} available."
-                    } else {
-                        "There are no scores available in $scopeLabel right now."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    enabled = hasScores,
-                    onClick = onOpenRandomSheet,
-                ) {
-                    Text("Open random sheet")
-                }
-                Button(
-                    enabled = hasScores,
-                    onClick = onCreateRandomSetlist,
-                ) {
-                    Text("Create random setlist")
-                }
-            }
+            Text("Open random sheet")
+        }
+        Button(
+            modifier = Modifier.weight(1f),
+            enabled = hasScores,
+            onClick = onCreateRandomSetlist,
+        ) {
+            Text("Random setlist")
         }
     }
 }
@@ -757,7 +735,7 @@ private fun EmptySetlistsState(onOpenLibrary: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = "Select one or more scores from the library, use Add to setlist, or build a temporary random setlist for a quick sight-reading session.",
+                text = "Select one or more scores from the library, use Add to setlist, or build a temporary random mix to explore something new.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
@@ -947,7 +925,7 @@ private fun TemporarySetlistDetailView(
 ) {
     SetlistDetailScaffold(
         title = session.title,
-        subtitle = "Temporary sight-reading mix. Save it if you want to keep this run.",
+        subtitle = "Temporary random mix. Save it if you want to keep this run.",
         itemCount = items.size,
         emptyMessage = "This temporary setlist no longer has any available scores.",
         items = items,
@@ -988,51 +966,99 @@ private fun SetlistDetailView(
 
 @Composable
 private fun SearchAndSortBar(appState: LunarAppState) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        // Row 1: full-width search field
-        OutlinedTextField(
-            value = appState.query.searchText,
-            onValueChange = appState::updateSearchText,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            label = { Text("Search title, composer, tags…") },
-        )
-        // Row 2: sort / direction / layout controls
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SortMenuButton(
-                current = appState.query.sortOption,
-                onSelect = appState::updateSortOption,
-                modifier = Modifier.weight(1f),
-            )
-            DirectionToggle(
-                sortDirection = appState.query.sortDirection,
-                onToggle = {
-                    appState.updateSortDirection(
-                        if (appState.query.sortDirection == SortDirection.ASCENDING) {
-                            SortDirection.DESCENDING
-                        } else {
-                            SortDirection.ASCENDING
-                        }
-                    )
-                },
-            )
-            LayoutToggle(
-                selected = appState.layoutMode,
-                onSelect = appState::updateLayoutMode,
-            )
-            FilterChip(
-                selected = appState.query.favoritesOnly,
-                onClick = appState::toggleFavoriteFilter,
-                label = { Text("★") },
-            )
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val stackControls = maxWidth < 680.dp
+
+        if (stackControls) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                LibrarySearchField(
+                    searchText = appState.query.searchText,
+                    onValueChange = appState::updateSearchText,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                SearchAndSortControlsRow(
+                    appState = appState,
+                    modifier = Modifier.fillMaxWidth(),
+                    sortButtonModifier = Modifier.weight(1f),
+                )
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                LibrarySearchField(
+                    searchText = appState.query.searchText,
+                    onValueChange = appState::updateSearchText,
+                    modifier = Modifier.weight(1f),
+                )
+                SearchAndSortControlsRow(
+                    appState = appState,
+                    sortButtonModifier = Modifier.widthIn(min = 144.dp, max = 164.dp),
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun LibrarySearchField(
+    searchText: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = searchText,
+        onValueChange = onValueChange,
+        modifier = modifier.semantics {
+            contentDescription = "Library search"
+        },
+        singleLine = true,
+        label = { Text("Search title, composer, tags...") },
+    )
+}
+
+@Composable
+private fun SearchAndSortControlsRow(
+    appState: LunarAppState,
+    modifier: Modifier = Modifier,
+    sortButtonModifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SortMenuButton(
+            current = appState.query.sortOption,
+            onSelect = appState::updateSortOption,
+            modifier = sortButtonModifier,
+        )
+        DirectionToggle(
+            sortDirection = appState.query.sortDirection,
+            onToggle = {
+                appState.updateSortDirection(
+                    if (appState.query.sortDirection == SortDirection.ASCENDING) {
+                        SortDirection.DESCENDING
+                    } else {
+                        SortDirection.ASCENDING
+                    }
+                )
+            },
+        )
+        LayoutMenuButton(
+            selected = appState.layoutMode,
+            onSelect = appState::updateLayoutMode,
+        )
+        FilterChip(
+            selected = appState.query.favoritesOnly,
+            onClick = appState::toggleFavoriteFilter,
+            label = { Text("★") },
+        )
     }
 }
 
@@ -1047,9 +1073,20 @@ private fun SortMenuButton(
     Box(modifier = modifier) {
         OutlinedButton(
             onClick = { expanded = true },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics {
+                    contentDescription = "Sort by ${current.label()}"
+                },
         ) {
-            Text("Sort: ${current.label()}")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(current.label())
+                ChevronDownGlyph(color = MaterialTheme.colorScheme.onSurface)
+            }
         }
         DropdownMenu(
             expanded = expanded,
@@ -1085,15 +1122,32 @@ private fun RefineLibraryPanel(
         return
     }
 
+    var isExpanded by rememberSaveable(hasActiveRefinements) {
+        mutableStateOf(hasActiveRefinements)
+    }
     val selectedTags = appState.query.selectedTags
+    val activeRefinementCount = selectedTags.size +
+        (if (appState.query.selectedCollection != null) 1 else 0) +
+        (if (appState.query.favoritesOnly) 1 else 0)
     val orderedCollections = availableCollections.sortedWith(String.CASE_INSENSITIVE_ORDER)
     val orderedTags = availableTags.sortedWith(
         compareBy<String> { if (it in selectedTags) 0 else 1 }
             .then(String.CASE_INSENSITIVE_ORDER)
     )
+    val summaryText: String? = when {
+        hasActiveRefinements && visibleCount == totalCount ->
+            "Browsing ${totalCount.scoreLabel()} with $activeRefinementCount active filter${if (activeRefinementCount == 1) "" else "s"}."
+        hasActiveRefinements ->
+            "Showing ${visibleCount.scoreLabel()} out of ${totalCount.scoreLabel()} with $activeRefinementCount active filter${if (activeRefinementCount == 1) "" else "s"}."
+        visibleCount != totalCount ->
+            "Showing ${visibleCount.scoreLabel()} out of ${totalCount.scoreLabel()}."
+        else -> null
+    }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(),
         colors = androidx.compose.material3.CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface,
         ),
@@ -1120,24 +1174,30 @@ private fun RefineLibraryPanel(
                             fontWeight = FontWeight.SemiBold,
                         ),
                     )
-                    Text(
-                        text = if (visibleCount == totalCount) {
-                            "Browsing ${totalCount.scoreLabel()}. Narrow the library by collection or tag."
-                        } else {
-                            "Showing ${visibleCount.scoreLabel()} out of ${totalCount.scoreLabel()}."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
-                if (hasActiveRefinements) {
+                TextButton(onClick = { isExpanded = !isExpanded }) {
+                    Text(if (isExpanded) "Hide filters" else "Show filters")
+                }
+            }
+            if (summaryText != null) {
+                Text(
+                    text = summaryText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (hasActiveRefinements) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
                     TextButton(onClick = appState::clearRefinements) {
                         Text("Clear filters")
                     }
                 }
             }
 
-            if (orderedCollections.isNotEmpty()) {
+            if (isExpanded && orderedCollections.isNotEmpty()) {
                 FilterChipSection(
                     title = "Collection",
                     supportingText = "Choose one collection at a time.",
@@ -1157,7 +1217,7 @@ private fun RefineLibraryPanel(
                 }
             }
 
-            if (orderedTags.isNotEmpty()) {
+            if (isExpanded && orderedTags.isNotEmpty()) {
                 FilterChipSection(
                     title = "Tags",
                     supportingText = if (selectedTags.size > 1) {
@@ -1210,53 +1270,265 @@ private fun DirectionToggle(
     sortDirection: SortDirection,
     onToggle: () -> Unit,
 ) {
-    OutlinedButton(onClick = onToggle) {
-        Text(if (sortDirection == SortDirection.ASCENDING) "Asc" else "Desc")
+    CompactControlButton(
+        onClick = onToggle,
+        contentDescription = if (sortDirection == SortDirection.ASCENDING) {
+            "Sort ascending"
+        } else {
+            "Sort descending"
+        },
+    ) { contentColor ->
+        SortDirectionGlyph(
+            sortDirection = sortDirection,
+            color = contentColor,
+        )
     }
 }
 
 @Composable
-private fun LayoutToggle(
+private fun LayoutMenuButton(
     selected: LibraryLayoutMode,
     onSelect: (LibraryLayoutMode) -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        LayoutButton(
-            text = "Grid",
-            selected = selected == LibraryLayoutMode.GRID,
-            onClick = { onSelect(LibraryLayoutMode.GRID) },
-        )
-        LayoutButton(
-            text = "List",
-            selected = selected == LibraryLayoutMode.LIST,
-            onClick = { onSelect(LibraryLayoutMode.LIST) },
+    var expanded by remember { mutableStateOf(false) }
+
+    Box {
+        CompactControlButton(
+            onClick = { expanded = true },
+            contentDescription = "Layout options (${selected.label()})",
+        ) { contentColor ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                LayoutGlyph(
+                    mode = selected,
+                    color = contentColor,
+                )
+                ChevronDownGlyph(color = contentColor)
+            }
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            LibraryLayoutMode.entries.forEach { mode ->
+                DropdownMenuItem(
+                    text = { Text(mode.label()) },
+                    onClick = {
+                        expanded = false
+                        onSelect(mode)
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactControlButton(
+    onClick: () -> Unit,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    content: @Composable (Color) -> Unit,
+) {
+    val shape = MaterialTheme.shapes.medium
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = shape,
+        modifier = modifier
+            .size(44.dp)
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                shape = shape,
+            )
+            .semantics {
+                this.contentDescription = contentDescription
+            }
+            .clickable(onClick = onClick),
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            content(MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun SortDirectionGlyph(
+    sortDirection: SortDirection,
+    color: Color,
+) {
+    val barWidths = if (sortDirection == SortDirection.ASCENDING) {
+        listOf(6.dp, 9.dp, 12.dp)
+    } else {
+        listOf(12.dp, 9.dp, 6.dp)
+    }
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            barWidths.forEach { width ->
+                Box(
+                    modifier = Modifier
+                        .width(width)
+                        .height(2.dp)
+                        .background(
+                            color = color,
+                            shape = MaterialTheme.shapes.small,
+                        ),
+                )
+            }
+        }
+        DirectionArrowGlyph(
+            sortDirection = sortDirection,
+            color = color,
         )
     }
 }
 
 @Composable
-private fun LayoutButton(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit,
+private fun DirectionArrowGlyph(
+    sortDirection: SortDirection,
+    color: Color,
 ) {
-    val containerColor = if (selected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
-    }
-    val textColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-
-    Surface(
-        color = containerColor,
-        shape = MaterialTheme.shapes.large,
-        modifier = Modifier.clickable(onClick = onClick),
+    Canvas(
+        modifier = Modifier
+            .width(8.dp)
+            .height(12.dp),
     ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            style = MaterialTheme.typography.labelLarge,
-            color = textColor,
+        val strokeWidth = size.minDimension * 0.28f
+        val centerX = size.width / 2f
+
+        if (sortDirection == SortDirection.ASCENDING) {
+            drawLine(
+                color = color,
+                start = Offset(centerX, size.height * 0.85f),
+                end = Offset(centerX, size.height * 0.2f),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = color,
+                start = Offset(centerX, size.height * 0.2f),
+                end = Offset(size.width * 0.18f, size.height * 0.42f),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = color,
+                start = Offset(centerX, size.height * 0.2f),
+                end = Offset(size.width * 0.82f, size.height * 0.42f),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+        } else {
+            drawLine(
+                color = color,
+                start = Offset(centerX, size.height * 0.15f),
+                end = Offset(centerX, size.height * 0.8f),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = color,
+                start = Offset(centerX, size.height * 0.8f),
+                end = Offset(size.width * 0.18f, size.height * 0.58f),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = color,
+                start = Offset(centerX, size.height * 0.8f),
+                end = Offset(size.width * 0.82f, size.height * 0.58f),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LayoutGlyph(
+    mode: LibraryLayoutMode,
+    color: Color,
+) {
+    when (mode) {
+        LibraryLayoutMode.GRID -> GridLayoutGlyph(color = color)
+        LibraryLayoutMode.LIST -> ListLayoutGlyph(color = color)
+    }
+}
+
+@Composable
+private fun GridLayoutGlyph(color: Color) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        repeat(2) {
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                repeat(2) {
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .background(
+                                color = color,
+                                shape = MaterialTheme.shapes.small,
+                            ),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ListLayoutGlyph(color: Color) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        repeat(3) { index ->
+            Box(
+                modifier = Modifier
+                    .width(if (index == 1) 12.dp else 14.dp)
+                    .height(2.dp)
+                    .background(
+                        color = color,
+                        shape = MaterialTheme.shapes.small,
+                    ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChevronDownGlyph(color: Color) {
+    Canvas(
+        modifier = Modifier
+            .width(8.dp)
+            .height(8.dp),
+    ) {
+        val strokeWidth = size.minDimension * 0.24f
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.18f, size.height * 0.32f),
+            end = Offset(size.width / 2f, size.height * 0.68f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width / 2f, size.height * 0.68f),
+            end = Offset(size.width * 0.82f, size.height * 0.32f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
         )
     }
 }
@@ -1545,7 +1817,7 @@ private fun RandomSetlistDialog(
             ) {
                 Text(
                     text = if (availableCount > 0) {
-                        "Build a temporary sight-reading setlist from $scopeLabel. Lunar will clamp the size to the ${availableCount.scoreLabel()} currently available."
+                        "Build a temporary random setlist from $scopeLabel. Lunar will clamp the size to the ${availableCount.scoreLabel()} currently available."
                     } else {
                         "There are no scores available in $scopeLabel right now."
                     },
@@ -1971,7 +2243,7 @@ private data class LibraryScreenModel(
     val activeSetlist: LibrarySetlist?,
     val activeSetlistItems: List<SheetMusicItem>,
     val currentScopeItems: List<SheetMusicItem>,
-    val sightReadingScopeLabel: String,
+    val randomScopeLabel: String,
     val selectedItems: List<SheetMusicItem>,
     val editingItem: SheetMusicItem?,
     val deleteCandidate: SheetMusicItem?,
@@ -2027,7 +2299,7 @@ private fun buildLibraryScreenModel(
         activeSetlist = activeSetlist,
         activeSetlistItems = activeSetlistItems,
         currentScopeItems = currentScopeItems,
-        sightReadingScopeLabel = sightReadingScopeLabel(
+        randomScopeLabel = randomScopeLabel(
             browseMode = appState.browseMode,
             selectedGroup = appState.selectedGroup,
             activeTemporarySetlist = activeTemporarySetlist,
@@ -2066,7 +2338,7 @@ private fun currentScopeItems(
     }
 }
 
-private fun sightReadingScopeLabel(
+private fun randomScopeLabel(
     browseMode: LibraryBrowseMode,
     selectedGroup: String?,
     activeTemporarySetlist: TemporarySetlistSession?,
@@ -2248,6 +2520,11 @@ private fun LibrarySortOption.label(): String = when (this) {
     LibrarySortOption.COMPOSER -> "Composer"
     LibrarySortOption.DATE_ADDED -> "Date added"
     LibrarySortOption.LAST_OPENED -> "Last opened"
+}
+
+private fun LibraryLayoutMode.label(): String = when (this) {
+    LibraryLayoutMode.GRID -> "Grid"
+    LibraryLayoutMode.LIST -> "List"
 }
 
 private fun syncStatusLabel(syncStatus: SyncStatus): String = when (syncStatus) {

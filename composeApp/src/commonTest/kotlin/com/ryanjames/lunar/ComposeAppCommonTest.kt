@@ -6,28 +6,18 @@ import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.GoogleDriveImportRoot
 import com.ryanjames.lunar.library.data.GoogleDriveStorageSettings
 import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
-import com.ryanjames.lunar.library.data.InMemorySourceRegistry
-import com.ryanjames.lunar.platform.PlatformCapabilities
-import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.PdfDocumentInfo
 import com.ryanjames.lunar.platform.PdfPageRenderer
 import com.ryanjames.lunar.platform.RenderedPdfPage
-import com.ryanjames.lunar.platform.UnavailablePdfPageRenderer
-import com.ryanjames.lunar.platform.UnsupportedLibraryCacheInspector
-import com.ryanjames.lunar.platform.UnsupportedPdfImporter
 import com.ryanjames.lunar.settings.AppColorTheme
 import com.ryanjames.lunar.settings.AutoRefreshSchedule
 import com.ryanjames.lunar.settings.InMemoryAppSettingsStore
 import com.ryanjames.lunar.sync.LibrarySyncManager
 import com.ryanjames.lunar.sync.ManagedPdfStore
 import com.ryanjames.lunar.sync.SyncHttpClient
-import com.ryanjames.lunar.sync.UnsupportedGoogleDriveOAuthCoordinator
-import com.ryanjames.lunar.sync.rememberNoOpLibrarySyncManager
 import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.LibraryBrowseMode
-import com.ryanjames.lunar.ui.LunarAppState
 import com.ryanjames.lunar.ui.buildRandomSightReadingSelection
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.runBlocking
 import kotlin.random.Random
 import kotlin.test.Test
@@ -108,9 +98,9 @@ class ComposeAppCommonTest {
     @Test
     fun randomSightReadingSelectionClampsRequestedSize() {
         val items = listOf(
-            randomSightReadingItem("one"),
-            randomSightReadingItem("two"),
-            randomSightReadingItem("three"),
+            testSheetMusicItem("one"),
+            testSheetMusicItem("two"),
+            testSheetMusicItem("three"),
         )
 
         val result = buildRandomSightReadingSelection(
@@ -151,7 +141,7 @@ class ComposeAppCommonTest {
         val appState = createTestLunarAppState(this)
 
         appState.createTemporaryRandomSetlist(
-            items = listOf(randomSightReadingItem("one"), randomSightReadingItem("two")),
+            items = listOf(testSheetMusicItem("one"), testSheetMusicItem("two")),
             requestedCount = 2,
         )
         appState.openSetlist("saved-setlist")
@@ -170,7 +160,7 @@ class ComposeAppCommonTest {
         appState.toggleScoreSelection("score-1")
         appState.showSetlistPicker()
         appState.createTemporaryRandomSetlist(
-            items = listOf(randomSightReadingItem("one")),
+            items = listOf(testSheetMusicItem("one")),
             requestedCount = 1,
         )
         appState.showRandomSetlistBuilder()
@@ -236,38 +226,4 @@ private class FakePdfPageRenderer : PdfPageRenderer {
         pageIndex: Int,
         targetWidth: Int,
     ): RenderedPdfPage? = null
-}
-
-private fun randomSightReadingItem(id: String) = com.ryanjames.lunar.library.model.SheetMusicItem(
-    id = id,
-    title = id.replaceFirstChar(Char::uppercase),
-    composer = "Composer",
-    document = com.ryanjames.lunar.library.model.PdfDocumentReference(
-        storedPath = "/scores/$id.pdf",
-        originalFileName = "$id.pdf",
-    ),
-    dateAddedEpochMillis = 1L,
-)
-
-private suspend fun createTestLunarAppState(scope: CoroutineScope): LunarAppState {
-    val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
-    repository.initialize()
-
-    val runtime = PlatformRuntime(
-        platformName = "Test",
-        capabilities = PlatformCapabilities(),
-        repository = repository,
-        importer = UnsupportedPdfImporter("Import unavailable in tests."),
-        renderer = UnavailablePdfPageRenderer,
-        syncManager = rememberNoOpLibrarySyncManager(
-            repository = repository,
-            renderer = UnavailablePdfPageRenderer,
-        ),
-        sourceRegistry = InMemorySourceRegistry(),
-        settingsStore = InMemoryAppSettingsStore(),
-        googleDriveOAuth = UnsupportedGoogleDriveOAuthCoordinator,
-        cacheInspector = UnsupportedLibraryCacheInspector("Test cache"),
-    )
-
-    return LunarAppState(runtime = runtime, scope = scope)
 }

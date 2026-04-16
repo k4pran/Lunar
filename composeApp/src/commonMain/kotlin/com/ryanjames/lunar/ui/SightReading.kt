@@ -23,4 +23,4 @@ internal fun buildRandomSightReadingSelection(
         .take(requestedCount.coerceIn(1, items.size))
 }
 
-const val DEFAULT_TEMPORARY_SETLIST_NAME = "Sight Reading Mix"
+const val DEFAULT_TEMPORARY_SETLIST_NAME = "Random Mix"

@@ -35,7 +35,16 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run verification suite
-        run: ./gradlew :composeApp:jvmTest :shared:jvmTest :composeApp:compileKotlinJvm :composeApp:compileDebugKotlinAndroid
+        run: xvfb-run --auto-servernum ./gradlew :server:test :composeApp:jvmTest :shared:jvmTest koverXmlReport koverVerify :composeApp:compileKotlinJvm :composeApp:compileDebugKotlinAndroid
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: lunar-coverage-report
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            build/reports/kover/**
 
   desktop:
     name: Desktop ${{ matrix.label }}
