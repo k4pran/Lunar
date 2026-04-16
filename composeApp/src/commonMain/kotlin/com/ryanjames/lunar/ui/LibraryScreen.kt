@@ -1359,6 +1359,39 @@ private fun CompactControlButton(
 }
 
 @Composable
+private fun LibraryActionIconButton(
+    onClick: () -> Unit,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    content: @Composable (Color) -> Unit,
+) {
+    val shape = MaterialTheme.shapes.small
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
+        shape = shape,
+        modifier = modifier
+            .size(36.dp)
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.24f),
+                shape = shape,
+            )
+            .semantics {
+                this.contentDescription = contentDescription
+            }
+            .clickable(onClick = onClick),
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            content(MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
 private fun SortDirectionGlyph(
     sortDirection: SortDirection,
     color: Color,
@@ -1527,6 +1560,62 @@ private fun ChevronDownGlyph(color: Color) {
             color = color,
             start = Offset(size.width / 2f, size.height * 0.68f),
             end = Offset(size.width * 0.82f, size.height * 0.32f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+@Composable
+private fun DownloadGlyph(color: Color) {
+    Canvas(
+        modifier = Modifier.size(16.dp),
+    ) {
+        val strokeWidth = size.minDimension * 0.16f
+        val centerX = size.width / 2f
+        val arrowTop = size.height * 0.14f
+        val arrowBottom = size.height * 0.68f
+        val trayTop = size.height * 0.78f
+
+        drawLine(
+            color = color,
+            start = Offset(centerX, arrowTop),
+            end = Offset(centerX, arrowBottom),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = color,
+            start = Offset(centerX, arrowBottom),
+            end = Offset(size.width * 0.28f, size.height * 0.46f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = color,
+            start = Offset(centerX, arrowBottom),
+            end = Offset(size.width * 0.72f, size.height * 0.46f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.22f, trayTop),
+            end = Offset(size.width * 0.78f, trayTop),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.22f, trayTop),
+            end = Offset(size.width * 0.22f, size.height * 0.6f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.78f, trayTop),
+            end = Offset(size.width * 0.78f, size.height * 0.6f),
             strokeWidth = strokeWidth,
             cap = StrokeCap.Round,
         )
@@ -1715,6 +1804,14 @@ private fun LibraryCard(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        if (appState.layoutMode == LibraryLayoutMode.LIST && appState.canDownloadScores) {
+                            LibraryActionIconButton(
+                                onClick = { appState.downloadScore(item) },
+                                contentDescription = "Download ${item.title}",
+                            ) { contentColor ->
+                                DownloadGlyph(color = contentColor)
+                            }
+                        }
                         androidx.compose.material3.TextButton(
                             onClick = { appState.toggleScoreSelection(item.id) },
                         ) {

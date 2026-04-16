@@ -60,6 +60,10 @@ class ScreenSmokeTest {
             val runtime = createTestPlatformRuntime(
                 initialItems = items,
                 initialSetlists = listOf(setlist),
+                pdfExporter = TestPdfDocumentExporter { _, suggestedFileName ->
+                    "Downloads/$suggestedFileName"
+                },
+                scoreDownloadSupported = true,
             )
             val appState = createTestLunarAppState(
                 scope = backgroundScope(),
@@ -79,6 +83,11 @@ class ScreenSmokeTest {
 
             rule.onNodeWithText("Open random sheet").assertIsDisplayed()
             rule.onNodeWithText("Random setlist").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Download Moon River").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Download Moon River").performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                appState.bannerMessage == "Saved \"Moon River\" to Downloads/Moon River.pdf."
+            }
             rule.onNodeWithContentDescription("Library search").assertIsDisplayed()
             rule.runOnIdle {
                 assertTrue(

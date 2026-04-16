@@ -12,7 +12,9 @@ import com.ryanjames.lunar.platform.LibraryCacheInspector
 import com.ryanjames.lunar.platform.LibraryCacheSnapshot
 import com.ryanjames.lunar.platform.PlatformCapabilities
 import com.ryanjames.lunar.platform.PlatformRuntime
+import com.ryanjames.lunar.platform.PdfDocumentExporter
 import com.ryanjames.lunar.platform.UnavailablePdfPageRenderer
+import com.ryanjames.lunar.platform.UnsupportedPdfDocumentExporter
 import com.ryanjames.lunar.platform.UnsupportedPdfImporter
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.InMemoryAppSettingsStore
@@ -27,6 +29,8 @@ internal suspend fun createTestPlatformRuntime(
     initialSources: List<LibrarySource> = emptyList(),
     initialSettings: AppSettings = AppSettings(),
     cacheSnapshot: LibraryCacheSnapshot = LibraryCacheSnapshot(storageLabel = "Test cache"),
+    pdfExporter: PdfDocumentExporter = UnsupportedPdfDocumentExporter,
+    scoreDownloadSupported: Boolean = false,
 ): PlatformRuntime {
     val repository = DefaultSheetMusicRepository(
         storage = InMemoryLibraryStorage(
@@ -44,10 +48,13 @@ internal suspend fun createTestPlatformRuntime(
 
     return PlatformRuntime(
         platformName = "Test",
-        capabilities = PlatformCapabilities(),
+        capabilities = PlatformCapabilities(
+            scoreDownloadSupported = scoreDownloadSupported,
+        ),
         repository = repository,
         importer = UnsupportedPdfImporter("Import unavailable in tests."),
         renderer = UnavailablePdfPageRenderer,
+        pdfExporter = pdfExporter,
         syncManager = rememberNoOpLibrarySyncManager(
             repository = repository,
             renderer = UnavailablePdfPageRenderer,
@@ -123,4 +130,14 @@ private class StaticLibraryCacheInspector(
     private val snapshot: LibraryCacheSnapshot,
 ) : LibraryCacheInspector {
     override suspend fun inspect(): LibraryCacheSnapshot = snapshot
+}
+
+internal class TestPdfDocumentExporter(
+    private val exportAction: suspend (documentPath: String, suggestedFileName: String) -> String =
+        { _, suggestedFileName -> "Downloads/$suggestedFileName" },
+) : PdfDocumentExporter {
+    override suspend fun export(
+        documentPath: String,
+        suggestedFileName: String,
+    ): String = exportAction(documentPath, suggestedFileName)
 }

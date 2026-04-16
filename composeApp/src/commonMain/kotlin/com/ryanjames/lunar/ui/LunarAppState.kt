@@ -52,6 +52,9 @@ class LunarAppState(
     private val runtime: PlatformRuntime,
     private val scope: CoroutineScope,
 ) {
+    val canDownloadScores: Boolean
+        get() = runtime.capabilities.scoreDownloadSupported
+
     var selectedSection: AppSection by mutableStateOf(AppSection.LIBRARY)
         private set
 
@@ -505,6 +508,25 @@ class LunarAppState(
     fun toggleFavorite(itemId: String) {
         scope.launch {
             runtime.repository.toggleFavorite(itemId)
+        }
+    }
+
+    fun downloadScore(item: SheetMusicItem) {
+        scope.launch {
+            if (!runtime.capabilities.scoreDownloadSupported) {
+                bannerMessage = "Score downloads aren't available on this device."
+                return@launch
+            }
+
+            try {
+                val destination = runtime.pdfExporter.export(
+                    documentPath = item.document.storedPath,
+                    suggestedFileName = item.document.originalFileName,
+                )
+                bannerMessage = "Saved \"${item.title}\" to $destination."
+            } catch (error: Throwable) {
+                bannerMessage = error.message ?: "Could not download \"${item.title}\"."
+            }
         }
     }
 

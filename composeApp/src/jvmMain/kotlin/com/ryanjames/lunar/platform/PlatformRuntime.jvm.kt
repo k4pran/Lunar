@@ -57,6 +57,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
         )
     }
     val renderer = remember { DesktopPdfPageRenderer() }
+    val pdfExporter = remember { DesktopPdfDocumentExporter() }
     val pdfStore = remember(scoresDirectory) {
         DesktopManagedPdfStore(scoresDirectory = scoresDirectory)
     }
@@ -103,7 +104,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
         )
     }
 
-    return remember(repository, importer, renderer, syncManager, sourceRegistry, settingsStore, googleDriveOAuth, appRoot, cacheInspector) {
+    return remember(repository, importer, renderer, pdfExporter, syncManager, sourceRegistry, settingsStore, googleDriveOAuth, appRoot, cacheInspector) {
         PlatformRuntime(
             platformName = System.getProperty("os.name") ?: "Desktop JVM",
             capabilities = PlatformCapabilities(
@@ -111,11 +112,13 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
                 folderImportSupported = true,
                 permissionTrackingSupported = false,
                 inAppViewingSupported = true,
+                scoreDownloadSupported = true,
                 statusLine = "Library stored in ${appRoot.name}",
             ),
             repository = repository,
             importer = importer,
             renderer = renderer,
+            pdfExporter = pdfExporter,
             syncManager = syncManager,
             sourceRegistry = sourceRegistry,
             settingsStore = settingsStore,
@@ -299,6 +302,27 @@ private class DesktopPdfPageRenderer : PdfPageRenderer {
     }
 }
 
+private class DesktopPdfDocumentExporter : PdfDocumentExporter {
+    override suspend fun export(
+        documentPath: String,
+        suggestedFileName: String,
+    ): String = withContext(Dispatchers.IO) {
+        val source = File(documentPath)
+        if (!source.exists()) {
+            throw IllegalStateException("The local PDF copy is unavailable.")
+        }
+
+        val downloadsDirectory = desktopDownloadsDirectory()
+        val destination = nextAvailableExportFile(
+            directory = downloadsDirectory,
+            suggestedFileName = suggestedFileName,
+        )
+        source.copyTo(destination, overwrite = false)
+
+        "${downloadsDirectory.name}/${destination.name}"
+    }
+}
+
 private class DesktopSyncHttpClient(
     private val settingsProvider: () -> AppSettings,
 ) : SyncHttpClient {
@@ -445,6 +469,38 @@ private class DesktopManagedPdfStore(
     }
 }
 
+private fun desktopDownloadsDirectory(): File {
+    val preferred = File(System.getProperty("user.home"), "Downloads")
+    if (preferred.exists() || preferred.mkdirs()) {
+        return preferred
+    }
+
+    return File(desktopAppRootDirectory(), "exports").apply { mkdirs() }
+}
+
+private fun nextAvailableExportFile(
+    directory: File,
+    suggestedFileName: String,
+): File {
+    val normalizedName = safeExportFileName(suggestedFileName)
+    val stem = normalizedName.substringBeforeLast('.')
+    val extension = normalizedName.substringAfterLast('.', "")
+    var candidate = File(directory, normalizedName)
+    var suffix = 2
+
+    while (candidate.exists()) {
+        val nextName = if (extension.isBlank()) {
+            "${stem}_$suffix"
+        } else {
+            "${stem}_$suffix.$extension"
+        }
+        candidate = File(directory, nextName)
+        suffix += 1
+    }
+
+    return candidate
+}
+
 private fun desktopAppRootDirectory(): File {
     val appData = System.getenv("APPDATA")
     val root = if (!appData.isNullOrBlank()) {
@@ -461,6 +517,18 @@ private fun safeFileStem(fileName: String): String = fileName
     .replace(Regex("[^A-Za-z0-9_-]+"), "_")
     .trim('_')
     .ifEmpty { "score" }
+
+private fun safeExportFileName(fileName: String): String {
+    val originalStem = fileName
+        .substringBeforeLast('.')
+        .trim()
+        .ifEmpty { "score" }
+    val sanitizedStem = originalStem
+        .replace(Regex("[\\\\/:*?\"<>|]+"), "_")
+        .trim()
+        .ifEmpty { "score" }
+    return "$sanitizedStem.pdf"
+}
 
 private const val COPY_BUFFER_SIZE_BYTES = 8_192
 

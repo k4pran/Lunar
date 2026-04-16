@@ -28,6 +28,7 @@ data class PlatformRuntime(
     val repository: SheetMusicRepository,
     val importer: PdfImporter,
     val renderer: PdfPageRenderer,
+    val pdfExporter: PdfDocumentExporter,
     val syncManager: LibrarySyncManager,
     val sourceRegistry: SourceRegistry,
     val settingsStore: AppSettingsStore,
@@ -40,6 +41,7 @@ data class PlatformCapabilities(
     val folderImportSupported: Boolean = false,
     val permissionTrackingSupported: Boolean = false,
     val inAppViewingSupported: Boolean = true,
+    val scoreDownloadSupported: Boolean = false,
     val statusLine: String = "Local metadata only",
 )
 
@@ -125,6 +127,13 @@ interface PdfPageRenderer {
     ): RenderedPdfPage?
 }
 
+interface PdfDocumentExporter {
+    suspend fun export(
+        documentPath: String,
+        suggestedFileName: String,
+    ): String
+}
+
 class UnsupportedPdfImporter(
     private val message: String,
 ) : PdfImporter {
@@ -155,6 +164,13 @@ object UnavailablePdfPageRenderer : PdfPageRenderer {
     ): RenderedPdfPage? = null
 }
 
+object UnsupportedPdfDocumentExporter : PdfDocumentExporter {
+    override suspend fun export(
+        documentPath: String,
+        suggestedFileName: String,
+    ): String = throw UnsupportedOperationException("Score downloads are unavailable on this target.")
+}
+
 @Composable
 fun rememberUnsupportedPlatformRuntime(
     platformName: String,
@@ -183,11 +199,13 @@ fun rememberUnsupportedPlatformRuntime(
                 folderImportSupported = false,
                 permissionTrackingSupported = false,
                 inAppViewingSupported = false,
+                scoreDownloadSupported = false,
                 statusLine = statusLine,
             ),
             repository = repository,
             importer = UnsupportedPdfImporter(importMessage),
             renderer = UnavailablePdfPageRenderer,
+            pdfExporter = UnsupportedPdfDocumentExporter,
             syncManager = syncManager,
             sourceRegistry = InMemorySourceRegistry(),
             settingsStore = InMemoryAppSettingsStore(),

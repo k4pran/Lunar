@@ -19,6 +19,7 @@ import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.LibraryBrowseMode
 import com.ryanjames.lunar.ui.buildRandomSightReadingSelection
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -173,6 +174,66 @@ class ComposeAppCommonTest {
         assertFalse(appState.setlistPickerVisible)
         assertFalse(appState.randomSetlistBuilderVisible)
         assertFalse(appState.saveTemporarySetlistDialogVisible)
+    }
+
+    @Test
+    fun downloadingScoreExportsManagedPdfAndShowsBanner() = runBlocking {
+        val item = testSheetMusicItem(
+            id = "moon_river",
+            title = "Moon River",
+        )
+        val runtime = createTestPlatformRuntime(
+            initialItems = listOf(item),
+            pdfExporter = TestPdfDocumentExporter { documentPath, suggestedFileName ->
+                assertEquals(item.document.storedPath, documentPath)
+                assertEquals(item.document.originalFileName, suggestedFileName)
+                "Downloads/$suggestedFileName"
+            },
+            scoreDownloadSupported = true,
+        )
+        val appState = createTestLunarAppState(
+            scope = this,
+            runtime = runtime,
+        )
+
+        appState.downloadScore(item)
+        repeat(5) {
+            if (appState.bannerMessage != null) {
+                return@repeat
+            }
+            yield()
+        }
+
+        assertEquals("Saved \"Moon River\" to Downloads/Moon River.pdf.", appState.bannerMessage)
+    }
+
+    @Test
+    fun downloadingScoreReportsExporterFailure() = runBlocking {
+        val item = testSheetMusicItem(
+            id = "moon_river",
+            title = "Moon River",
+        )
+        val runtime = createTestPlatformRuntime(
+            initialItems = listOf(item),
+            pdfExporter = TestPdfDocumentExporter { _, _ ->
+                error("Downloads folder unavailable.")
+            },
+            scoreDownloadSupported = true,
+        )
+        val appState = createTestLunarAppState(
+            scope = this,
+            runtime = runtime,
+        )
+
+        appState.downloadScore(item)
+        repeat(5) {
+            if (appState.bannerMessage != null) {
+                return@repeat
+            }
+            yield()
+        }
+
+        assertEquals("Downloads folder unavailable.", appState.bannerMessage)
     }
 }
 
