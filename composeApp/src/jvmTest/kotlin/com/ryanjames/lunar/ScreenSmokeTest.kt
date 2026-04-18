@@ -166,7 +166,7 @@ class ScreenSmokeTest {
                 }
             }
 
-            rule.onAllNodesWithText("Select")[0].performClick()
+            rule.onNodeWithContentDescription("Select Autumn Leaves").performClick()
             rule.onNodeWithText("Add to songbook").assertIsDisplayed()
             rule.onNodeWithText("Add to songbook").performClick()
             rule.onNodeWithText("Add 1 score to a songbook").assertIsDisplayed()

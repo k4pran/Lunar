@@ -28,6 +28,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -1947,27 +1948,22 @@ private fun LibraryCard(
 ) {
     val themePalette = lunarThemePalette()
     val isSelected = item.id in appState.selectedScoreIds
-    val selectedBorderColor = if (isSelected) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+    val containerColor = if (isSelected) {
+        MaterialTheme.colorScheme.surfaceBright.copy(alpha = 0.96f)
     } else {
-        Color.Transparent
+        MaterialTheme.colorScheme.surface
     }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .border(
-                width = 1.dp,
-                color = selectedBorderColor,
-                shape = MaterialTheme.shapes.large,
-            )
             .clickable { appState.openPreview(item) },
         shape = MaterialTheme.shapes.large,
         colors = androidx.compose.material3.CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
+            containerColor = containerColor,
         ),
         elevation = androidx.compose.material3.CardDefaults.cardElevation(
-            defaultElevation = 2.dp,
+            defaultElevation = if (isSelected) 4.dp else 2.dp,
         ),
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -2015,19 +2011,13 @@ private fun LibraryCard(
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (isSelected) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.82f),
-                                shape = MaterialTheme.shapes.large,
-                            ) {
-                                Text(
-                                    text = "Selected",
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
-                            }
-                        }
+                        Checkbox(
+                            checked = isSelected,
+                            onCheckedChange = { appState.toggleScoreSelection(item.id) },
+                            modifier = Modifier.semantics {
+                                contentDescription = "Select ${item.title}"
+                            },
+                        )
                         FavoriteMarker(isFavorite = item.isFavorite)
                     }
                 }
@@ -2085,18 +2075,6 @@ private fun LibraryCard(
                             ) { contentColor ->
                                 DownloadGlyph(color = contentColor)
                             }
-                        }
-                        androidx.compose.material3.TextButton(
-                            onClick = { appState.toggleScoreSelection(item.id) },
-                        ) {
-                            Text(
-                                if (isSelected) "Unselect" else "Select",
-                                color = if (isSelected) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                            )
                         }
                         androidx.compose.material3.TextButton(
                             onClick = { appState.toggleFavorite(item.id) },

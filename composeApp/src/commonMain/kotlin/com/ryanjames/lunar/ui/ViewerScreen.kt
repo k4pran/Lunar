@@ -467,24 +467,6 @@ fun FullscreenViewerScreen(
                             ) {
                                 Text(if (twoPageMode) "Single Page" else "Two Pages")
                             }
-                            Surface(
-                                color = themePalette.viewerForeground.copy(alpha = 0.12f),
-                                shape = MaterialTheme.shapes.large,
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        text = if (twoPageMode) "Spread view" else "Single view",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = themePalette.viewerForeground,
-                                    )
-                                }
-                            }
                         }
 
                         Row(
