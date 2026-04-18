@@ -2053,11 +2053,17 @@ private fun LibraryCard(
                         }
                     }
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                if (appState.layoutMode == LibraryLayoutMode.GRID) {
+                    GridLibraryCardFooter(
+                        item = item,
+                        appState = appState,
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                     Text(
                         text = buildDetailsLine(item),
                         style = MaterialTheme.typography.bodySmall,
@@ -2102,7 +2108,65 @@ private fun LibraryCard(
                             Text("Open")
                         }
                     }
+                    }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GridLibraryCardFooter(
+    item: SheetMusicItem,
+    appState: LunarAppState,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = buildDetailsLine(item),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.TextButton(
+                    onClick = { appState.toggleFavorite(item.id) },
+                ) {
+                    Text(
+                        if (item.isFavorite) "Unfav" else "Fav",
+                        color = if (item.isFavorite) {
+                            MaterialTheme.colorScheme.secondary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+                androidx.compose.material3.TextButton(
+                    onClick = { appState.startEditing(item.id) },
+                ) {
+                    Text("Edit", color = MaterialTheme.colorScheme.primary)
+                }
+                androidx.compose.material3.TextButton(
+                    onClick = { appState.requestDelete(item.id) },
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            }
+            androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
+                Text("Open")
             }
         }
     }
