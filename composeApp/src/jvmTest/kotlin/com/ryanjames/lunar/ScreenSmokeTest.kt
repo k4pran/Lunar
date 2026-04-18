@@ -263,6 +263,10 @@ class ScreenSmokeTest {
             rule.onNodeWithText("Appearance").assertIsDisplayed()
             rule.onNodeWithText("Color theme").assertIsDisplayed()
             rule.onNodeWithText("Darcula").assertIsDisplayed()
+            rule.onNodeWithText("Keybindings").performClick()
+            rule.onNodeWithText("Viewer keybindings").assertIsDisplayed()
+            rule.onNodeWithText("Toggle fullscreen").assertIsDisplayed()
+            rule.onNodeWithText("F11").assertIsDisplayed()
 
             rule.runOnIdle {
                 appState.resetGlobalSettings()

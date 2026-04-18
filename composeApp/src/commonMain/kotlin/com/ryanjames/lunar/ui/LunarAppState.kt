@@ -27,7 +27,9 @@ import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.AutoRefreshSchedule
 import com.ryanjames.lunar.settings.CacheLimitPreset
 import com.ryanjames.lunar.settings.LibraryLayoutPreference
+import com.ryanjames.lunar.settings.ViewerKeybindings
 import com.ryanjames.lunar.settings.ViewerPageModePreference
+import com.ryanjames.lunar.settings.ViewerShortcutAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.time.Clock
@@ -408,6 +410,35 @@ class LunarAppState(
         updateStoredSettings { settings -> settings.copy(defaultViewerPageMode = mode) }
     }
 
+    fun updateViewerKeybinding(
+        action: ViewerShortcutAction,
+        keyId: String?,
+    ) {
+        updateStoredSettings { settings ->
+            settings.copy(
+                viewerKeybindings = settings.viewerKeybindings.withBinding(
+                    action = action,
+                    keyId = keyId,
+                )
+            )
+        }
+    }
+
+    fun clearViewerKeybinding(action: ViewerShortcutAction) {
+        updateStoredSettings { settings ->
+            settings.copy(
+                viewerKeybindings = settings.viewerKeybindings.clear(action)
+            )
+        }
+    }
+
+    fun resetViewerKeybindings() {
+        updateStoredSettings { settings ->
+            settings.copy(viewerKeybindings = ViewerKeybindings())
+        }
+        bannerMessage = "Viewer keybindings reset to defaults."
+    }
+
     fun updateTheme(theme: AppColorTheme) {
         updateStoredSettings { settings -> settings.copy(theme = theme) }
     }
@@ -541,13 +572,11 @@ class LunarAppState(
 
     fun openFullscreen(itemId: String) {
         focusLibrarySection()
-        previewTarget = null
         fullscreenTarget = ViewerTarget.Score(itemId)
     }
 
     fun openSongbookFullscreen(songbookId: String) {
         focusLibrarySection()
-        previewTarget = null
         fullscreenTarget = ViewerTarget.Songbook(songbookId)
     }
 

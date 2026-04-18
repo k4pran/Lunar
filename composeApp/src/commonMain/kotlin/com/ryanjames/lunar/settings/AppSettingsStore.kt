@@ -56,7 +56,7 @@ class JsonAppSettingsStore(
     override suspend fun initialize() {
         mutex.withLock {
             if (initialized) return
-            state.value = readFromDisk()
+            state.value = readFromDisk().normalize()
             initialized = true
         }
     }
@@ -64,7 +64,7 @@ class JsonAppSettingsStore(
     override suspend fun updateSettings(transform: (AppSettings) -> AppSettings) {
         ensureInitialized()
         mutex.withLock {
-            val updated = transform(state.value)
+            val updated = transform(state.value).normalize()
             writeToDisk(updated)
             state.value = updated
         }

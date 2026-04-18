@@ -110,6 +110,7 @@ fun App() {
                 onPageChanged = appState.fullscreenTarget.pageChanged(appState),
                 onPageCountResolved = appState.fullscreenTarget.pageCountResolved(appState),
                 defaultTwoPageMode = defaultTwoPageMode,
+                viewerKeybindings = appSettings.viewerKeybindings,
             )
         } else {
             Box(
@@ -196,6 +197,18 @@ fun App() {
                                             onPageChanged = appState.previewTarget.pageChanged(appState),
                                             onPageCountResolved = appState.previewTarget.pageCountResolved(appState),
                                             defaultTwoPageMode = defaultTwoPageMode,
+                                            viewerKeybindings = appSettings.viewerKeybindings,
+                                            onEnterFullscreen = {
+                                                when (val target = appState.previewTarget) {
+                                                    is ViewerTarget.Score ->
+                                                        appState.openFullscreen(target.itemId)
+
+                                                    is ViewerTarget.Songbook ->
+                                                        appState.openSongbookFullscreen(target.songbookId)
+
+                                                    null -> Unit
+                                                }
+                                            },
                                             backButtonLabel = "Close",
                                         )
                                     }

@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -39,9 +40,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
@@ -52,6 +59,7 @@ import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.RenderedPdfPage
+import com.ryanjames.lunar.settings.ViewerKeybindings
 
 private const val MinZoom = 0.2f
 private const val MaxZoom = 4.0f
@@ -88,6 +96,7 @@ fun ViewerScreen(
     onPageChanged: (Int) -> Unit,
     onPageCountResolved: (Int) -> Unit,
     defaultTwoPageMode: Boolean = false,
+    viewerKeybindings: ViewerKeybindings = ViewerKeybindings(),
     onEnterFullscreen: (() -> Unit)? = null,
     backButtonLabel: String = "Back to library",
     modifier: Modifier = Modifier,
@@ -103,6 +112,11 @@ fun ViewerScreen(
     var errorMessage by remember(documentState.id, currentPage) { mutableStateOf<String?>(null) }
     var isLoading by remember(documentState.id, currentPage) { mutableStateOf(true) }
     val themePalette = lunarThemePalette()
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(documentState.id) {
+        focusRequester.requestFocus()
+    }
 
     LaunchedEffect(documentState.id, currentPage, twoPageMode) {
         isLoading = true
@@ -149,7 +163,35 @@ fun ViewerScreen(
     val canGoNext = resolvedPageCount?.let { currentPage + pageStep < it } ?: true
 
     Column(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .focusRequester(focusRequester)
+            .focusable()
+            .viewerShortcutHandler(
+                keybindings = viewerKeybindings,
+                onToggleFullscreen = onEnterFullscreen,
+                onNextPage = {
+                    if (canGoNext) {
+                        currentPage = nextPageIndex(currentPage, resolvedPageCount, pageStep)
+                    }
+                },
+                onPreviousPage = {
+                    if (canGoPrevious) {
+                        currentPage = (currentPage - pageStep).coerceAtLeast(0)
+                    }
+                },
+                onToggleFavorite = onToggleFavorite,
+                onZoomIn = {
+                    zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom)
+                },
+                onZoomOut = {
+                    zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom)
+                },
+                onTogglePageViewMode = {
+                    twoPageMode = !twoPageMode
+                    zoom = FitZoom
+                },
+            ),
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         Box(
@@ -255,6 +297,7 @@ fun FullscreenViewerScreen(
     onPageChanged: (Int) -> Unit,
     onPageCountResolved: (Int) -> Unit,
     defaultTwoPageMode: Boolean = false,
+    viewerKeybindings: ViewerKeybindings = ViewerKeybindings(),
     modifier: Modifier = Modifier,
 ) {
     var currentPage by remember(documentState.id) {
@@ -269,6 +312,11 @@ fun FullscreenViewerScreen(
     var isLoading by remember(documentState.id, currentPage) { mutableStateOf(true) }
     var overlayVisible by remember { mutableStateOf(false) }
     val themePalette = lunarThemePalette()
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(documentState.id) {
+        focusRequester.requestFocus()
+    }
 
     LaunchedEffect(documentState.id, currentPage, twoPageMode) {
         isLoading = true
@@ -318,6 +366,33 @@ fun FullscreenViewerScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .focusRequester(focusRequester)
+            .focusable()
+            .viewerShortcutHandler(
+                keybindings = viewerKeybindings,
+                onToggleFullscreen = onBack,
+                onNextPage = {
+                    if (canGoNext) {
+                        currentPage = nextPageIndex(currentPage, resolvedPageCount, pageStep)
+                    }
+                },
+                onPreviousPage = {
+                    if (canGoPrevious) {
+                        currentPage = (currentPage - pageStep).coerceAtLeast(0)
+                    }
+                },
+                onToggleFavorite = onToggleFavorite,
+                onZoomIn = {
+                    zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom)
+                },
+                onZoomOut = {
+                    zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom)
+                },
+                onTogglePageViewMode = {
+                    twoPageMode = !twoPageMode
+                    zoom = FitZoom
+                },
+            )
             .background(themePalette.viewerBackdrop)
             .pointerInput(Unit) {
                 detectTapGestures(
@@ -618,6 +693,64 @@ private fun ViewerMessage(
             style = MaterialTheme.typography.bodyLarge,
             color = themePalette.viewerForeground.copy(alpha = 0.7f),
         )
+    }
+}
+
+private fun Modifier.viewerShortcutHandler(
+    keybindings: ViewerKeybindings,
+    onToggleFullscreen: (() -> Unit)?,
+    onNextPage: (() -> Unit)?,
+    onPreviousPage: (() -> Unit)?,
+    onToggleFavorite: (() -> Unit)?,
+    onZoomIn: () -> Unit,
+    onZoomOut: () -> Unit,
+    onTogglePageViewMode: () -> Unit,
+): Modifier = onPreviewKeyEvent { event ->
+    if (event.type != KeyEventType.KeyDown) {
+        return@onPreviewKeyEvent false
+    }
+
+    when (keybindings.actionForKeyId(viewerShortcutKeyId(event.key))) {
+        com.ryanjames.lunar.settings.ViewerShortcutAction.TOGGLE_FULLSCREEN ->
+            onToggleFullscreen?.let {
+                it()
+                true
+            } ?: false
+
+        com.ryanjames.lunar.settings.ViewerShortcutAction.NEXT_PAGE ->
+            onNextPage?.let {
+                it()
+                true
+            } ?: false
+
+        com.ryanjames.lunar.settings.ViewerShortcutAction.PREVIOUS_PAGE ->
+            onPreviousPage?.let {
+                it()
+                true
+            } ?: false
+
+        com.ryanjames.lunar.settings.ViewerShortcutAction.TOGGLE_FAVORITE ->
+            onToggleFavorite?.let {
+                it()
+                true
+            } ?: false
+
+        com.ryanjames.lunar.settings.ViewerShortcutAction.ZOOM_IN -> {
+            onZoomIn()
+            true
+        }
+
+        com.ryanjames.lunar.settings.ViewerShortcutAction.ZOOM_OUT -> {
+            onZoomOut()
+            true
+        }
+
+        com.ryanjames.lunar.settings.ViewerShortcutAction.TOGGLE_PAGE_VIEW_MODE -> {
+            onTogglePageViewMode()
+            true
+        }
+
+        null -> false
     }
 }
 

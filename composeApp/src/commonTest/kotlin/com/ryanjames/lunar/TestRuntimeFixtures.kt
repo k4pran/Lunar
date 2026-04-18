@@ -15,6 +15,7 @@ import com.ryanjames.lunar.platform.LibraryCacheSnapshot
 import com.ryanjames.lunar.platform.PlatformCapabilities
 import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.PdfDocumentExporter
+import com.ryanjames.lunar.platform.PdfPageRenderer
 import com.ryanjames.lunar.platform.SelectedCoverImage
 import com.ryanjames.lunar.platform.SongbookBuildResult
 import com.ryanjames.lunar.platform.SongbookPdfBuilder
@@ -37,6 +38,7 @@ internal suspend fun createTestPlatformRuntime(
     initialSources: List<LibrarySource> = emptyList(),
     initialSettings: AppSettings = AppSettings(),
     cacheSnapshot: LibraryCacheSnapshot = LibraryCacheSnapshot(storageLabel = "Test cache"),
+    renderer: PdfPageRenderer = UnavailablePdfPageRenderer,
     pdfExporter: PdfDocumentExporter = UnsupportedPdfDocumentExporter,
     scoreDownloadSupported: Boolean = false,
     localImageImportSupported: Boolean = false,
@@ -70,13 +72,13 @@ internal suspend fun createTestPlatformRuntime(
         ),
         repository = repository,
         importer = UnsupportedPdfImporter("Import unavailable in tests."),
-        renderer = UnavailablePdfPageRenderer,
+        renderer = renderer,
         pdfExporter = pdfExporter,
         songbookBuilder = songbookBuilder,
         coverImagePicker = coverImagePicker,
         syncManager = rememberNoOpLibrarySyncManager(
             repository = repository,
-            renderer = UnavailablePdfPageRenderer,
+            renderer = renderer,
         ),
         sourceRegistry = sourceRegistry,
         settingsStore = settingsStore,

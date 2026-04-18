@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 data class AppSettings(
     val defaultViewerPageMode: ViewerPageModePreference = ViewerPageModePreference.SINGLE_PAGE,
     val defaultLibraryLayout: LibraryLayoutPreference = LibraryLayoutPreference.LIST,
+    val viewerKeybindings: ViewerKeybindings = ViewerKeybindings(),
     val theme: AppColorTheme = AppColorTheme.OCEAN,
     val refreshOnLaunch: Boolean = true,
     val autoRefreshSchedule: AutoRefreshSchedule = AutoRefreshSchedule.MINUTES_15,
@@ -18,6 +19,72 @@ data class AppSettings(
 
     val cloudReadTimeoutMillis: Int
         get() = cloudReadTimeoutSeconds.coerceIn(15, 300) * 1000
+}
+
+@Serializable
+data class ViewerKeybindings(
+    val toggleFullscreen: String? = "F11",
+    val nextPage: String? = "ArrowRight",
+    val previousPage: String? = "ArrowLeft",
+    val toggleFavorite: String? = "F",
+    val zoomIn: String? = "ArrowUp",
+    val zoomOut: String? = "ArrowDown",
+    val togglePageViewMode: String? = "V",
+) {
+    fun bindingFor(action: ViewerShortcutAction): String? = when (action) {
+        ViewerShortcutAction.TOGGLE_FULLSCREEN -> toggleFullscreen
+        ViewerShortcutAction.NEXT_PAGE -> nextPage
+        ViewerShortcutAction.PREVIOUS_PAGE -> previousPage
+        ViewerShortcutAction.TOGGLE_FAVORITE -> toggleFavorite
+        ViewerShortcutAction.ZOOM_IN -> zoomIn
+        ViewerShortcutAction.ZOOM_OUT -> zoomOut
+        ViewerShortcutAction.TOGGLE_PAGE_VIEW_MODE -> togglePageViewMode
+    }
+
+    fun withBinding(
+        action: ViewerShortcutAction,
+        keyId: String?,
+    ): ViewerKeybindings = when (action) {
+        ViewerShortcutAction.TOGGLE_FULLSCREEN -> copy(toggleFullscreen = keyId)
+        ViewerShortcutAction.NEXT_PAGE -> copy(nextPage = keyId)
+        ViewerShortcutAction.PREVIOUS_PAGE -> copy(previousPage = keyId)
+        ViewerShortcutAction.TOGGLE_FAVORITE -> copy(toggleFavorite = keyId)
+        ViewerShortcutAction.ZOOM_IN -> copy(zoomIn = keyId)
+        ViewerShortcutAction.ZOOM_OUT -> copy(zoomOut = keyId)
+        ViewerShortcutAction.TOGGLE_PAGE_VIEW_MODE -> copy(togglePageViewMode = keyId)
+    }
+
+    fun clear(action: ViewerShortcutAction): ViewerKeybindings = withBinding(
+        action = action,
+        keyId = null,
+    )
+}
+
+@Serializable
+enum class ViewerShortcutAction {
+    TOGGLE_FULLSCREEN,
+    NEXT_PAGE,
+    PREVIOUS_PAGE,
+    TOGGLE_FAVORITE,
+    ZOOM_IN,
+    ZOOM_OUT,
+    TOGGLE_PAGE_VIEW_MODE,
+}
+
+internal val LegacyDefaultViewerKeybindings = ViewerKeybindings(
+    toggleFullscreen = "F11",
+    nextPage = "ArrowRight",
+    previousPage = "ArrowLeft",
+    toggleFavorite = "F",
+    zoomIn = "Equal",
+    zoomOut = "Minus",
+    togglePageViewMode = "V",
+)
+
+internal fun AppSettings.normalize(): AppSettings = if (viewerKeybindings == LegacyDefaultViewerKeybindings) {
+    copy(viewerKeybindings = ViewerKeybindings())
+} else {
+    this
 }
 
 @Serializable

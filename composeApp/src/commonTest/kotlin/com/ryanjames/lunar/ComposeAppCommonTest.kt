@@ -15,6 +15,7 @@ import com.ryanjames.lunar.platform.SongbookBuildResult
 import com.ryanjames.lunar.settings.AppColorTheme
 import com.ryanjames.lunar.settings.AutoRefreshSchedule
 import com.ryanjames.lunar.settings.InMemoryAppSettingsStore
+import com.ryanjames.lunar.settings.ViewerShortcutAction
 import com.ryanjames.lunar.sync.LibrarySyncManager
 import com.ryanjames.lunar.sync.ManagedPdfStore
 import com.ryanjames.lunar.sync.SyncHttpClient
@@ -54,6 +55,59 @@ class ComposeAppCommonTest {
         assertEquals(AppColorTheme.OCEAN, store.settings.value.theme)
         assertEquals(AutoRefreshSchedule.MINUTES_15, store.settings.value.autoRefreshSchedule)
         assertEquals(15, store.settings.value.cloudConnectTimeoutSeconds)
+    }
+
+    @Test
+    fun viewerKeybindingsUpdateAndReset() = runBlocking {
+        val runtime = createTestPlatformRuntime()
+        val appState = createTestLunarAppState(
+            scope = this,
+            runtime = runtime,
+        )
+
+        appState.updateViewerKeybinding(
+            action = ViewerShortcutAction.NEXT_PAGE,
+            keyId = "L",
+        )
+        yield()
+
+        assertEquals("L", runtime.settingsStore.settings.value.viewerKeybindings.nextPage)
+
+        appState.clearViewerKeybinding(ViewerShortcutAction.ZOOM_IN)
+        yield()
+
+        assertEquals(null, runtime.settingsStore.settings.value.viewerKeybindings.zoomIn)
+
+        appState.resetViewerKeybindings()
+        yield()
+
+        assertEquals("ArrowRight", runtime.settingsStore.settings.value.viewerKeybindings.nextPage)
+        assertEquals("ArrowUp", runtime.settingsStore.settings.value.viewerKeybindings.zoomIn)
+        assertEquals("ArrowDown", runtime.settingsStore.settings.value.viewerKeybindings.zoomOut)
+    }
+
+    @Test
+    fun closingFullscreenReturnsToExistingPreview() = runBlocking {
+        val item = testSheetMusicItem(
+            id = "moon_river",
+            title = "Moon River",
+        )
+        val runtime = createTestPlatformRuntime(initialItems = listOf(item))
+        val appState = createTestLunarAppState(
+            scope = this,
+            runtime = runtime,
+        )
+
+        appState.openPreview(item)
+        appState.openFullscreen(item.id)
+
+        assertEquals(ViewerTarget.Score(item.id), appState.previewTarget)
+        assertEquals(ViewerTarget.Score(item.id), appState.fullscreenTarget)
+
+        appState.closeFullscreen()
+
+        assertEquals(ViewerTarget.Score(item.id), appState.previewTarget)
+        assertEquals(null, appState.fullscreenTarget)
     }
 
     @Test
