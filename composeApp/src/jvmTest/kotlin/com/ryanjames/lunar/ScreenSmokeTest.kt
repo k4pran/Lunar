@@ -2,18 +2,24 @@ package com.ryanjames.lunar
 
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.foundation.layout.fillMaxSize
 import com.ryanjames.lunar.platform.ImporterState
 import com.ryanjames.lunar.platform.LibraryCacheSnapshot
 import com.ryanjames.lunar.settings.AppColorTheme
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.sync.CloudSyncState
 import com.ryanjames.lunar.ui.AppSection
+import com.ryanjames.lunar.ui.ComposeScreen
 import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.ImportScreen
 import com.ryanjames.lunar.ui.LibraryScreen
@@ -279,6 +285,60 @@ class ScreenSmokeTest {
             }
             rule.runOnIdle {
                 assertEquals(AppSection.LIBRARY, appState.selectedSection)
+            }
+        }
+    }
+
+    @Test
+    fun composeNavigationOpensPlaceholderWorkspace() {
+        runBlocking {
+            val runtime = createTestPlatformRuntime()
+            val appState = createTestLunarAppState(
+                scope = backgroundScope(),
+                runtime = runtime,
+            )
+
+            rule.setContent {
+                var selectedSection by mutableStateOf(AppSection.LIBRARY)
+
+                LunarTheme(theme = AppColorTheme.OCEAN) {
+                    androidx.compose.foundation.layout.Column(
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        BottomNavigationPanel(
+                            selectedSection = selectedSection,
+                            onSelectSection = {
+                                selectedSection = it
+                                appState.selectSection(it)
+                            },
+                        )
+
+                        if (selectedSection == AppSection.COMPOSE) {
+                            ComposeScreen(
+                                appState = appState,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+            }
+
+            rule.onNodeWithText("Compose").assertIsDisplayed()
+            rule.onNodeWithText("Compose").performClick()
+            rule.onNodeWithText("Internal renderer preview").assertIsDisplayed()
+            rule.runOnIdle {
+                assertTrue(
+                    rule.onAllNodesWithContentDescription("Notation preview canvas").fetchSemanticsNodes().isNotEmpty()
+                )
+                assertTrue(
+                    rule.onAllNodesWithText("Why this step matters").fetchSemanticsNodes().isNotEmpty()
+                )
+                assertTrue(
+                    rule.onAllNodesWithText("Back to library").fetchSemanticsNodes().isNotEmpty()
+                )
+            }
+            rule.runOnIdle {
+                assertEquals(AppSection.COMPOSE, appState.selectedSection)
             }
         }
     }

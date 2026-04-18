@@ -36,6 +36,7 @@ import com.ryanjames.lunar.library.data.LibrarySnapshot
 import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.platform.rememberPlatformRuntime
 import com.ryanjames.lunar.ui.AppSection
+import com.ryanjames.lunar.ui.ComposeScreen
 import com.ryanjames.lunar.ui.FullscreenViewerScreen
 import com.ryanjames.lunar.ui.ImportScreen
 import com.ryanjames.lunar.ui.LibraryScreen
@@ -149,6 +150,11 @@ fun App() {
                         AppSection.LIBRARY -> LibraryScreen(
                             runtime = runtime,
                             snapshot = snapshot,
+                            appState = appState,
+                            modifier = Modifier.padding(innerPadding),
+                        )
+
+                        AppSection.COMPOSE -> ComposeScreen(
                             appState = appState,
                             modifier = Modifier.padding(innerPadding),
                         )
@@ -306,7 +312,7 @@ private fun ViewerTarget?.pageCountResolved(appState: com.ryanjames.lunar.ui.Lun
     }
 
 @Composable
-private fun BottomNavigationPanel(
+internal fun BottomNavigationPanel(
     selectedSection: AppSection,
     onSelectSection: (AppSection) -> Unit,
 ) {
@@ -330,6 +336,11 @@ private fun BottomNavigationPanel(
                 title = "Library",
                 selected = selectedSection == AppSection.LIBRARY,
                 onClick = { onSelectSection(AppSection.LIBRARY) },
+            )
+            BottomNavItem(
+                title = "Compose",
+                selected = selectedSection == AppSection.COMPOSE,
+                onClick = { onSelectSection(AppSection.COMPOSE) },
             )
             BottomNavItem(
                 title = "Settings",

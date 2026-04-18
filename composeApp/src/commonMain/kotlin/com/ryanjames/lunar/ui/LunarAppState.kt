@@ -50,6 +50,7 @@ enum class LibraryBrowseMode {
 enum class AppSection {
     IMPORT,
     LIBRARY,
+    COMPOSE,
     SETTINGS,
 }
 
