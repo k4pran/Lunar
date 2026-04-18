@@ -89,6 +89,9 @@ class ScreenSmokeTest {
             rule.waitUntil(timeoutMillis = 5_000) {
                 appState.bannerMessage == "Saved \"Moon River\" to Downloads/Moon River.pdf."
             }
+            rule.onNodeWithContentDescription("Mark Moon River as favorite").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Edit Moon River").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Delete Moon River").assertIsDisplayed()
             rule.onNodeWithContentDescription("Library search").assertIsDisplayed()
             rule.runOnIdle {
                 assertTrue(

@@ -1667,6 +1667,69 @@ private fun LibraryActionIconButton(
 }
 
 @Composable
+private fun LibraryItemQuickActions(
+    item: SheetMusicItem,
+    appState: LunarAppState,
+    includeDownload: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (includeDownload) {
+            LibraryActionIconButton(
+                onClick = { appState.downloadScore(item) },
+                contentDescription = "Download ${item.title}",
+            ) { contentColor ->
+                DownloadGlyph(color = contentColor)
+            }
+        }
+        LibraryActionIconButton(
+            onClick = { appState.toggleFavorite(item.id) },
+            contentDescription = if (item.isFavorite) {
+                "Remove ${item.title} from favorites"
+            } else {
+                "Mark ${item.title} as favorite"
+            },
+        ) {
+            Text(
+                text = if (item.isFavorite) "\u2605" else "\u2606",
+                color = if (item.isFavorite) {
+                    MaterialTheme.colorScheme.secondary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        LibraryActionIconButton(
+            onClick = { appState.startEditing(item.id) },
+            contentDescription = "Edit ${item.title}",
+        ) {
+            Text(
+                text = "\u270E",
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        LibraryActionIconButton(
+            onClick = { appState.requestDelete(item.id) },
+            contentDescription = "Delete ${item.title}",
+        ) {
+            Text(
+                text = "\uD83D\uDDD1",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+    }
+}
+
+@Composable
 private fun SortDirectionGlyph(
     sortDirection: SortDirection,
     color: Color,
@@ -2064,50 +2127,25 @@ private fun LibraryCard(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                    Text(
-                        text = buildDetailsLine(item),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                        modifier = Modifier.weight(1f),
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (appState.layoutMode == LibraryLayoutMode.LIST && appState.canDownloadScores) {
-                            LibraryActionIconButton(
-                                onClick = { appState.downloadScore(item) },
-                                contentDescription = "Download ${item.title}",
-                            ) { contentColor ->
-                                DownloadGlyph(color = contentColor)
+                        Text(
+                            text = buildDetailsLine(item),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                            modifier = Modifier.weight(1f),
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            LibraryItemQuickActions(
+                                item = item,
+                                appState = appState,
+                                includeDownload = appState.canDownloadScores,
+                            )
+                            androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
+                                Text("Open")
                             }
                         }
-                        androidx.compose.material3.TextButton(
-                            onClick = { appState.toggleFavorite(item.id) },
-                        ) {
-                            Text(
-                                if (item.isFavorite) "★ Unfav" else "☆ Fav",
-                                color = if (item.isFavorite) {
-                                    MaterialTheme.colorScheme.secondary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                            )
-                        }
-                        androidx.compose.material3.TextButton(
-                            onClick = { appState.startEditing(item.id) },
-                        ) {
-                            Text("✎ Edit", color = MaterialTheme.colorScheme.primary)
-                        }
-                        androidx.compose.material3.TextButton(
-                            onClick = { appState.requestDelete(item.id) },
-                        ) {
-                            Text("Delete", color = MaterialTheme.colorScheme.error)
-                        }
-                        androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
-                            Text("Open")
-                        }
-                    }
                     }
                 }
             }
@@ -2135,36 +2173,14 @@ private fun GridLibraryCardFooter(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
+            LibraryItemQuickActions(
+                item = item,
+                appState = appState,
+                includeDownload = false,
                 modifier = Modifier
                     .weight(1f)
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                androidx.compose.material3.TextButton(
-                    onClick = { appState.toggleFavorite(item.id) },
-                ) {
-                    Text(
-                        if (item.isFavorite) "Unfav" else "Fav",
-                        color = if (item.isFavorite) {
-                            MaterialTheme.colorScheme.secondary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
-                androidx.compose.material3.TextButton(
-                    onClick = { appState.startEditing(item.id) },
-                ) {
-                    Text("Edit", color = MaterialTheme.colorScheme.primary)
-                }
-                androidx.compose.material3.TextButton(
-                    onClick = { appState.requestDelete(item.id) },
-                ) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
-                }
-            }
+            )
             androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
                 Text("Open")
             }
