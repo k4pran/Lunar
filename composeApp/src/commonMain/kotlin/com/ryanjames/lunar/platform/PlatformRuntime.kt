@@ -42,6 +42,7 @@ data class PlatformRuntime(
 data class PlatformCapabilities(
     val fileImportSupported: Boolean = true,
     val folderImportSupported: Boolean = false,
+    val localImageImportSupported: Boolean = false,
     val permissionTrackingSupported: Boolean = false,
     val inAppViewingSupported: Boolean = true,
     val scoreDownloadSupported: Boolean = false,

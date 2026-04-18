@@ -58,6 +58,7 @@ private data class EditableGoogleDriveRoot(
 @Composable
 fun AddLocalSourceDialog(
     folderImportSupported: Boolean,
+    localImageImportSupported: Boolean,
     onDismiss: () -> Unit,
     onConfirm: (type: LocalSourceType, label: String) -> Unit,
 ) {
@@ -78,7 +79,11 @@ fun AddLocalSourceDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "Choose how to import local PDFs into your library.",
+                    text = if (localImageImportSupported) {
+                        "Choose how to import local PDFs or image files into your library."
+                    } else {
+                        "Choose how to import local PDFs into your library."
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -96,7 +101,11 @@ fun AddLocalSourceDialog(
                     selected = selectedType == LocalSourceType.FILES,
                     enabled = true,
                     title = "Individual files",
-                    subtitle = "Pick one or more PDF files",
+                    subtitle = if (localImageImportSupported) {
+                        "Pick PDFs, PNGs, JPGs, or JPEGs"
+                    } else {
+                        "Pick one or more PDF files"
+                    },
                     onSelect = { selectedType = LocalSourceType.FILES },
                 )
 
@@ -105,7 +114,11 @@ fun AddLocalSourceDialog(
                     enabled = folderImportSupported,
                     title = "Folder",
                     subtitle = if (folderImportSupported) {
-                        "Scan a folder for all PDFs"
+                        if (localImageImportSupported) {
+                            "Scan a folder for PDFs and image files"
+                        } else {
+                            "Scan a folder for all PDFs"
+                        }
                     } else {
                         "Folder import not supported on this platform"
                     },

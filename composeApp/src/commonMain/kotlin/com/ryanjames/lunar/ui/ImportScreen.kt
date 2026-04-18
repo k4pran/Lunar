@@ -495,6 +495,7 @@ fun ImportScreen(
     if (showLocalDialog) {
         AddLocalSourceDialog(
             folderImportSupported = runtime.capabilities.folderImportSupported,
+            localImageImportSupported = runtime.capabilities.localImageImportSupported,
             onDismiss = { showLocalDialog = false },
             onConfirm = { type, label ->
                 showLocalDialog = false

@@ -97,10 +97,9 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             renderer = renderer,
         )
     }
-    val importer = remember(scoresDirectory, renderer) {
+    val importer = remember(scoresDirectory) {
         DesktopPdfImporter(
             scoresDirectory = scoresDirectory,
-            renderer = renderer,
         )
     }
     val sourceRegistry = remember(sourcesPath) {
@@ -137,6 +136,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             capabilities = PlatformCapabilities(
                 fileImportSupported = true,
                 folderImportSupported = true,
+                localImageImportSupported = true,
                 permissionTrackingSupported = false,
                 inAppViewingSupported = true,
                 scoreDownloadSupported = true,
@@ -161,7 +161,6 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
 
 private class DesktopPdfImporter(
     private val scoresDirectory: File,
-    private val renderer: PdfPageRenderer,
 ) : PdfImporter {
     private val importerState = MutableStateFlow(
         ImporterState(
@@ -180,14 +179,18 @@ private class DesktopPdfImporter(
         val documents = withContext(Dispatchers.IO) {
             buildList {
                 files.forEach { file ->
-                    copyFileToLibrary(file)?.let(::add)
+                    importDesktopScoreFile(file = file, scoresDirectory = scoresDirectory)?.let(::add)
                 }
             }
         }
 
         return ImportRequestResult(
             documents = documents,
-            notice = if (documents.isEmpty()) "No readable PDFs were imported from the selected files." else null,
+            notice = if (documents.isEmpty()) {
+                "No readable PDF or image files were imported from the selected files."
+            } else {
+                null
+            },
         )
     }
 
@@ -198,9 +201,9 @@ private class DesktopPdfImporter(
         val documents = withContext(Dispatchers.IO) {
             buildList {
                 folder.walkTopDown()
-                    .filter { it.isFile && it.extension.equals("pdf", ignoreCase = true) }
+                    .filter(::isSupportedDesktopScoreFile)
                     .forEach { file ->
-                        copyFileToLibrary(file)?.let(::add)
+                        importDesktopScoreFile(file = file, scoresDirectory = scoresDirectory)?.let(::add)
                     }
             }
         }
@@ -208,65 +211,18 @@ private class DesktopPdfImporter(
         return ImportRequestResult(
             documents = documents,
             notice = when {
-                documents.isEmpty() -> "No PDF files were found in the selected folder."
+                documents.isEmpty() -> "No PDF or image files were found in the selected folder."
                 else -> null
             },
         )
     }
 
-    private suspend fun copyFileToLibrary(file: File): ImportedPdfDescriptor? {
-        if (!file.exists()) {
-            return null
-        }
-
-        val safeStem = safeFileStem(file.name)
-        val destination = File(
-            scoresDirectory,
-            "${System.currentTimeMillis()}_${Random.nextInt(1000, 9999)}_$safeStem.pdf",
-        )
-
-        val contentFingerprint = copyToManagedPdf(
-            source = file,
-            destination = destination,
-        )
-
-        val pageCount = renderer.inspect(destination.absolutePath)?.pageCount
-
-        return ImportedPdfDescriptor(
-            storedPath = destination.absolutePath,
-            originalFileName = file.name,
-            sourceUri = file.toURI().toString(),
-            contentFingerprint = contentFingerprint,
-            pageCount = pageCount,
-            suggestedTitle = file.nameWithoutExtension,
-        )
-    }
-
-    private fun copyToManagedPdf(
-        source: File,
-        destination: File,
-    ): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        source.inputStream().use { input ->
-            destination.outputStream().use { output ->
-                val buffer = ByteArray(COPY_BUFFER_SIZE_BYTES)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read <= 0) break
-                    digest.update(buffer, 0, read)
-                    output.write(buffer, 0, read)
-                }
-            }
-        }
-        return digest.digest().toHexString()
-    }
-
     private fun selectFiles(): List<File> {
         val chooser = JFileChooser().apply {
-            dialogTitle = "Import sheet music PDFs"
+            dialogTitle = "Import sheet music files"
             isMultiSelectionEnabled = true
             fileSelectionMode = JFileChooser.FILES_ONLY
-            fileFilter = FileNameExtensionFilter("PDF files", "pdf")
+            fileFilter = FileNameExtensionFilter("Score files", "pdf", "png", "jpg", "jpeg")
         }
 
         return if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
@@ -278,7 +234,7 @@ private class DesktopPdfImporter(
 
     private fun selectFolder(): File? {
         val chooser = JFileChooser().apply {
-            dialogTitle = "Select a folder of sheet music PDFs"
+            dialogTitle = "Select a folder of sheet music files"
             fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
             isMultiSelectionEnabled = false
         }
@@ -289,6 +245,42 @@ private class DesktopPdfImporter(
             null
         }
     }
+}
+
+internal fun importDesktopScoreFile(
+    file: File,
+    scoresDirectory: File,
+): ImportedPdfDescriptor? {
+    if (!isSupportedDesktopScoreFile(file)) {
+        return null
+    }
+
+    val destination = nextManagedPdfFile(
+        directory = scoresDirectory,
+        baseName = file.name,
+    )
+    val contentFingerprint = fingerprintFile(file)
+
+    val pageCount = if (file.extension.equals("pdf", ignoreCase = true)) {
+        copyFileToManagedPdf(source = file, destination = destination)
+        loadPdfPageCount(destination)
+    } else {
+        writeImageFileToManagedPdf(source = file, destination = destination) ?: return null
+        1
+    }
+
+    return ImportedPdfDescriptor(
+        storedPath = destination.absolutePath,
+        originalFileName = if (file.extension.equals("pdf", ignoreCase = true)) {
+            file.name
+        } else {
+            safeExportFileName(file.name)
+        },
+        sourceUri = file.toURI().toString(),
+        contentFingerprint = contentFingerprint,
+        pageCount = pageCount,
+        suggestedTitle = file.nameWithoutExtension,
+    )
 }
 
 private class DesktopPdfPageRenderer : PdfPageRenderer {
@@ -606,6 +598,68 @@ private class DesktopLibraryCacheInspector(
     }
 }
 
+private fun isSupportedDesktopScoreFile(file: File): Boolean =
+    file.isFile && file.extension.lowercase() in DesktopSupportedScoreExtensions
+
+private fun copyFileToManagedPdf(
+    source: File,
+    destination: File,
+) {
+    source.inputStream().use { input ->
+        destination.outputStream().use { output ->
+            val buffer = ByteArray(COPY_BUFFER_SIZE_BYTES)
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                output.write(buffer, 0, read)
+            }
+        }
+    }
+}
+
+private fun writeImageFileToManagedPdf(
+    source: File,
+    destination: File,
+): File? {
+    val bufferedImage = ImageIO.read(source) ?: return null
+    val imageWidth = bufferedImage.width.coerceAtLeast(1).toFloat()
+    val imageHeight = bufferedImage.height.coerceAtLeast(1).toFloat()
+    val scale = 1000f / max(imageWidth, imageHeight)
+    val pageWidth = imageWidth * scale
+    val pageHeight = imageHeight * scale
+
+    val document = PDDocument()
+    try {
+        val page = PDPage(PDRectangle(pageWidth, pageHeight))
+        document.addPage(page)
+        val image = LosslessFactory.createFromImage(document, bufferedImage)
+        PDPageContentStream(document, page).use { contentStream ->
+            contentStream.drawImage(image, 0f, 0f, pageWidth, pageHeight)
+        }
+        document.save(destination)
+        return destination
+    } finally {
+        document.close()
+    }
+}
+
+private fun fingerprintFile(file: File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input ->
+        val buffer = ByteArray(COPY_BUFFER_SIZE_BYTES)
+        while (true) {
+            val read = input.read(buffer)
+            if (read <= 0) break
+            digest.update(buffer, 0, read)
+        }
+    }
+    return digest.digest().toHexString()
+}
+
+private fun loadPdfPageCount(file: File): Int? = runCatching {
+    Loader.loadPDF(file).use { document -> document.numberOfPages }
+}.getOrNull()
+
 private class DesktopManagedPdfStore(
     private val scoresDirectory: File,
 ) : ManagedPdfStore {
@@ -702,6 +756,7 @@ private fun safeExportFileName(fileName: String): String {
 }
 
 private const val COPY_BUFFER_SIZE_BYTES = 8_192
+private val DesktopSupportedScoreExtensions = setOf("pdf", "png", "jpg", "jpeg")
 
 private fun ByteArray.toHexString(): String = joinToString(separator = "") { byte ->
     byte.toUByte().toString(16).padStart(2, '0')

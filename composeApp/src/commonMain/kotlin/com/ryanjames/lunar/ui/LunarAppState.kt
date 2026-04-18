@@ -863,12 +863,12 @@ class LunarAppState(
             try {
                 appendImportActivity(
                     message = "Opening file picker.",
-                    currentStep = "Selecting local PDFs",
+                    currentStep = "Selecting local scores",
                 )
                 val result = importerAction()
                 appendImportActivity(
-                    message = "Importer returned ${result.documents.size} PDF${if (result.documents.size == 1) "" else "s"}.",
-                    currentStep = "Importing local PDFs",
+                    message = "Importer returned ${result.documents.size} score file${if (result.documents.size == 1) "" else "s"}.",
+                    currentStep = "Importing local scores",
                     discoveredDelta = result.documents.size,
                 )
                 val importResult = runtime.repository.importDocuments(result.documents)
@@ -881,7 +881,7 @@ class LunarAppState(
                 }
                 if (imported.isNotEmpty()) {
                     appendImportActivity(
-                        message = "Imported ${imported.size} PDF${if (imported.size == 1) "" else "s"} into the library.",
+                        message = "Imported ${imported.size} score${if (imported.size == 1) "" else "s"} into the library.",
                         currentStep = "Import complete",
                         processedDelta = imported.size,
                     )
@@ -891,7 +891,7 @@ class LunarAppState(
                         selectedSection = AppSection.LIBRARY
                         clearFilters()
                         val scores = imported.size
-                        "$scores PDF${if (scores == 1) "" else "s"} added to your library."
+                        "$scores score${if (scores == 1) "" else "s"} added to your library."
                     }
 
                     !result.notice.isNullOrBlank() -> result.notice
@@ -901,7 +901,7 @@ class LunarAppState(
                     summary = when {
                         imported.isNotEmpty() -> "Local import complete."
                         !result.notice.isNullOrBlank() -> result.notice
-                        else -> "No local PDFs were added."
+                        else -> "No local score files were added."
                     }
                 )
             } catch (error: Throwable) {
@@ -926,12 +926,12 @@ class LunarAppState(
             try {
                 appendImportActivity(
                     message = "Opening picker for $sourceLabel.",
-                    currentStep = "Selecting local PDFs",
+                    currentStep = "Selecting local scores",
                 )
                 val result = importerAction()
                 appendImportActivity(
-                    message = "$sourceLabel picker returned ${result.documents.size} PDF${if (result.documents.size == 1) "" else "s"}.",
-                    currentStep = "Importing local PDFs",
+                    message = "$sourceLabel picker returned ${result.documents.size} score file${if (result.documents.size == 1) "" else "s"}.",
+                    currentStep = "Importing local scores",
                     discoveredDelta = result.documents.size,
                 )
                 val importResult = runtime.repository.importDocumentsForSource(sourceId, result.documents)
@@ -967,11 +967,11 @@ class LunarAppState(
                         clearFilters()
                         val scores = imported.size
                         appendImportActivity(
-                            message = "$sourceLabel imported $scores PDF${if (scores == 1) "" else "s"} into the library.",
+                            message = "$sourceLabel imported $scores score${if (scores == 1) "" else "s"} into the library.",
                             currentStep = "Import complete",
                             processedDelta = scores,
                         )
-                        "$scores PDF${if (scores == 1) "" else "s"} added to your library."
+                        "$scores score${if (scores == 1) "" else "s"} added to your library."
                     }
 
                     !result.notice.isNullOrBlank() -> result.notice
@@ -981,7 +981,7 @@ class LunarAppState(
                     summary = when {
                         imported.isNotEmpty() -> "$sourceLabel import complete."
                         !result.notice.isNullOrBlank() -> result.notice
-                        else -> "No PDFs were added from $sourceLabel."
+                        else -> "No score files were added from $sourceLabel."
                     }
                 )
             } catch (error: Throwable) {
@@ -1082,9 +1082,9 @@ class LunarAppState(
         val prefix = sourceLabel.ifBlank { "Local import" }
         appendImportActivities(
             messages = skippedDocuments.map { skipped ->
-                "$prefix skipped duplicate PDF \"${skipped.originalFileName}\" because ${skipped.reason}"
+                "$prefix skipped duplicate score file \"${skipped.originalFileName}\" because ${skipped.reason}"
             },
-            currentStep = "Importing local PDFs",
+            currentStep = "Importing local scores",
             skippedDelta = skippedDocuments.size,
         )
     }

@@ -39,6 +39,7 @@ internal suspend fun createTestPlatformRuntime(
     cacheSnapshot: LibraryCacheSnapshot = LibraryCacheSnapshot(storageLabel = "Test cache"),
     pdfExporter: PdfDocumentExporter = UnsupportedPdfDocumentExporter,
     scoreDownloadSupported: Boolean = false,
+    localImageImportSupported: Boolean = false,
     songbookBuilder: SongbookPdfBuilder = UnsupportedSongbookPdfBuilder,
     coverImagePicker: CoverImagePicker = UnsupportedCoverImagePicker,
     songbookCreationSupported: Boolean = false,
@@ -63,6 +64,7 @@ internal suspend fun createTestPlatformRuntime(
         platformName = "Test",
         capabilities = PlatformCapabilities(
             scoreDownloadSupported = scoreDownloadSupported,
+            localImageImportSupported = localImageImportSupported,
             songbookCreationSupported = songbookCreationSupported,
             songbookCoverImageSupported = songbookCoverImageSupported,
         ),

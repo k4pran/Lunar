@@ -196,6 +196,7 @@ class ScreenSmokeTest {
                         itemCount = 3,
                     )
                 ),
+                localImageImportSupported = true,
                 cacheSnapshot = LibraryCacheSnapshot(
                     storageLabel = "Desktop cache",
                     cacheRootPath = "/tmp/lunar-cache",
@@ -226,6 +227,10 @@ class ScreenSmokeTest {
             rule.onNodeWithText("Sources").assertIsDisplayed()
             rule.onNodeWithText("Add local source").assertIsDisplayed()
             rule.onNodeWithText("Add cloud source").assertIsDisplayed()
+            rule.onNodeWithText("Add local source").performClick()
+            rule.onNodeWithText("Choose how to import local PDFs or image files into your library.").assertIsDisplayed()
+            rule.onNodeWithText("Pick PDFs, PNGs, JPGs, or JPEGs").assertIsDisplayed()
+            rule.onNodeWithText("Cancel").performClick()
             rule.waitUntil(timeoutMillis = 5_000) {
                 rule.onAllNodesWithText("On-device cache").fetchSemanticsNodes().isNotEmpty()
             }
