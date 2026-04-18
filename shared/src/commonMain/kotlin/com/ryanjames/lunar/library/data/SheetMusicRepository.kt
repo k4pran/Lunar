@@ -1,6 +1,7 @@
 package com.ryanjames.lunar.library.data
 
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
+import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.library.model.LibrarySetlist
 import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.library.model.RemoteSyncMetadata
@@ -18,6 +19,7 @@ import kotlin.time.Clock
 data class LibrarySnapshot(
     val items: List<SheetMusicItem> = emptyList(),
     val setlists: List<LibrarySetlist> = emptyList(),
+    val songbooks: List<LibrarySongbook> = emptyList(),
     val syncStatus: SyncStatus = SyncStatus.LocalOnly,
 )
 
@@ -139,6 +141,22 @@ interface SheetMusicRepository {
 
     suspend fun deleteSetlist(setlistId: String)
 
+    suspend fun createSongbook(
+        name: String,
+        itemIds: List<String>,
+        document: PdfDocumentReference,
+        pageCount: Int? = null,
+    ): LibrarySongbook
+
+    suspend fun addItemsToSongbook(
+        songbookId: String,
+        itemIds: List<String>,
+        document: PdfDocumentReference,
+        pageCount: Int? = null,
+    ): LibrarySongbook
+
+    suspend fun deleteSongbook(songbookId: String)
+
     suspend fun applyRemoteSync(
         providerId: String,
         providerName: String,
@@ -152,6 +170,8 @@ interface SheetMusicRepository {
     fun getItem(itemId: String): SheetMusicItem?
 
     fun getSetlist(setlistId: String): LibrarySetlist?
+
+    fun getSongbook(songbookId: String): LibrarySongbook?
 
     fun itemCountForSource(sourceId: String): Int
 }
@@ -180,14 +200,22 @@ class DefaultSheetMusicRepository(
                 setlists = storedLibrary.setlists,
                 items = storedLibrary.items,
             )
-            if (sanitizedSetlists != storedLibrary.setlists) {
+            val sanitizedSongbooks = sanitizeSongbooks(storedLibrary.songbooks)
+            if (
+                sanitizedSetlists != storedLibrary.setlists ||
+                sanitizedSongbooks != storedLibrary.songbooks
+            ) {
                 storage.writeLibraryData(
-                    storedLibrary.copy(setlists = sanitizedSetlists)
+                    storedLibrary.copy(
+                        setlists = sanitizedSetlists,
+                        songbooks = sanitizedSongbooks,
+                    )
                 )
             }
             _library.value = LibrarySnapshot(
                 items = storedLibrary.items,
                 setlists = sanitizedSetlists,
+                songbooks = sanitizedSongbooks,
                 syncStatus = syncGateway.currentStatus(),
             )
             initialized = true
@@ -396,6 +424,93 @@ class DefaultSheetMusicRepository(
         }
     }
 
+    override suspend fun createSongbook(
+        name: String,
+        itemIds: List<String>,
+        document: PdfDocumentReference,
+        pageCount: Int?,
+    ): LibrarySongbook {
+        ensureInitialized()
+
+        val createdAt = clock.now().toEpochMilliseconds()
+        var createdSongbook: LibrarySongbook? = null
+        mutateSongbooks { songbooks, _ ->
+            val normalizedName = normalizeSongbookName(name)
+                ?: error("Songbook name cannot be blank.")
+            val nextSongbook = LibrarySongbook(
+                id = buildSongbookId(createdAt),
+                name = normalizedName,
+                itemIds = sanitizeSongbookItemIds(itemIds),
+                document = sanitizeSongbookDocument(document)
+                    ?: error("Songbook PDF is unavailable."),
+                createdAtEpochMillis = createdAt,
+                updatedAtEpochMillis = createdAt,
+                pageCount = pageCount?.takeIf { it > 0 },
+            )
+            createdSongbook = nextSongbook
+            songbooks + nextSongbook
+        }
+        return requireNotNull(createdSongbook)
+    }
+
+    override suspend fun addItemsToSongbook(
+        songbookId: String,
+        itemIds: List<String>,
+        document: PdfDocumentReference,
+        pageCount: Int?,
+    ): LibrarySongbook {
+        ensureInitialized()
+
+        val updatedAt = clock.now().toEpochMilliseconds()
+        val stalePaths = mutableListOf<String>()
+        var updatedSongbook: LibrarySongbook? = null
+        mutateSongbooks { songbooks, _ ->
+            val sanitizedDocument = sanitizeSongbookDocument(document)
+                ?: error("Songbook PDF is unavailable.")
+            val sanitizedItems = sanitizeSongbookItemIds(itemIds)
+            songbooks.map { songbook ->
+                if (songbook.id != songbookId) {
+                    songbook
+                } else {
+                    if (songbook.document.storedPath != sanitizedDocument.storedPath) {
+                        stalePaths += songbook.document.storedPath
+                    }
+                    songbook.copy(
+                        itemIds = (songbook.itemIds + sanitizedItems).distinct(),
+                        document = sanitizedDocument,
+                        updatedAtEpochMillis = updatedAt,
+                        pageCount = pageCount?.takeIf { it > 0 } ?: songbook.pageCount,
+                    ).also { updatedSongbook = it }
+                }
+            }.also {
+                if (updatedSongbook == null) {
+                    error("Songbook not found.")
+                }
+            }
+        }
+
+        stalePaths
+            .distinct()
+            .forEach { stalePath ->
+                runCatching { storedDocumentCleaner.deleteStoredDocument(stalePath) }
+            }
+
+        return requireNotNull(updatedSongbook)
+    }
+
+    override suspend fun deleteSongbook(songbookId: String) {
+        ensureInitialized()
+
+        val songbook = getSongbook(songbookId) ?: return
+        runCatching {
+            storedDocumentCleaner.deleteStoredDocument(songbook.document.storedPath)
+        }
+
+        mutateSongbooks { songbooks, _ ->
+            songbooks.filterNot { existing -> existing.id == songbookId }
+        }
+    }
+
     override suspend fun applyRemoteSync(
         providerId: String,
         providerName: String,
@@ -466,15 +581,18 @@ class DefaultSheetMusicRepository(
 
             val updatedItems = keptLocalItems + syncedItems
             val updatedSetlists = sanitizeSetlists(_library.value.setlists, updatedItems)
+            val updatedSongbooks = sanitizeSongbooks(_library.value.songbooks)
             storage.writeLibraryData(
                 StoredLibraryData(
                     items = updatedItems,
                     setlists = updatedSetlists,
+                    songbooks = updatedSongbooks,
                 )
             )
             _library.value = _library.value.copy(
                 items = updatedItems,
                 setlists = updatedSetlists,
+                songbooks = updatedSongbooks,
             )
         }
 
@@ -496,6 +614,9 @@ class DefaultSheetMusicRepository(
 
     override fun getSetlist(setlistId: String): LibrarySetlist? =
         _library.value.setlists.firstOrNull { it.id == setlistId }
+
+    override fun getSongbook(songbookId: String): LibrarySongbook? =
+        _library.value.songbooks.firstOrNull { it.id == songbookId }
 
     override fun itemCountForSource(sourceId: String): Int =
         _library.value.items.count { it.sourceId == sourceId }
@@ -548,6 +669,7 @@ class DefaultSheetMusicRepository(
             snapshot.copy(
                 items = updatedItems,
                 setlists = sanitizeSetlists(snapshot.setlists, updatedItems),
+                songbooks = sanitizeSongbooks(snapshot.songbooks),
             )
         }
     }
@@ -565,6 +687,18 @@ class DefaultSheetMusicRepository(
         }
     }
 
+    private suspend fun mutateSongbooks(
+        transform: (List<LibrarySongbook>, List<SheetMusicItem>) -> List<LibrarySongbook>,
+    ) {
+        mutateLibrary { snapshot ->
+            snapshot.copy(
+                songbooks = sanitizeSongbooks(
+                    transform(snapshot.songbooks, snapshot.items)
+                )
+            )
+        }
+    }
+
     private suspend fun mutateLibrary(
         transform: (LibrarySnapshot) -> LibrarySnapshot,
     ) {
@@ -574,6 +708,7 @@ class DefaultSheetMusicRepository(
                 StoredLibraryData(
                     items = updatedLibrary.items,
                     setlists = updatedLibrary.setlists,
+                    songbooks = updatedLibrary.songbooks,
                 )
             )
             _library.value = updatedLibrary
@@ -585,6 +720,9 @@ class DefaultSheetMusicRepository(
 
     private fun buildSetlistId(createdAt: Long): String =
         "setlist_${createdAt}_${Random.nextInt(1000, 9999)}"
+
+    private fun buildSongbookId(createdAt: Long): String =
+        "songbook_${createdAt}_${Random.nextInt(1000, 9999)}"
 
     private fun buildRemoteItemId(
         providerId: String,
@@ -608,6 +746,10 @@ private fun normalizeSetlistName(name: String): String? = name
     .trim()
     .ifEmpty { null }
 
+private fun normalizeSongbookName(name: String): String? = name
+    .trim()
+    .ifEmpty { null }
+
 private fun sanitizeSetlists(
     setlists: List<LibrarySetlist>,
     items: List<SheetMusicItem>,
@@ -622,6 +764,18 @@ private fun sanitizeSetlists(
     }
 }
 
+private fun sanitizeSongbooks(songbooks: List<LibrarySongbook>): List<LibrarySongbook> =
+    songbooks.mapNotNull { songbook ->
+        val normalizedName = normalizeSongbookName(songbook.name) ?: return@mapNotNull null
+        val sanitizedDocument = sanitizeSongbookDocument(songbook.document) ?: return@mapNotNull null
+        songbook.copy(
+            name = normalizedName,
+            itemIds = sanitizeSongbookItemIds(songbook.itemIds),
+            document = sanitizedDocument,
+            pageCount = songbook.pageCount?.takeIf { it > 0 },
+        )
+    }
+
 private fun sanitizeSetlistItemIds(
     itemIds: List<String>,
     validItemIds: Set<String>,
@@ -630,6 +784,26 @@ private fun sanitizeSetlistItemIds(
     .filter(String::isNotEmpty)
     .filter { it in validItemIds }
     .distinct()
+
+private fun sanitizeSongbookItemIds(itemIds: List<String>): List<String> = itemIds
+    .map(String::trim)
+    .filter(String::isNotEmpty)
+    .distinct()
+
+private fun sanitizeSongbookDocument(document: PdfDocumentReference): PdfDocumentReference? {
+    val storedPath = document.storedPath.trim()
+    val originalFileName = document.originalFileName.trim()
+    if (storedPath.isEmpty() || originalFileName.isEmpty()) {
+        return null
+    }
+
+    return document.copy(
+        storedPath = storedPath,
+        originalFileName = originalFileName,
+        sourceUri = document.sourceUri?.trim()?.ifEmpty { null },
+        contentFingerprint = document.contentFingerprint?.trim()?.ifEmpty { null },
+    )
+}
 
 private fun normalizeTags(tags: List<String>): List<String> = tags
     .map(String::trim)

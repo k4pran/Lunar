@@ -9,6 +9,7 @@ import com.ryanjames.lunar.library.data.OkioStoredDocumentCleaner
 import com.ryanjames.lunar.library.data.JsonSourceRegistry
 import com.ryanjames.lunar.library.data.StoredDocumentFingerprinter
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
+import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.JsonAppSettingsStore
 import com.ryanjames.lunar.sync.LibrarySyncManager
@@ -23,12 +24,21 @@ import kotlinx.coroutines.withContext
 import okio.FileSystem
 import okio.Path.Companion.toPath
 import org.apache.pdfbox.Loader
+import org.apache.pdfbox.pdmodel.PDDocument
+import org.apache.pdfbox.pdmodel.PDPage
+import org.apache.pdfbox.pdmodel.PDPageContentStream
+import org.apache.pdfbox.pdmodel.common.PDRectangle
+import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory
 import org.apache.pdfbox.rendering.PDFRenderer
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
+import javax.imageio.ImageIO
 import javax.swing.JFileChooser
 import javax.swing.filechooser.FileNameExtensionFilter
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.random.Random
 
 @Composable
@@ -58,6 +68,10 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
     }
     val renderer = remember { DesktopPdfPageRenderer() }
     val pdfExporter = remember { DesktopPdfDocumentExporter() }
+    val songbookBuilder = remember(scoresDirectory) {
+        DesktopSongbookPdfBuilder(scoresDirectory = scoresDirectory)
+    }
+    val coverImagePicker = remember { DesktopCoverImagePicker() }
     val pdfStore = remember(scoresDirectory) {
         DesktopManagedPdfStore(scoresDirectory = scoresDirectory)
     }
@@ -104,7 +118,20 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
         )
     }
 
-    return remember(repository, importer, renderer, pdfExporter, syncManager, sourceRegistry, settingsStore, googleDriveOAuth, appRoot, cacheInspector) {
+    return remember(
+        repository,
+        importer,
+        renderer,
+        pdfExporter,
+        songbookBuilder,
+        coverImagePicker,
+        syncManager,
+        sourceRegistry,
+        settingsStore,
+        googleDriveOAuth,
+        appRoot,
+        cacheInspector,
+    ) {
         PlatformRuntime(
             platformName = System.getProperty("os.name") ?: "Desktop JVM",
             capabilities = PlatformCapabilities(
@@ -113,12 +140,16 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
                 permissionTrackingSupported = false,
                 inAppViewingSupported = true,
                 scoreDownloadSupported = true,
+                songbookCreationSupported = true,
+                songbookCoverImageSupported = true,
                 statusLine = "Library stored in ${appRoot.name}",
             ),
             repository = repository,
             importer = importer,
             renderer = renderer,
             pdfExporter = pdfExporter,
+            songbookBuilder = songbookBuilder,
+            coverImagePicker = coverImagePicker,
             syncManager = syncManager,
             sourceRegistry = sourceRegistry,
             settingsStore = settingsStore,
@@ -323,6 +354,135 @@ private class DesktopPdfDocumentExporter : PdfDocumentExporter {
     }
 }
 
+private class DesktopSongbookPdfBuilder(
+    private val scoresDirectory: File,
+) : SongbookPdfBuilder {
+    override suspend fun buildSongbook(
+        songbookName: String,
+        appendedDocumentPaths: List<String>,
+        existingSongbookPath: String?,
+        coverImage: SelectedCoverImage?,
+    ): SongbookBuildResult = withContext(Dispatchers.IO) {
+        val normalizedName = songbookName.trim().ifEmpty { "Songbook" }
+        val sourcePaths = appendedDocumentPaths
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+        if (existingSongbookPath.isNullOrBlank() && sourcePaths.isEmpty()) {
+            throw IllegalStateException("Select at least one score to build a songbook.")
+        }
+
+        val mergedDocument = PDDocument()
+        try {
+            coverImage?.let { addCoverPage(mergedDocument, it) }
+            existingSongbookPath
+                ?.trim()
+                ?.takeIf(String::isNotEmpty)
+                ?.let { appendPdf(mergedDocument, it) }
+            sourcePaths.forEach { path ->
+                appendPdf(mergedDocument, path)
+            }
+
+            if (mergedDocument.numberOfPages == 0) {
+                throw IllegalStateException("The songbook PDF is empty.")
+            }
+
+            val bytes = ByteArrayOutputStream().use { output ->
+                mergedDocument.save(output)
+                output.toByteArray()
+            }
+            val fingerprint = bytes.sha256()
+            val destination = nextManagedPdfFile(
+                directory = scoresDirectory,
+                baseName = normalizedName,
+            )
+            destination.outputStream().use { output ->
+                output.write(bytes)
+            }
+
+            SongbookBuildResult(
+                document = PdfDocumentReference(
+                    storedPath = destination.absolutePath,
+                    originalFileName = safeExportFileName(normalizedName),
+                    contentFingerprint = fingerprint,
+                ),
+                pageCount = mergedDocument.numberOfPages,
+            )
+        } finally {
+            mergedDocument.close()
+        }
+    }
+
+    private fun appendPdf(target: PDDocument, documentPath: String) {
+        val source = File(documentPath)
+        if (!source.exists()) {
+            throw IllegalStateException("A source PDF is unavailable: ${source.name}")
+        }
+
+        Loader.loadPDF(source).use { incoming ->
+            incoming.pages.forEach { page ->
+                target.importPage(page)
+            }
+        }
+    }
+
+    private fun addCoverPage(
+        document: PDDocument,
+        coverImage: SelectedCoverImage,
+    ) {
+        val bufferedImage = ByteArrayInputStream(coverImage.bytes).use { input ->
+            ImageIO.read(input)
+        } ?: throw IllegalStateException("The selected cover image could not be read.")
+        val page = PDPage(PDRectangle.LETTER)
+        document.addPage(page)
+
+        val pageWidth = page.mediaBox.width
+        val pageHeight = page.mediaBox.height
+        val margin = 24f
+        val availableWidth = pageWidth - margin * 2
+        val availableHeight = pageHeight - margin * 2
+        val scale = min(
+            availableWidth / bufferedImage.width.coerceAtLeast(1).toFloat(),
+            availableHeight / bufferedImage.height.coerceAtLeast(1).toFloat(),
+        )
+        val drawWidth = bufferedImage.width * scale
+        val drawHeight = bufferedImage.height * scale
+        val startX = (pageWidth - drawWidth) / 2f
+        val startY = (pageHeight - drawHeight) / 2f
+        val image = LosslessFactory.createFromImage(document, bufferedImage)
+
+        PDPageContentStream(document, page).use { contentStream ->
+            contentStream.drawImage(image, startX, startY, drawWidth, drawHeight)
+        }
+    }
+}
+
+private class DesktopCoverImagePicker : CoverImagePicker {
+    override suspend fun pickCoverImage(): SelectedCoverImage? {
+        val selectedFile = withContext(Dispatchers.Swing) { selectCoverImageFile() } ?: return null
+        return withContext(Dispatchers.IO) {
+            SelectedCoverImage(
+                displayName = selectedFile.name,
+                bytes = selectedFile.readBytes(),
+            )
+        }
+    }
+
+    private fun selectCoverImageFile(): File? {
+        val chooser = JFileChooser().apply {
+            dialogTitle = "Choose a songbook cover image"
+            isMultiSelectionEnabled = false
+            fileSelectionMode = JFileChooser.FILES_ONLY
+            fileFilter = FileNameExtensionFilter("Image files", "png", "jpg", "jpeg")
+        }
+
+        return if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
+            chooser.selectedFile
+        } else {
+            null
+        }
+    }
+}
+
 private class DesktopSyncHttpClient(
     private val settingsProvider: () -> AppSettings,
 ) : SyncHttpClient {
@@ -501,6 +661,17 @@ private fun nextAvailableExportFile(
     return candidate
 }
 
+private fun nextManagedPdfFile(
+    directory: File,
+    baseName: String,
+): File {
+    val safeStem = safeFileStem(baseName)
+    return File(
+        directory,
+        "${System.currentTimeMillis()}_${Random.nextInt(1000, 9999)}_$safeStem.pdf",
+    )
+}
+
 private fun desktopAppRootDirectory(): File {
     val appData = System.getenv("APPDATA")
     val root = if (!appData.isNullOrBlank()) {
@@ -535,3 +706,8 @@ private const val COPY_BUFFER_SIZE_BYTES = 8_192
 private fun ByteArray.toHexString(): String = joinToString(separator = "") { byte ->
     byte.toUByte().toString(16).padStart(2, '0')
 }
+
+private fun ByteArray.sha256(): String = MessageDigest
+    .getInstance("SHA-256")
+    .digest(this)
+    .toHexString()

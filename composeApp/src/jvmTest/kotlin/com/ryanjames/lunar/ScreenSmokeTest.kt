@@ -14,6 +14,7 @@ import com.ryanjames.lunar.settings.AppColorTheme
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.sync.CloudSyncState
 import com.ryanjames.lunar.ui.AppSection
+import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.ImportScreen
 import com.ryanjames.lunar.ui.LibraryScreen
 import com.ryanjames.lunar.ui.LunarTheme
@@ -119,6 +120,65 @@ class ScreenSmokeTest {
             rule.onNodeWithText("Morning rehearsal").assertIsDisplayed()
             rule.onNodeWithText("Open").performClick()
             rule.onNodeWithText("Saved automatically. Delete it whenever you no longer need it.").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun libraryScreenShowsSongbookActionsAndSongbookOverview() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(
+                    id = "autumn_leaves",
+                    title = "Autumn Leaves",
+                    collection = "Standards",
+                ),
+                testSheetMusicItem(
+                    id = "all_the_things",
+                    title = "All The Things You Are",
+                    collection = "Standards",
+                ),
+            )
+            val songbook = testLibrarySongbook(
+                id = "songbook_standards",
+                name = "Standards Book",
+                itemIds = items.map { it.id },
+                pageCount = 12,
+            )
+            val runtime = createTestPlatformRuntime(
+                initialItems = items,
+                initialSongbooks = listOf(songbook),
+                songbookCreationSupported = true,
+                songbookCoverImageSupported = true,
+            )
+            val appState = createTestLunarAppState(
+                scope = backgroundScope(),
+                runtime = runtime,
+            )
+            val snapshot = runtime.repository.library.value
+
+            rule.setContent {
+                LunarTheme(theme = AppColorTheme.OCEAN) {
+                    LibraryScreen(
+                        runtime = runtime,
+                        snapshot = snapshot,
+                        appState = appState,
+                    )
+                }
+            }
+
+            rule.onAllNodesWithText("Select")[0].performClick()
+            rule.onNodeWithText("Add to songbook").assertIsDisplayed()
+            rule.onNodeWithText("Add to songbook").performClick()
+            rule.onNodeWithText("Add 1 score to a songbook").assertIsDisplayed()
+            rule.onNodeWithText("Choose cover").assertIsDisplayed()
+            rule.onNodeWithText("Cancel").performClick()
+
+            rule.onNodeWithText("Songbooks").performClick()
+            rule.onNodeWithText("Standards Book").assertIsDisplayed()
+            rule.onNodeWithText("Standards Book").performClick()
+            rule.runOnIdle {
+                assertEquals(ViewerTarget.Songbook(songbook.id), appState.previewTarget)
+            }
         }
     }
 

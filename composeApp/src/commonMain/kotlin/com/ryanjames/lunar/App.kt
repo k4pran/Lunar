@@ -32,6 +32,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.ryanjames.lunar.library.data.LibrarySnapshot
+import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.platform.rememberPlatformRuntime
 import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.FullscreenViewerScreen
@@ -39,9 +41,12 @@ import com.ryanjames.lunar.ui.ImportScreen
 import com.ryanjames.lunar.ui.LibraryScreen
 import com.ryanjames.lunar.ui.LunarTheme
 import com.ryanjames.lunar.ui.SettingsScreen
+import com.ryanjames.lunar.ui.ViewerDocumentState
 import com.ryanjames.lunar.ui.ViewerScreen
+import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.lunarThemePalette
 import com.ryanjames.lunar.ui.rememberLunarAppState
+import com.ryanjames.lunar.ui.toViewerDocumentState
 import com.ryanjames.lunar.settings.ViewerPageModePreference
 import com.ryanjames.lunar.settings.intervalMillis
 import kotlinx.coroutines.delay
@@ -55,8 +60,8 @@ fun App() {
     val syncState by runtime.syncManager.state.collectAsState()
     val appSettings by runtime.settingsStore.settings.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
-    val previewItem = snapshot.items.firstOrNull { it.id == appState.previewItemId }
-    val fullscreenItem = snapshot.items.firstOrNull { it.id == appState.fullscreenItemId }
+    val previewDocument = snapshot.resolveViewerDocument(appState.previewTarget)
+    val fullscreenDocument = snapshot.resolveViewerDocument(appState.fullscreenTarget)
     val defaultTwoPageMode = appSettings.defaultViewerPageMode == ViewerPageModePreference.TWO_PAGE
 
     LaunchedEffect(runtime.repository, runtime.syncManager, runtime.sourceRegistry, runtime.settingsStore) {
@@ -96,18 +101,14 @@ fun App() {
     LunarTheme(theme = appSettings.theme) {
         val themePalette = lunarThemePalette()
 
-        if (fullscreenItem != null) {
+        if (fullscreenDocument != null) {
             FullscreenViewerScreen(
                 runtime = runtime,
-                item = fullscreenItem,
+                documentState = fullscreenDocument,
                 onBack = appState::closeFullscreen,
-                onToggleFavorite = { appState.toggleFavorite(fullscreenItem.id) },
-                onPageChanged = { pageIndex ->
-                    appState.updateViewerProgress(fullscreenItem.id, pageIndex)
-                },
-                onPageCountResolved = { pageCount ->
-                    appState.updateViewerPageCount(fullscreenItem.id, pageCount)
-                },
+                onToggleFavorite = appState.fullscreenTarget.favoriteToggle(appState),
+                onPageChanged = appState.fullscreenTarget.pageChanged(appState),
+                onPageCountResolved = appState.fullscreenTarget.pageCountResolved(appState),
                 defaultTwoPageMode = defaultTwoPageMode,
             )
         } else {
@@ -159,7 +160,7 @@ fun App() {
                     }
                 }
 
-                if (previewItem != null) {
+                if (previewDocument != null) {
                     Dialog(
                         onDismissRequest = appState::closePreview,
                         properties = DialogProperties(
@@ -189,15 +190,11 @@ fun App() {
                                     Box(modifier = Modifier.weight(1f)) {
                                         ViewerScreen(
                                             runtime = runtime,
-                                            item = previewItem,
+                                            documentState = previewDocument,
                                             onBack = appState::closePreview,
-                                            onToggleFavorite = { appState.toggleFavorite(previewItem.id) },
-                                            onPageChanged = { pageIndex ->
-                                                appState.updateViewerProgress(previewItem.id, pageIndex)
-                                            },
-                                            onPageCountResolved = { pageCount ->
-                                                appState.updateViewerPageCount(previewItem.id, pageCount)
-                                            },
+                                            onToggleFavorite = appState.previewTarget.favoriteToggle(appState),
+                                            onPageChanged = appState.previewTarget.pageChanged(appState),
+                                            onPageCountResolved = appState.previewTarget.pageCountResolved(appState),
                                             defaultTwoPageMode = defaultTwoPageMode,
                                             backButtonLabel = "Close",
                                         )
@@ -220,7 +217,17 @@ fun App() {
                                                 Text("Close")
                                             }
                                             androidx.compose.material3.Button(
-                                                onClick = { appState.openFullscreen(previewItem.id) },
+                                                onClick = {
+                                                    when (val target = appState.previewTarget) {
+                                                        is ViewerTarget.Score ->
+                                                            appState.openFullscreen(target.itemId)
+
+                                                        is ViewerTarget.Songbook ->
+                                                            appState.openSongbookFullscreen(target.songbookId)
+
+                                                        null -> Unit
+                                                    }
+                                                },
                                                 colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                                                     containerColor = MaterialTheme.colorScheme.primary,
                                                 ),
@@ -238,6 +245,52 @@ fun App() {
         }
     }
 }
+
+private fun LibrarySnapshot.resolveViewerDocument(target: ViewerTarget?): ViewerDocumentState? = when (target) {
+    is ViewerTarget.Score -> items
+        .firstOrNull { it.id == target.itemId }
+        ?.toViewerDocumentState()
+
+    is ViewerTarget.Songbook -> songbooks
+        .firstOrNull { it.id == target.songbookId }
+        ?.toViewerDocumentState()
+
+    null -> null
+}
+
+private fun LibrarySongbook.toViewerDocumentState(): ViewerDocumentState = ViewerDocumentState(
+    id = id,
+    title = name,
+    subtitle = buildString {
+        append("${itemIds.size} score")
+        if (itemIds.size != 1) append("s")
+        append(" combined")
+        pageCount?.let {
+            append("  |  ")
+            append("$it pages")
+        }
+    },
+    document = document,
+    pageCount = pageCount,
+)
+
+private fun ViewerTarget?.favoriteToggle(appState: com.ryanjames.lunar.ui.LunarAppState): (() -> Unit)? =
+    when (this) {
+        is ViewerTarget.Score -> { { appState.toggleFavorite(itemId) } }
+        is ViewerTarget.Songbook, null -> null
+    }
+
+private fun ViewerTarget?.pageChanged(appState: com.ryanjames.lunar.ui.LunarAppState): (Int) -> Unit =
+    when (this) {
+        is ViewerTarget.Score -> { pageIndex -> appState.updateViewerProgress(itemId, pageIndex) }
+        is ViewerTarget.Songbook, null -> { _ -> }
+    }
+
+private fun ViewerTarget?.pageCountResolved(appState: com.ryanjames.lunar.ui.LunarAppState): (Int) -> Unit =
+    when (this) {
+        is ViewerTarget.Score -> { pageCount -> appState.updateViewerPageCount(itemId, pageCount) }
+        is ViewerTarget.Songbook, null -> { _ -> }
+    }
 
 @Composable
 private fun BottomNavigationPanel(

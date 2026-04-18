@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.RenderedPdfPage
@@ -58,12 +59,32 @@ private const val ZoomStep = 0.2f
 private const val FitZoom = 1f
 private const val PageGap = 20
 
+data class ViewerDocumentState(
+    val id: String,
+    val title: String,
+    val subtitle: String? = null,
+    val document: PdfDocumentReference,
+    val lastViewedPage: Int = 0,
+    val pageCount: Int? = null,
+    val isFavorite: Boolean? = null,
+)
+
+fun SheetMusicItem.toViewerDocumentState(): ViewerDocumentState = ViewerDocumentState(
+    id = id,
+    title = title,
+    subtitle = composer,
+    document = document,
+    lastViewedPage = lastViewedPage,
+    pageCount = pageCount,
+    isFavorite = isFavorite,
+)
+
 @Composable
 fun ViewerScreen(
     runtime: PlatformRuntime,
-    item: SheetMusicItem,
+    documentState: ViewerDocumentState,
     onBack: () -> Unit,
-    onToggleFavorite: () -> Unit,
+    onToggleFavorite: (() -> Unit)? = null,
     onPageChanged: (Int) -> Unit,
     onPageCountResolved: (Int) -> Unit,
     defaultTwoPageMode: Boolean = false,
@@ -71,20 +92,24 @@ fun ViewerScreen(
     backButtonLabel: String = "Back to library",
     modifier: Modifier = Modifier,
 ) {
-    var currentPage by remember(item.id) { mutableIntStateOf(item.lastViewedPage.coerceAtLeast(0)) }
-    var zoom by remember(item.id) { mutableFloatStateOf(1f) }
-    var twoPageMode by remember(item.id, defaultTwoPageMode) { mutableStateOf(defaultTwoPageMode) }
-    var renderedPages by remember(item.id, currentPage, twoPageMode) { mutableStateOf<List<RenderedPdfPage>>(emptyList()) }
-    var errorMessage by remember(item.id, currentPage) { mutableStateOf<String?>(null) }
-    var isLoading by remember(item.id, currentPage) { mutableStateOf(true) }
+    var currentPage by remember(documentState.id) {
+        mutableIntStateOf(documentState.lastViewedPage.coerceAtLeast(0))
+    }
+    var zoom by remember(documentState.id) { mutableFloatStateOf(1f) }
+    var twoPageMode by remember(documentState.id, defaultTwoPageMode) { mutableStateOf(defaultTwoPageMode) }
+    var renderedPages by remember(documentState.id, currentPage, twoPageMode) {
+        mutableStateOf<List<RenderedPdfPage>>(emptyList())
+    }
+    var errorMessage by remember(documentState.id, currentPage) { mutableStateOf<String?>(null) }
+    var isLoading by remember(documentState.id, currentPage) { mutableStateOf(true) }
     val themePalette = lunarThemePalette()
 
-    LaunchedEffect(item.id, currentPage, twoPageMode) {
+    LaunchedEffect(documentState.id, currentPage, twoPageMode) {
         isLoading = true
         errorMessage = null
         onPageChanged(currentPage)
 
-        val info = runtime.renderer.inspect(item.document.storedPath)
+        val info = runtime.renderer.inspect(documentState.document.storedPath)
         if (info != null) {
             onPageCountResolved(info.pageCount)
             if (currentPage > info.pageCount - 1) {
@@ -95,13 +120,13 @@ fun ViewerScreen(
 
         renderedPages = buildList {
             runtime.renderer.renderPage(
-                documentPath = item.document.storedPath,
+                documentPath = documentState.document.storedPath,
                 pageIndex = currentPage,
             )?.let(::add)
 
             if (twoPageMode) {
                 runtime.renderer.renderPage(
-                    documentPath = item.document.storedPath,
+                    documentPath = documentState.document.storedPath,
                     pageIndex = currentPage + 1,
                 )?.let(::add)
             }
@@ -118,7 +143,7 @@ fun ViewerScreen(
         isLoading = false
     }
 
-    val resolvedPageCount = renderedPages.firstOrNull()?.pageCount ?: item.pageCount
+    val resolvedPageCount = renderedPages.firstOrNull()?.pageCount ?: documentState.pageCount
     val pageStep = if (twoPageMode) 2 else 1
     val canGoPrevious = currentPage > 0
     val canGoNext = resolvedPageCount?.let { currentPage + pageStep < it } ?: true
@@ -147,15 +172,15 @@ fun ViewerScreen(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = item.title,
+                        text = documentState.title,
                         style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Serif),
                         color = themePalette.headerForeground,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    item.composer?.let { composer ->
+                    documentState.subtitle?.let { subtitle ->
                         Text(
-                            text = composer,
+                            text = subtitle,
                             style = MaterialTheme.typography.bodySmall,
                             color = themePalette.headerForeground.copy(alpha = 0.7f),
                             maxLines = 1,
@@ -181,22 +206,24 @@ fun ViewerScreen(
                     twoPageMode = !twoPageMode
                     zoom = FitZoom
                 }
-                Text(
-                    text = if (item.isFavorite) "*" else "o",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = if (item.isFavorite) {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    } else {
-                        themePalette.headerForeground.copy(alpha = 0.55f)
-                    },
-                    modifier = Modifier
-                        .clickable(onClick = onToggleFavorite)
-                        .padding(horizontal = 6.dp, vertical = 4.dp),
-                )
+                if (documentState.isFavorite != null && onToggleFavorite != null) {
+                    Text(
+                        text = if (documentState.isFavorite) "*" else "o",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (documentState.isFavorite) {
+                            MaterialTheme.colorScheme.secondaryContainer
+                        } else {
+                            themePalette.headerForeground.copy(alpha = 0.55f)
+                        },
+                        modifier = Modifier
+                            .clickable(onClick = onToggleFavorite)
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                    )
+                }
                 if (onEnterFullscreen != null) {
                     CompactNavButton("Full", true, onClick = onEnterFullscreen)
                 }
-                CompactNavButton("Close", true, onClick = onBack)
+                CompactNavButton(backButtonLabel, true, onClick = onBack)
             }
         }
 
@@ -222,29 +249,33 @@ fun ViewerScreen(
 @Composable
 fun FullscreenViewerScreen(
     runtime: PlatformRuntime,
-    item: SheetMusicItem,
+    documentState: ViewerDocumentState,
     onBack: () -> Unit,
-    onToggleFavorite: () -> Unit,
+    onToggleFavorite: (() -> Unit)? = null,
     onPageChanged: (Int) -> Unit,
     onPageCountResolved: (Int) -> Unit,
     defaultTwoPageMode: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    var currentPage by remember(item.id) { mutableIntStateOf(item.lastViewedPage.coerceAtLeast(0)) }
-    var zoom by remember(item.id) { mutableFloatStateOf(1f) }
-    var twoPageMode by remember(item.id, defaultTwoPageMode) { mutableStateOf(defaultTwoPageMode) }
-    var renderedPages by remember(item.id, currentPage, twoPageMode) { mutableStateOf<List<RenderedPdfPage>>(emptyList()) }
-    var errorMessage by remember(item.id, currentPage) { mutableStateOf<String?>(null) }
-    var isLoading by remember(item.id, currentPage) { mutableStateOf(true) }
+    var currentPage by remember(documentState.id) {
+        mutableIntStateOf(documentState.lastViewedPage.coerceAtLeast(0))
+    }
+    var zoom by remember(documentState.id) { mutableFloatStateOf(1f) }
+    var twoPageMode by remember(documentState.id, defaultTwoPageMode) { mutableStateOf(defaultTwoPageMode) }
+    var renderedPages by remember(documentState.id, currentPage, twoPageMode) {
+        mutableStateOf<List<RenderedPdfPage>>(emptyList())
+    }
+    var errorMessage by remember(documentState.id, currentPage) { mutableStateOf<String?>(null) }
+    var isLoading by remember(documentState.id, currentPage) { mutableStateOf(true) }
     var overlayVisible by remember { mutableStateOf(false) }
     val themePalette = lunarThemePalette()
 
-    LaunchedEffect(item.id, currentPage, twoPageMode) {
+    LaunchedEffect(documentState.id, currentPage, twoPageMode) {
         isLoading = true
         errorMessage = null
         onPageChanged(currentPage)
 
-        val info = runtime.renderer.inspect(item.document.storedPath)
+        val info = runtime.renderer.inspect(documentState.document.storedPath)
         if (info != null) {
             onPageCountResolved(info.pageCount)
             if (currentPage > info.pageCount - 1) {
@@ -255,13 +286,13 @@ fun FullscreenViewerScreen(
 
         renderedPages = buildList {
             runtime.renderer.renderPage(
-                documentPath = item.document.storedPath,
+                documentPath = documentState.document.storedPath,
                 pageIndex = currentPage,
             )?.let(::add)
 
             if (twoPageMode) {
                 runtime.renderer.renderPage(
-                    documentPath = item.document.storedPath,
+                    documentPath = documentState.document.storedPath,
                     pageIndex = currentPage + 1,
                 )?.let(::add)
             }
@@ -278,7 +309,7 @@ fun FullscreenViewerScreen(
         isLoading = false
     }
 
-    val resolvedPageCount = renderedPages.firstOrNull()?.pageCount ?: item.pageCount
+    val resolvedPageCount = renderedPages.firstOrNull()?.pageCount ?: documentState.pageCount
     val pageStep = if (twoPageMode) 2 else 1
     val canGoPrevious = currentPage > 0
     val canGoNext = resolvedPageCount?.let { currentPage + pageStep < it } ?: true
@@ -343,15 +374,15 @@ fun FullscreenViewerScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = item.title,
+                                    text = documentState.title,
                                     style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Serif),
                                     color = themePalette.viewerForeground,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
-                                item.composer?.let { composer ->
+                                documentState.subtitle?.let { subtitle ->
                                     Text(
-                                        text = composer,
+                                        text = subtitle,
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = themePalette.viewerForeground.copy(alpha = 0.78f),
                                         maxLines = 1,
@@ -460,11 +491,13 @@ fun FullscreenViewerScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            OutlinedButton(
-                                onClick = onToggleFavorite,
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(if (item.isFavorite) "Unfavorite" else "Favorite")
+                            if (documentState.isFavorite != null && onToggleFavorite != null) {
+                                OutlinedButton(
+                                    onClick = onToggleFavorite,
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text(if (documentState.isFavorite) "Unfavorite" else "Favorite")
+                                }
                             }
                             Button(
                                 onClick = onBack,

@@ -6,9 +6,12 @@ import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.GoogleDriveImportRoot
 import com.ryanjames.lunar.library.data.GoogleDriveStorageSettings
 import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
+import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.platform.PdfDocumentInfo
 import com.ryanjames.lunar.platform.PdfPageRenderer
 import com.ryanjames.lunar.platform.RenderedPdfPage
+import com.ryanjames.lunar.platform.SelectedCoverImage
+import com.ryanjames.lunar.platform.SongbookBuildResult
 import com.ryanjames.lunar.settings.AppColorTheme
 import com.ryanjames.lunar.settings.AutoRefreshSchedule
 import com.ryanjames.lunar.settings.InMemoryAppSettingsStore
@@ -17,6 +20,7 @@ import com.ryanjames.lunar.sync.ManagedPdfStore
 import com.ryanjames.lunar.sync.SyncHttpClient
 import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.LibraryBrowseMode
+import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.buildRandomSightReadingSelection
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
@@ -24,6 +28,7 @@ import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class ComposeAppCommonTest {
@@ -160,6 +165,7 @@ class ComposeAppCommonTest {
 
         appState.toggleScoreSelection("score-1")
         appState.showSetlistPicker()
+        appState.showSongbookPicker()
         appState.createTemporaryRandomSetlist(
             items = listOf(testSheetMusicItem("one")),
             requestedCount = 1,
@@ -172,8 +178,147 @@ class ComposeAppCommonTest {
         assertEquals(AppSection.IMPORT, appState.selectedSection)
         assertTrue(appState.selectedScoreIds.isEmpty())
         assertFalse(appState.setlistPickerVisible)
+        assertFalse(appState.songbookPickerVisible)
         assertFalse(appState.randomSetlistBuilderVisible)
         assertFalse(appState.saveTemporarySetlistDialogVisible)
+    }
+
+    @Test
+    fun creatingSongbookBuildsCombinedPdfAndOpensSongbookViewer() = runBlocking {
+        val items = listOf(
+            testSheetMusicItem(id = "one", title = "One"),
+            testSheetMusicItem(id = "two", title = "Two"),
+        )
+        val runtime = createTestPlatformRuntime(
+            initialItems = items,
+            songbookBuilder = TestSongbookPdfBuilder { songbookName, appendedDocumentPaths, existingSongbookPath, coverImage ->
+                assertEquals("Evening book", songbookName)
+                assertEquals(items.map { it.document.storedPath }, appendedDocumentPaths)
+                assertEquals(null, existingSongbookPath)
+                assertNotNull(coverImage)
+                assertEquals("cover.png", coverImage.displayName)
+                SongbookBuildResult(
+                    document = PdfDocumentReference(
+                        storedPath = "/songbooks/evening-book.pdf",
+                        originalFileName = "Evening book.pdf",
+                    ),
+                    pageCount = 9,
+                )
+            },
+            songbookCreationSupported = true,
+            songbookCoverImageSupported = true,
+        )
+        val appState = createTestLunarAppState(
+            scope = this,
+            runtime = runtime,
+        )
+
+        appState.createSongbook(
+            name = "Evening book",
+            items = items,
+            coverImage = SelectedCoverImage(
+                displayName = "cover.png",
+                bytes = byteArrayOf(1, 2, 3),
+            ),
+        )
+        repeat(10) {
+            if (runtime.repository.library.value.songbooks.isNotEmpty()) {
+                return@repeat
+            }
+            yield()
+        }
+
+        val songbook = runtime.repository.library.value.songbooks.single()
+        assertEquals("Evening book", songbook.name)
+        assertEquals(items.map { it.id }, songbook.itemIds)
+        assertEquals("/songbooks/evening-book.pdf", songbook.document.storedPath)
+        assertEquals(LibraryBrowseMode.SONGBOOKS, appState.browseMode)
+        assertEquals(ViewerTarget.Songbook(songbook.id), appState.previewTarget)
+        assertEquals("Saved \"Evening book\".", appState.bannerMessage)
+    }
+
+    @Test
+    fun addingSelectionToSongbookUsesExistingMergedPdf() = runBlocking {
+        val existingItems = listOf(
+            testSheetMusicItem(id = "one", title = "One"),
+            testSheetMusicItem(id = "two", title = "Two"),
+            testSheetMusicItem(id = "three", title = "Three"),
+        )
+        val existingSongbook = testLibrarySongbook(
+            id = "songbook_evening",
+            name = "Evening book",
+            itemIds = listOf(existingItems[0].id),
+            pageCount = 4,
+        )
+        val runtime = createTestPlatformRuntime(
+            initialItems = existingItems,
+            initialSongbooks = listOf(existingSongbook),
+            songbookBuilder = TestSongbookPdfBuilder { songbookName, appendedDocumentPaths, existingSongbookPath, coverImage ->
+                assertEquals("Evening book", songbookName)
+                assertEquals(existingSongbook.document.storedPath, existingSongbookPath)
+                assertEquals(listOf(existingItems[1].document.storedPath), appendedDocumentPaths)
+                assertEquals(null, coverImage)
+                SongbookBuildResult(
+                    document = PdfDocumentReference(
+                        storedPath = "/songbooks/evening-book-v2.pdf",
+                        originalFileName = "Evening book.pdf",
+                    ),
+                    pageCount = 7,
+                )
+            },
+            songbookCreationSupported = true,
+        )
+        val appState = createTestLunarAppState(
+            scope = this,
+            runtime = runtime,
+        )
+
+        appState.addSelectionToSongbook(
+            songbookId = existingSongbook.id,
+            items = listOf(existingItems[1]),
+        )
+        repeat(10) {
+            if (runtime.repository.library.value.songbooks.single().document.storedPath == "/songbooks/evening-book-v2.pdf") {
+                return@repeat
+            }
+            yield()
+        }
+
+        val updatedSongbook = runtime.repository.library.value.songbooks.single()
+        assertEquals(listOf(existingItems[0].id, existingItems[1].id), updatedSongbook.itemIds)
+        assertEquals("/songbooks/evening-book-v2.pdf", updatedSongbook.document.storedPath)
+        assertEquals(ViewerTarget.Songbook(existingSongbook.id), appState.previewTarget)
+        assertEquals("Updated \"Evening book\".", appState.bannerMessage)
+    }
+
+    @Test
+    fun deletingSongbookClearsFullscreenTarget() = runBlocking {
+        val existingSongbook = testLibrarySongbook(
+            id = "songbook_delete",
+            name = "Delete me",
+            itemIds = listOf("one"),
+        )
+        val runtime = createTestPlatformRuntime(
+            initialSongbooks = listOf(existingSongbook),
+        )
+        val appState = createTestLunarAppState(
+            scope = this,
+            runtime = runtime,
+        )
+        appState.openSongbookFullscreen(existingSongbook.id)
+        appState.requestDeleteSongbook(existingSongbook.id)
+
+        appState.confirmDeleteSongbook()
+        repeat(10) {
+            if (runtime.repository.library.value.songbooks.isEmpty()) {
+                return@repeat
+            }
+            yield()
+        }
+
+        assertTrue(runtime.repository.library.value.songbooks.isEmpty())
+        assertEquals(null, appState.fullscreenTarget)
+        assertEquals("Songbook deleted.", appState.bannerMessage)
     }
 
     @Test

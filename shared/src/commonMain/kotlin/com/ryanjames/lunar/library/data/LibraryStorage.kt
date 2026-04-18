@@ -1,6 +1,7 @@
 package com.ryanjames.lunar.library.data
 
 import com.ryanjames.lunar.library.model.LibrarySetlist
+import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.library.model.SheetMusicItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -13,6 +14,7 @@ import okio.buffer
 data class StoredLibraryData(
     val items: List<SheetMusicItem> = emptyList(),
     val setlists: List<LibrarySetlist> = emptyList(),
+    val songbooks: List<LibrarySongbook> = emptyList(),
 )
 
 interface LibraryStorage {
@@ -31,10 +33,12 @@ interface LibraryStorage {
 class InMemoryLibraryStorage(
     initialItems: List<SheetMusicItem> = emptyList(),
     initialSetlists: List<LibrarySetlist> = emptyList(),
+    initialSongbooks: List<LibrarySongbook> = emptyList(),
 ) : LibraryStorage {
     private var data: StoredLibraryData = StoredLibraryData(
         items = initialItems,
         setlists = initialSetlists,
+        songbooks = initialSongbooks,
     )
 
     override suspend fun readLibraryData(): StoredLibraryData = data
@@ -76,6 +80,7 @@ class JsonLibraryStorage(
                 PersistedLibrary(
                     items = data.items,
                     setlists = data.setlists,
+                    songbooks = data.songbooks,
                 ),
             )
             fileSystem.sink(metadataPath).buffer().use { sink ->
@@ -89,9 +94,11 @@ class JsonLibraryStorage(
 private data class PersistedLibrary(
     val items: List<SheetMusicItem> = emptyList(),
     val setlists: List<LibrarySetlist> = emptyList(),
+    val songbooks: List<LibrarySongbook> = emptyList(),
 )
 
 private fun PersistedLibrary.toStoredLibraryData(): StoredLibraryData = StoredLibraryData(
     items = items,
     setlists = setlists,
+    songbooks = songbooks,
 )

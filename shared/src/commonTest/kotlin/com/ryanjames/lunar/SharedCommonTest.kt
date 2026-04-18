@@ -6,6 +6,7 @@ import com.ryanjames.lunar.library.data.SheetMusicMetadataInput
 import com.ryanjames.lunar.library.data.SyncedSheetMusicDescriptor
 import com.ryanjames.lunar.library.data.StoredDocumentFingerprinter
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
+import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.library.model.LibraryQuery
 import com.ryanjames.lunar.library.model.LibrarySortOption
 import com.ryanjames.lunar.library.model.SortDirection
@@ -16,6 +17,7 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class SharedCommonTest {
     @Test
@@ -260,6 +262,122 @@ class SharedCommonTest {
         repository.deleteSetlist(setlist.id)
 
         assertEquals(emptyList(), repository.library.value.setlists)
+    }
+
+    @Test
+    fun repositoryPersistsSongbooksAcrossInitializations() = runBlocking {
+        val storage = InMemoryLibraryStorage()
+        val firstRepository = DefaultSheetMusicRepository(storage)
+
+        firstRepository.initialize()
+        val importedItems = firstRepository.importDocuments(
+            listOf(
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/songbook-one.pdf",
+                    originalFileName = "Songbook One.pdf",
+                ),
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/songbook-two.pdf",
+                    originalFileName = "Songbook Two.pdf",
+                ),
+            )
+        ).importedItems
+        val createdSongbook = firstRepository.createSongbook(
+            name = "Sunday book",
+            itemIds = importedItems.map { it.id },
+            document = PdfDocumentReference(
+                storedPath = "/songbooks/sunday-book.pdf",
+                originalFileName = "Sunday book.pdf",
+            ),
+            pageCount = 12,
+        )
+
+        val secondRepository = DefaultSheetMusicRepository(storage)
+        secondRepository.initialize()
+
+        assertEquals(1, secondRepository.library.value.songbooks.size)
+        assertEquals(createdSongbook.name, secondRepository.library.value.songbooks.single().name)
+        assertEquals(
+            createdSongbook.document.storedPath,
+            secondRepository.library.value.songbooks.single().document.storedPath,
+        )
+    }
+
+    @Test
+    fun repositoryAddItemsToSongbookKeepsOrderAndUpdatesMergedPdf() = runBlocking {
+        val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
+
+        repository.initialize()
+        val importedItems = repository.importDocuments(
+            listOf(
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/a.pdf",
+                    originalFileName = "A.pdf",
+                ),
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/b.pdf",
+                    originalFileName = "B.pdf",
+                ),
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/c.pdf",
+                    originalFileName = "C.pdf",
+                ),
+            )
+        ).importedItems
+        val songbook = repository.createSongbook(
+            name = "Merged book",
+            itemIds = listOf(importedItems[1].id, importedItems[0].id),
+            document = PdfDocumentReference(
+                storedPath = "/songbooks/merged-book-v1.pdf",
+                originalFileName = "Merged book.pdf",
+            ),
+            pageCount = 8,
+        )
+
+        val updatedSongbook = repository.addItemsToSongbook(
+            songbookId = songbook.id,
+            itemIds = listOf(importedItems[0].id, importedItems[2].id),
+            document = PdfDocumentReference(
+                storedPath = "/songbooks/merged-book-v2.pdf",
+                originalFileName = "Merged book.pdf",
+            ),
+            pageCount = 11,
+        )
+
+        assertEquals(
+            listOf(importedItems[1].id, importedItems[0].id, importedItems[2].id),
+            updatedSongbook.itemIds,
+        )
+        assertEquals("/songbooks/merged-book-v2.pdf", updatedSongbook.document.storedPath)
+        assertEquals(11, updatedSongbook.pageCount)
+    }
+
+    @Test
+    fun repositoryDeletesSongbookWithoutRemovingScores() = runBlocking {
+        val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
+
+        repository.initialize()
+        val importedItems = repository.importDocuments(
+            listOf(
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/songbook-delete.pdf",
+                    originalFileName = "Delete Songbook Score.pdf",
+                )
+            )
+        ).importedItems
+        val songbook = repository.createSongbook(
+            name = "Delete me",
+            itemIds = importedItems.map { it.id },
+            document = PdfDocumentReference(
+                storedPath = "/songbooks/delete-me.pdf",
+                originalFileName = "Delete me.pdf",
+            ),
+        )
+
+        repository.deleteSongbook(songbook.id)
+
+        assertTrue(repository.library.value.songbooks.isEmpty())
+        assertEquals(importedItems.map { it.id }, repository.library.value.items.map { it.id })
     }
 
     @Test

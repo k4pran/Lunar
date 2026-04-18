@@ -13,6 +13,7 @@ import com.ryanjames.lunar.library.data.LocalFolderSource
 import com.ryanjames.lunar.library.data.SheetMusicMetadataInput
 import com.ryanjames.lunar.library.data.SkippedImportDocument
 import com.ryanjames.lunar.library.data.generateSourceId
+import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.library.model.LibrarySetlist
 import com.ryanjames.lunar.library.model.LibraryQuery
 import com.ryanjames.lunar.library.model.LibrarySortOption
@@ -20,6 +21,7 @@ import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.library.model.SortDirection
 import com.ryanjames.lunar.platform.ImportRequestResult
 import com.ryanjames.lunar.platform.PlatformRuntime
+import com.ryanjames.lunar.platform.SelectedCoverImage
 import com.ryanjames.lunar.settings.AppColorTheme
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.AutoRefreshSchedule
@@ -40,6 +42,7 @@ enum class LibraryBrowseMode {
     BY_COLLECTION,
     BY_COMPOSER,
     SETLISTS,
+    SONGBOOKS,
 }
 
 enum class AppSection {
@@ -48,12 +51,24 @@ enum class AppSection {
     SETTINGS,
 }
 
+sealed interface ViewerTarget {
+    data class Score(val itemId: String) : ViewerTarget
+
+    data class Songbook(val songbookId: String) : ViewerTarget
+}
+
 class LunarAppState(
     private val runtime: PlatformRuntime,
     private val scope: CoroutineScope,
 ) {
     val canDownloadScores: Boolean
         get() = runtime.capabilities.scoreDownloadSupported
+
+    val canCreateSongbooks: Boolean
+        get() = runtime.capabilities.songbookCreationSupported
+
+    val canPickSongbookCover: Boolean
+        get() = runtime.capabilities.songbookCoverImageSupported
 
     var selectedSection: AppSection by mutableStateOf(AppSection.LIBRARY)
         private set
@@ -87,10 +102,10 @@ class LunarAppState(
     var editingItemId: String? by mutableStateOf(null)
         private set
 
-    var previewItemId: String? by mutableStateOf(null)
+    var previewTarget: ViewerTarget? by mutableStateOf(null)
         private set
 
-    var fullscreenItemId: String? by mutableStateOf(null)
+    var fullscreenTarget: ViewerTarget? by mutableStateOf(null)
         private set
 
     var deleteCandidateItemId: String? by mutableStateOf(null)
@@ -99,7 +114,13 @@ class LunarAppState(
     var deleteCandidateSetlistId: String? by mutableStateOf(null)
         private set
 
+    var deleteCandidateSongbookId: String? by mutableStateOf(null)
+        private set
+
     var setlistPickerVisible: Boolean by mutableStateOf(false)
+        private set
+
+    var songbookPickerVisible: Boolean by mutableStateOf(false)
         private set
 
     var randomSetlistBuilderVisible: Boolean by mutableStateOf(false)
@@ -236,6 +257,7 @@ class LunarAppState(
     fun clearScoreSelection() {
         selectedScoreIds = emptySet()
         setlistPickerVisible = false
+        songbookPickerVisible = false
     }
 
     fun showSetlistPicker() {
@@ -246,6 +268,16 @@ class LunarAppState(
 
     fun dismissSetlistPicker() {
         setlistPickerVisible = false
+    }
+
+    fun showSongbookPicker() {
+        if (selectedScoreIds.isNotEmpty()) {
+            songbookPickerVisible = true
+        }
+    }
+
+    fun dismissSongbookPicker() {
+        songbookPickerVisible = false
     }
 
     fun openSetlist(setlistId: String) {
@@ -280,6 +312,14 @@ class LunarAppState(
 
     fun dismissDeleteSetlistRequest() {
         deleteCandidateSetlistId = null
+    }
+
+    fun requestDeleteSongbook(songbookId: String) {
+        deleteCandidateSongbookId = songbookId
+    }
+
+    fun dismissDeleteSongbookRequest() {
+        deleteCandidateSongbookId = null
     }
 
     fun openRandomSheet(items: List<SheetMusicItem>) {
@@ -484,24 +524,35 @@ class LunarAppState(
 
     fun openPreview(item: SheetMusicItem) {
         focusLibrarySection()
-        previewItemId = item.id
+        previewTarget = ViewerTarget.Score(item.id)
         scope.launch {
             runtime.repository.recordOpened(item.id, item.lastViewedPage)
         }
     }
 
+    fun openSongbook(songbookId: String) {
+        focusLibrarySection()
+        previewTarget = ViewerTarget.Songbook(songbookId)
+    }
+
     fun closePreview() {
-        previewItemId = null
+        previewTarget = null
     }
 
     fun openFullscreen(itemId: String) {
         focusLibrarySection()
-        previewItemId = null
-        fullscreenItemId = itemId
+        previewTarget = null
+        fullscreenTarget = ViewerTarget.Score(itemId)
+    }
+
+    fun openSongbookFullscreen(songbookId: String) {
+        focusLibrarySection()
+        previewTarget = null
+        fullscreenTarget = ViewerTarget.Songbook(songbookId)
     }
 
     fun closeFullscreen() {
-        fullscreenItemId = null
+        fullscreenTarget = null
         focusLibrarySection()
     }
 
@@ -561,12 +612,13 @@ class LunarAppState(
             selectedScoreIds = selectedScoreIds - itemId
             if (selectedScoreIds.isEmpty()) {
                 setlistPickerVisible = false
+                songbookPickerVisible = false
             }
-            if (previewItemId == itemId) {
-                previewItemId = null
+            if (previewTarget == ViewerTarget.Score(itemId)) {
+                previewTarget = null
             }
-            if (fullscreenItemId == itemId) {
-                fullscreenItemId = null
+            if (fullscreenTarget == ViewerTarget.Score(itemId)) {
+                fullscreenTarget = null
             }
             if (editingItemId == itemId) {
                 editingItemId = null
@@ -605,6 +657,87 @@ class LunarAppState(
         }
     }
 
+    fun createSongbook(
+        name: String,
+        items: List<SheetMusicItem>,
+        coverImage: SelectedCoverImage? = null,
+    ) {
+        scope.launch {
+            if (!runtime.capabilities.songbookCreationSupported) {
+                bannerMessage = "Songbook creation isn't available on this device."
+                return@launch
+            }
+
+            val selectedItems = items.distinctBy { it.id }
+            if (selectedItems.isEmpty()) {
+                bannerMessage = "Select at least one score to create a songbook."
+                return@launch
+            }
+
+            try {
+                val buildResult = runtime.songbookBuilder.buildSongbook(
+                    songbookName = name,
+                    appendedDocumentPaths = selectedItems.map { it.document.storedPath },
+                    coverImage = coverImage,
+                )
+                val songbook = runtime.repository.createSongbook(
+                    name = name,
+                    itemIds = selectedItems.map { it.id },
+                    document = buildResult.document,
+                    pageCount = buildResult.pageCount,
+                )
+                showSongbooksOverview()
+                previewTarget = ViewerTarget.Songbook(songbook.id)
+                bannerMessage = "Saved \"${songbook.name}\"."
+            } catch (error: Throwable) {
+                bannerMessage = error.message ?: "Could not create the songbook."
+            }
+        }
+    }
+
+    fun addSelectionToSongbook(
+        songbookId: String,
+        items: List<SheetMusicItem>,
+    ) {
+        scope.launch {
+            if (!runtime.capabilities.songbookCreationSupported) {
+                bannerMessage = "Songbook updates aren't available on this device."
+                return@launch
+            }
+
+            val selectedItems = items.distinctBy { it.id }
+            if (selectedItems.isEmpty()) {
+                bannerMessage = "Select at least one score to add to a songbook."
+                return@launch
+            }
+
+            val existingSongbook = runtime.repository.getSongbook(songbookId)
+            if (existingSongbook == null) {
+                bannerMessage = "That songbook no longer exists."
+                return@launch
+            }
+
+            try {
+                val buildResult = runtime.songbookBuilder.buildSongbook(
+                    songbookName = existingSongbook.name,
+                    existingSongbookPath = existingSongbook.document.storedPath,
+                    appendedDocumentPaths = selectedItems.map { it.document.storedPath },
+                )
+                val updatedSongbook = runtime.repository.addItemsToSongbook(
+                    songbookId = songbookId,
+                    itemIds = selectedItems.map { it.id },
+                    document = buildResult.document,
+                    pageCount = buildResult.pageCount,
+                )
+                showSongbooksOverview()
+                previewTarget = ViewerTarget.Songbook(updatedSongbook.id)
+                bannerMessage = "Updated \"${updatedSongbook.name}\"."
+            } catch (error: Throwable) {
+                bannerMessage = error.message ?: "Could not update the songbook."
+            }
+        }
+    }
+
     fun confirmDeleteSetlist() {
         val setlistId = deleteCandidateSetlistId ?: return
         scope.launch {
@@ -614,6 +747,21 @@ class LunarAppState(
             }
             deleteCandidateSetlistId = null
             bannerMessage = "Setlist deleted."
+        }
+    }
+
+    fun confirmDeleteSongbook() {
+        val songbookId = deleteCandidateSongbookId ?: return
+        scope.launch {
+            runtime.repository.deleteSongbook(songbookId)
+            if (previewTarget == ViewerTarget.Songbook(songbookId)) {
+                previewTarget = null
+            }
+            if (fullscreenTarget == ViewerTarget.Songbook(songbookId)) {
+                fullscreenTarget = null
+            }
+            deleteCandidateSongbookId = null
+            bannerMessage = "Songbook deleted."
         }
     }
 
@@ -650,6 +798,8 @@ class LunarAppState(
     }
 
     private fun dismissLibraryTransientUi() {
+        setlistPickerVisible = false
+        songbookPickerVisible = false
         randomSetlistBuilderVisible = false
         saveTemporarySetlistDialogVisible = false
     }
@@ -693,6 +843,13 @@ class LunarAppState(
         selectedGroup = null
         selectedSetlistId = null
         temporarySetlistOpen = true
+    }
+
+    private fun showSongbooksOverview() {
+        clearScoreSelection()
+        closeSetlistDetail()
+        browseMode = LibraryBrowseMode.SONGBOOKS
+        selectedGroup = null
     }
 
     private fun runImport(

@@ -41,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,6 +57,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ryanjames.lunar.library.data.LibrarySnapshot
 import com.ryanjames.lunar.library.data.SyncStatus
+import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.library.model.LibrarySetlist
 import com.ryanjames.lunar.library.model.LibrarySortOption
 import com.ryanjames.lunar.library.model.SheetMusicItem
@@ -65,8 +67,10 @@ import com.ryanjames.lunar.library.model.availableCollections
 import com.ryanjames.lunar.library.model.availableComposers
 import com.ryanjames.lunar.library.model.availableTags
 import com.ryanjames.lunar.platform.PlatformRuntime
+import com.ryanjames.lunar.platform.SelectedCoverImage
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import kotlinx.coroutines.launch
 import kotlin.time.Instant
 
 @Composable
@@ -90,14 +94,17 @@ fun LibraryScreen(
             visibleCount = screenModel.headerVisibleCount,
         )
         BrowseModeSwitcher(appState = appState)
-        if (snapshot.items.isNotEmpty()) {
+        if (snapshot.items.isNotEmpty() && appState.browseMode != LibraryBrowseMode.SONGBOOKS) {
             RandomLibraryActionsRow(
                 availableCount = screenModel.currentScopeItems.size,
                 onOpenRandomSheet = { appState.openRandomSheet(screenModel.currentScopeItems) },
                 onCreateRandomSetlist = appState::showRandomSetlistBuilder,
             )
         }
-        if (appState.browseMode != LibraryBrowseMode.SETLISTS) {
+        if (
+            appState.browseMode != LibraryBrowseMode.SETLISTS &&
+            appState.browseMode != LibraryBrowseMode.SONGBOOKS
+        ) {
             SearchAndSortBar(appState = appState)
             RefineLibraryPanel(
                 availableCollections = screenModel.collections,
@@ -111,6 +118,8 @@ fun LibraryScreen(
             SelectionActionBar(
                 selectedCount = screenModel.selectedItems.size,
                 onAddToSetlist = appState::showSetlistPicker,
+                onAddToSongbook = appState::showSongbookPicker,
+                canCreateSongbooks = appState.canCreateSongbooks,
                 onClear = appState::clearScoreSelection,
             )
         }
@@ -212,6 +221,18 @@ fun LibraryScreen(
                         )
                     }
                 }
+
+                LibraryBrowseMode.SONGBOOKS -> {
+                    SongbooksOverview(
+                        songbooks = snapshot.songbooks,
+                        itemsById = screenModel.itemsById,
+                        onOpenSongbook = appState::openSongbook,
+                        onDeleteSongbook = appState::requestDeleteSongbook,
+                        onOpenLibrary = {
+                            appState.updateBrowseMode(LibraryBrowseMode.ALL)
+                        },
+                    )
+                }
             }
         }
     }
@@ -262,6 +283,29 @@ fun LibraryScreen(
         )
     }
 
+    if (appState.songbookPickerVisible && screenModel.selectedItems.isNotEmpty()) {
+        AddToSongbookDialog(
+            runtime = runtime,
+            selectedCount = screenModel.selectedItems.size,
+            songbooks = snapshot.songbooks,
+            coverImageSupported = appState.canPickSongbookCover,
+            onDismiss = appState::dismissSongbookPicker,
+            onCreateSongbook = { name, coverImage ->
+                appState.createSongbook(
+                    name = name,
+                    items = screenModel.selectedItems,
+                    coverImage = coverImage,
+                )
+            },
+            onAddToSongbook = { songbookId ->
+                appState.addSelectionToSongbook(
+                    songbookId = songbookId,
+                    items = screenModel.selectedItems,
+                )
+            },
+        )
+    }
+
     if (appState.randomSetlistBuilderVisible) {
         RandomSetlistDialog(
             availableCount = screenModel.currentScopeItems.size,
@@ -289,6 +333,14 @@ fun LibraryScreen(
             setlist = screenModel.deleteSetlistCandidate,
             onDismiss = appState::dismissDeleteSetlistRequest,
             onConfirm = appState::confirmDeleteSetlist,
+        )
+    }
+
+    if (screenModel.deleteSongbookCandidate != null) {
+        DeleteSongbookDialog(
+            songbook = screenModel.deleteSongbookCandidate,
+            onDismiss = appState::dismissDeleteSongbookRequest,
+            onConfirm = appState::confirmDeleteSongbook,
         )
     }
 }
@@ -359,7 +411,9 @@ private fun SummaryPill(text: String) {
 @Composable
 private fun BrowseModeSwitcher(appState: LunarAppState) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         BrowseModeTab("All", appState.browseMode == LibraryBrowseMode.ALL) {
@@ -373,6 +427,9 @@ private fun BrowseModeSwitcher(appState: LunarAppState) {
         }
         BrowseModeTab("Setlists", appState.browseMode == LibraryBrowseMode.SETLISTS) {
             appState.updateBrowseMode(LibraryBrowseMode.SETLISTS)
+        }
+        BrowseModeTab("Songbooks", appState.browseMode == LibraryBrowseMode.SONGBOOKS) {
+            appState.updateBrowseMode(LibraryBrowseMode.SONGBOOKS)
         }
     }
 }
@@ -611,6 +668,8 @@ private fun RandomLibraryActionsRow(
 private fun SelectionActionBar(
     selectedCount: Int,
     onAddToSetlist: () -> Unit,
+    onAddToSongbook: () -> Unit,
+    canCreateSongbooks: Boolean,
     onClear: () -> Unit,
 ) {
     Card(
@@ -619,37 +678,97 @@ private fun SelectionActionBar(
             containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f),
         ),
     ) {
-        Row(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    text = "${selectedCount.scoreLabel()} selected",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontFamily = FontFamily.Serif,
-                        fontWeight = FontWeight.SemiBold,
-                    ),
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-                Text(
-                    text = "Add the current selection to a saved setlist or clear it.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onClear) {
-                    Text("Clear", color = MaterialTheme.colorScheme.onPrimaryContainer)
+            val stackActions = maxWidth < 620.dp
+
+            if (stackActions) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = "${selectedCount.scoreLabel()} selected",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontFamily = FontFamily.Serif,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                        Text(
+                            text = if (canCreateSongbooks) {
+                                "Add the current selection to a setlist or turn it into a combined songbook."
+                            } else {
+                                "Add the current selection to a saved setlist or clear it."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        TextButton(onClick = onClear) {
+                            Text("Clear", color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                        Button(onClick = onAddToSetlist) {
+                            Text("Add to setlist")
+                        }
+                        if (canCreateSongbooks) {
+                            OutlinedButton(onClick = onAddToSongbook) {
+                                Text("Add to songbook")
+                            }
+                        }
+                    }
                 }
-                Button(onClick = onAddToSetlist) {
-                    Text("Add to setlist")
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = "${selectedCount.scoreLabel()} selected",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontFamily = FontFamily.Serif,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                        Text(
+                            text = if (canCreateSongbooks) {
+                                "Add the current selection to a saved setlist or build a combined songbook."
+                            } else {
+                                "Add the current selection to a saved setlist or clear it."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = onClear) {
+                            Text("Clear", color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                        if (canCreateSongbooks) {
+                            OutlinedButton(onClick = onAddToSongbook) {
+                                Text("Add to songbook")
+                            }
+                        }
+                        Button(onClick = onAddToSetlist) {
+                            Text("Add to setlist")
+                        }
+                    }
                 }
             }
         }
@@ -705,6 +824,39 @@ private fun SetlistsOverview(
 }
 
 @Composable
+private fun SongbooksOverview(
+    songbooks: List<LibrarySongbook>,
+    itemsById: Map<String, SheetMusicItem>,
+    onOpenSongbook: (String) -> Unit,
+    onDeleteSongbook: (String) -> Unit,
+    onOpenLibrary: () -> Unit,
+) {
+    val orderedSongbooks = songbooks.sortedByDescending { it.updatedAtEpochMillis }
+
+    if (orderedSongbooks.isEmpty()) {
+        EmptySongbooksState(onOpenLibrary = onOpenLibrary)
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(
+            count = orderedSongbooks.size,
+            key = { index -> orderedSongbooks[index].id },
+        ) { index ->
+            SongbookCard(
+                songbook = orderedSongbooks[index],
+                itemsById = itemsById,
+                onOpen = { onOpenSongbook(orderedSongbooks[index].id) },
+                onDelete = { onDeleteSongbook(orderedSongbooks[index].id) },
+            )
+        }
+    }
+}
+
+@Composable
 private fun EmptySetlistsState(onOpenLibrary: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -736,6 +888,54 @@ private fun EmptySetlistsState(onOpenLibrary: () -> Unit) {
             )
             Text(
                 text = "Select one or more scores from the library, use Add to setlist, or build a temporary random mix to explore something new.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(top = 12.dp)
+                    .widthIn(max = 560.dp),
+            )
+            Button(
+                onClick = onOpenLibrary,
+                modifier = Modifier.padding(top = 18.dp),
+            ) {
+                Text("Browse scores")
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptySongbooksState(onOpenLibrary: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color.Transparent,
+        shape = MaterialTheme.shapes.extraLarge,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.34f),
+                            Color.Transparent,
+                        )
+                    )
+                )
+                .padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = "Songbooks are empty",
+                style = MaterialTheme.typography.headlineSmall.copy(
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = "Select scores from the library, then use Add to songbook to merge them into one PDF. You can optionally add a front cover image while creating it.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
@@ -899,6 +1099,80 @@ private fun SetlistCard(
         ) {
             Text(
                 text = "Open to browse the scores in order.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onDelete) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+                Button(onClick = onOpen) {
+                    Text("Open")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SongbookCard(
+    songbook: LibrarySongbook,
+    itemsById: Map<String, SheetMusicItem>,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val themePalette = lunarThemePalette()
+    SetlistCardFrame(
+        accentBrush = Brush.verticalGradient(
+            listOf(
+                themePalette.headerGradientStart,
+                themePalette.accentGradientEnd,
+            )
+        ),
+        containerColor = MaterialTheme.colorScheme.surface,
+        onClick = onOpen,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = songbook.name,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = buildSongbookMetaLine(songbook),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            SummaryPillDark(songbook.pageCount?.let { "$it pages" } ?: "PDF")
+        }
+        Text(
+            text = buildSetlistPreviewTitles(
+                itemIds = songbook.itemIds,
+                itemsById = itemsById,
+                emptyText = "This songbook no longer has linked scores, but the merged PDF is still available.",
+            ),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Open to read the merged PDF as one continuous songbook.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
             )
@@ -2091,6 +2365,167 @@ private fun AddToSetlistDialog(
 }
 
 @Composable
+private fun AddToSongbookDialog(
+    runtime: PlatformRuntime,
+    selectedCount: Int,
+    songbooks: List<LibrarySongbook>,
+    coverImageSupported: Boolean,
+    onDismiss: () -> Unit,
+    onCreateSongbook: (String, SelectedCoverImage?) -> Unit,
+    onAddToSongbook: (String) -> Unit,
+) {
+    val orderedSongbooks = songbooks.sortedByDescending { it.updatedAtEpochMillis }
+    val scope = rememberCoroutineScope()
+    var newSongbookName by remember(selectedCount, songbooks) { mutableStateOf("") }
+    var selectedSongbookId by remember(selectedCount, songbooks) { mutableStateOf<String?>(null) }
+    var selectedCoverImage by remember(selectedCount, songbooks) { mutableStateOf<SelectedCoverImage?>(null) }
+    var coverPickerError by remember(selectedCount, songbooks) { mutableStateOf<String?>(null) }
+    var coverPickerBusy by remember(selectedCount, songbooks) { mutableStateOf(false) }
+    val trimmedName = newSongbookName.trim()
+    val canConfirm = trimmedName.isNotEmpty() || selectedSongbookId != null
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add ${selectedCount.scoreLabel()} to a songbook") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 460.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = if (orderedSongbooks.isEmpty()) {
+                        "Name this songbook and Lunar will merge the selected PDFs into one combined document."
+                    } else {
+                        "Create a new combined PDF or append these scores to an existing songbook."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = newSongbookName,
+                    onValueChange = {
+                        newSongbookName = it
+                        if (it.isNotBlank()) {
+                            selectedSongbookId = null
+                        }
+                    },
+                    label = { Text("New songbook name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                if (coverImageSupported) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Front cover",
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        Text(
+                            text = if (selectedSongbookId == null) {
+                                "Optional. Add an image cover when creating a new songbook."
+                            } else {
+                                "Existing songbooks keep their current cover when you append more scores."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            OutlinedButton(
+                                enabled = selectedSongbookId == null && !coverPickerBusy,
+                                onClick = {
+                                    scope.launch {
+                                        coverPickerBusy = true
+                                        coverPickerError = null
+                                        try {
+                                            selectedCoverImage = runtime.coverImagePicker.pickCoverImage()
+                                        } catch (error: Throwable) {
+                                            coverPickerError = error.message ?: "Could not load that cover image."
+                                        } finally {
+                                            coverPickerBusy = false
+                                        }
+                                    }
+                                },
+                            ) {
+                                Text(
+                                    when {
+                                        coverPickerBusy -> "Loading..."
+                                        selectedCoverImage != null -> "Change cover"
+                                        else -> "Choose cover"
+                                    }
+                                )
+                            }
+                            selectedCoverImage?.let { cover ->
+                                Text(
+                                    text = cover.displayName,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(
+                                    enabled = selectedSongbookId == null,
+                                    onClick = { selectedCoverImage = null },
+                                ) {
+                                    Text("Remove")
+                                }
+                            }
+                        }
+                        coverPickerError?.let { message ->
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
+                if (orderedSongbooks.isNotEmpty()) {
+                    FilterChipSection(
+                        title = "Saved songbooks",
+                        supportingText = "Picking one appends these scores to the existing merged PDF.",
+                    ) {
+                        orderedSongbooks.forEach { songbook ->
+                            FilterChip(
+                                selected = selectedSongbookId == songbook.id,
+                                onClick = {
+                                    selectedSongbookId = if (selectedSongbookId == songbook.id) {
+                                        null
+                                    } else {
+                                        newSongbookName = ""
+                                        songbook.id
+                                    }
+                                },
+                                label = { Text(songbook.name) },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = canConfirm,
+                onClick = {
+                    selectedSongbookId?.let(onAddToSongbook)
+                        ?: onCreateSongbook(trimmedName, selectedCoverImage)
+                },
+            ) {
+                Text(if (selectedSongbookId != null) "Add" else "Create")
+            }
+        },
+    )
+}
+
+@Composable
 private fun DeleteSetlistDialog(
     setlist: LibrarySetlist,
     onDismiss: () -> Unit,
@@ -2102,6 +2537,39 @@ private fun DeleteSetlistDialog(
         text = {
             Text(
                 "Delete \"${setlist.name}\"? The saved score list will be removed, but the PDFs will stay in your library.",
+            )
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error,
+                    contentColor = MaterialTheme.colorScheme.onError,
+                ),
+            ) {
+                Text("Delete")
+            }
+        },
+    )
+}
+
+@Composable
+private fun DeleteSongbookDialog(
+    songbook: LibrarySongbook,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete songbook?") },
+        text = {
+            Text(
+                "Delete \"${songbook.name}\"? Lunar will remove the merged songbook PDF, but the original scores will stay in your library.",
             )
         },
         dismissButton = {
@@ -2345,6 +2813,7 @@ private data class LibraryScreenModel(
     val editingItem: SheetMusicItem?,
     val deleteCandidate: SheetMusicItem?,
     val deleteSetlistCandidate: LibrarySetlist?,
+    val deleteSongbookCandidate: LibrarySongbook?,
     val collectionGroups: Map<String, List<SheetMusicItem>>,
     val composerGroups: Map<String, List<SheetMusicItem>>,
 )
@@ -2381,7 +2850,10 @@ private fun buildLibraryScreenModel(
     )
     return LibraryScreenModel(
         visibleItems = visibleItems,
-        headerVisibleCount = if (appState.browseMode == LibraryBrowseMode.SETLISTS) {
+        headerVisibleCount = if (
+            appState.browseMode == LibraryBrowseMode.SETLISTS ||
+            appState.browseMode == LibraryBrowseMode.SONGBOOKS
+        ) {
             snapshot.items.size
         } else {
             visibleItems.size
@@ -2406,6 +2878,7 @@ private fun buildLibraryScreenModel(
         editingItem = snapshot.items.firstOrNull { it.id == appState.editingItemId },
         deleteCandidate = snapshot.items.firstOrNull { it.id == appState.deleteCandidateItemId },
         deleteSetlistCandidate = snapshot.setlists.firstOrNull { it.id == appState.deleteCandidateSetlistId },
+        deleteSongbookCandidate = snapshot.songbooks.firstOrNull { it.id == appState.deleteCandidateSongbookId },
         collectionGroups = visibleItems.groupByCollectionName(),
         composerGroups = visibleItems.groupByComposerName(),
     )
@@ -2433,6 +2906,7 @@ private fun currentScopeItems(
         hasActiveSetlist -> activeSetlistItems
         else -> snapshotItems
     }
+    LibraryBrowseMode.SONGBOOKS -> emptyList()
 }
 
 private fun randomScopeLabel(
@@ -2449,6 +2923,7 @@ private fun randomScopeLabel(
         activeSetlist != null -> "\"${activeSetlist.name}\""
         else -> "the full library"
     }
+    LibraryBrowseMode.SONGBOOKS -> "songbooks"
 }
 
 private fun List<SheetMusicItem>.groupByCollectionName(): Map<String, List<SheetMusicItem>> =
@@ -2481,6 +2956,12 @@ private fun buildSetlistPreviewTitles(
     .take(3)
     .joinToString("  •  ") { it.title }
     .ifBlank { emptyText }
+
+private fun buildSongbookMetaLine(songbook: LibrarySongbook): String = buildList {
+    add(songbook.itemIds.size.scoreLabel())
+    songbook.pageCount?.let { add("$it pages") }
+    add("Updated ${formatEpochMillis(songbook.updatedAtEpochMillis)}")
+}.joinToString("  |  ")
 
 @Composable
 private fun SetlistCardFrame(

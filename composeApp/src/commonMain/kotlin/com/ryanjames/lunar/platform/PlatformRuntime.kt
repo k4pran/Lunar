@@ -10,6 +10,7 @@ import com.ryanjames.lunar.library.data.NoOpStoredDocumentCleaner
 import com.ryanjames.lunar.library.data.NoOpStoredDocumentFingerprinter
 import com.ryanjames.lunar.library.data.SheetMusicRepository
 import com.ryanjames.lunar.library.data.SourceRegistry
+import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.sync.GoogleDriveOAuthCoordinator
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.settings.AppSettingsStore
@@ -29,6 +30,8 @@ data class PlatformRuntime(
     val importer: PdfImporter,
     val renderer: PdfPageRenderer,
     val pdfExporter: PdfDocumentExporter,
+    val songbookBuilder: SongbookPdfBuilder,
+    val coverImagePicker: CoverImagePicker,
     val syncManager: LibrarySyncManager,
     val sourceRegistry: SourceRegistry,
     val settingsStore: AppSettingsStore,
@@ -42,6 +45,8 @@ data class PlatformCapabilities(
     val permissionTrackingSupported: Boolean = false,
     val inAppViewingSupported: Boolean = true,
     val scoreDownloadSupported: Boolean = false,
+    val songbookCreationSupported: Boolean = false,
+    val songbookCoverImageSupported: Boolean = false,
     val statusLine: String = "Local metadata only",
 )
 
@@ -109,6 +114,16 @@ data class RenderedPdfPage(
     val image: ImageBitmap,
 )
 
+data class SelectedCoverImage(
+    val displayName: String,
+    val bytes: ByteArray,
+)
+
+data class SongbookBuildResult(
+    val document: PdfDocumentReference,
+    val pageCount: Int? = null,
+)
+
 interface PdfImporter {
     val state: StateFlow<ImporterState>
 
@@ -132,6 +147,19 @@ interface PdfDocumentExporter {
         documentPath: String,
         suggestedFileName: String,
     ): String
+}
+
+interface SongbookPdfBuilder {
+    suspend fun buildSongbook(
+        songbookName: String,
+        appendedDocumentPaths: List<String>,
+        existingSongbookPath: String? = null,
+        coverImage: SelectedCoverImage? = null,
+    ): SongbookBuildResult
+}
+
+interface CoverImagePicker {
+    suspend fun pickCoverImage(): SelectedCoverImage?
 }
 
 class UnsupportedPdfImporter(
@@ -171,6 +199,22 @@ object UnsupportedPdfDocumentExporter : PdfDocumentExporter {
     ): String = throw UnsupportedOperationException("Score downloads are unavailable on this target.")
 }
 
+object UnsupportedSongbookPdfBuilder : SongbookPdfBuilder {
+    override suspend fun buildSongbook(
+        songbookName: String,
+        appendedDocumentPaths: List<String>,
+        existingSongbookPath: String?,
+        coverImage: SelectedCoverImage?,
+    ): SongbookBuildResult = throw UnsupportedOperationException(
+        "Songbook creation is unavailable on this target."
+    )
+}
+
+object UnsupportedCoverImagePicker : CoverImagePicker {
+    override suspend fun pickCoverImage(): SelectedCoverImage? =
+        throw UnsupportedOperationException("Cover image selection is unavailable on this target.")
+}
+
 @Composable
 fun rememberUnsupportedPlatformRuntime(
     platformName: String,
@@ -200,12 +244,16 @@ fun rememberUnsupportedPlatformRuntime(
                 permissionTrackingSupported = false,
                 inAppViewingSupported = false,
                 scoreDownloadSupported = false,
+                songbookCreationSupported = false,
+                songbookCoverImageSupported = false,
                 statusLine = statusLine,
             ),
             repository = repository,
             importer = UnsupportedPdfImporter(importMessage),
             renderer = UnavailablePdfPageRenderer,
             pdfExporter = UnsupportedPdfDocumentExporter,
+            songbookBuilder = UnsupportedSongbookPdfBuilder,
+            coverImagePicker = UnsupportedCoverImagePicker,
             syncManager = syncManager,
             sourceRegistry = InMemorySourceRegistry(),
             settingsStore = InMemoryAppSettingsStore(),

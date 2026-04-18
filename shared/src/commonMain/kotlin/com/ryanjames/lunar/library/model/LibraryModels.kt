@@ -46,6 +46,17 @@ data class LibrarySetlist(
     val updatedAtEpochMillis: Long,
 )
 
+@Serializable
+data class LibrarySongbook(
+    val id: String,
+    val name: String,
+    val itemIds: List<String> = emptyList(),
+    val document: PdfDocumentReference,
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long,
+    val pageCount: Int? = null,
+)
+
 data class ImportedPdfDescriptor(
     val storedPath: String,
     val originalFileName: String,
