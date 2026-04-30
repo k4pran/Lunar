@@ -2,6 +2,7 @@ package com.ryanjames.lunar
 
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
+import com.ryanjames.lunar.library.data.InMemoryScoreMetadataStorage
 import com.ryanjames.lunar.library.data.SheetMusicMetadataInput
 import com.ryanjames.lunar.library.data.SyncedSheetMusicDescriptor
 import com.ryanjames.lunar.library.data.StoredDocumentFingerprinter
@@ -9,6 +10,8 @@ import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.library.model.LibraryQuery
 import com.ryanjames.lunar.library.model.LibrarySortOption
+import com.ryanjames.lunar.library.model.ScoreMetadata
+import com.ryanjames.lunar.library.model.ScoreMetadataComposer
 import com.ryanjames.lunar.library.model.SortDirection
 import com.ryanjames.lunar.library.model.applyLibraryQuery
 import com.ryanjames.lunar.library.model.collectionDuplicateKey
@@ -22,7 +25,11 @@ import kotlin.test.assertTrue
 class SharedCommonTest {
     @Test
     fun repositoryImportsAndUpdatesMetadata() = runBlocking {
-        val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
+        val metadataStorage = InMemoryScoreMetadataStorage()
+        val repository = DefaultSheetMusicRepository(
+            storage = InMemoryLibraryStorage(),
+            scoreMetadataStorage = metadataStorage,
+        )
 
         repository.initialize()
         val imported = repository.importDocuments(
@@ -31,6 +38,7 @@ class SharedCommonTest {
                     storedPath = "/scores/moonlight-sonata.pdf",
                     originalFileName = "Moonlight Sonata.pdf",
                     pageCount = 6,
+                    contentFingerprint = "1234567890abcdef1234567890abcdef",
                 )
             )
         ).importedItems
@@ -52,6 +60,50 @@ class SharedCommonTest {
         assertEquals(listOf("piano", "recital"), stored?.tags)
         assertEquals("Practice", stored?.collection)
         assertEquals(true, stored?.isFavorite)
+
+        val storedMetadata = metadataStorage.readMetadata(imported.single().id)
+        assertEquals("1234567890abcdef", storedMetadata?.id)
+        assertEquals("Moonlight Sonata", storedMetadata?.title)
+        assertEquals("Beethoven", storedMetadata?.composer?.name)
+        assertEquals(listOf("piano", "recital"), storedMetadata?.tags)
+        assertEquals(6, storedMetadata?.pageCount)
+        assertEquals("Moonlight Sonata.pdf", storedMetadata?.source?.filename)
+    }
+
+    @Test
+    fun repositoryUsesImportedScoreMetadataWhenAvailable() = runBlocking {
+        val repository = DefaultSheetMusicRepository(
+            storage = InMemoryLibraryStorage(),
+            scoreMetadataStorage = InMemoryScoreMetadataStorage(),
+        )
+
+        repository.initialize()
+        val importedItem = repository.importDocuments(
+            listOf(
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/the-bell.pdf",
+                    originalFileName = "H.Stief_The_Bell.pdf",
+                    pageCount = 6,
+                    scoreMetadata = ScoreMetadata(
+                        id = "266ec2f19ddb0cbb",
+                        title = "The Bell",
+                        alternativeTitles = listOf("H.Stief The Bell"),
+                        composer = ScoreMetadataComposer(name = "Holger Stief"),
+                        tags = listOf("the", "bell", "stief"),
+                    ),
+                )
+            )
+        ).importedItems.single()
+
+        assertEquals("The Bell", importedItem.title)
+        assertEquals("Holger Stief", importedItem.composer)
+        assertEquals(listOf("bell", "stief", "the"), importedItem.tags)
+
+        val storedMetadata = repository.getScoreMetadata(importedItem.id)
+        assertEquals("266ec2f19ddb0cbb", storedMetadata?.id)
+        assertEquals(listOf("H.Stief The Bell"), storedMetadata?.alternativeTitles)
+        assertEquals("H.Stief_The_Bell.pdf", storedMetadata?.source?.filename)
+        assertEquals(6, storedMetadata?.pageCount)
     }
 
     @Test
@@ -141,7 +193,11 @@ class SharedCommonTest {
 
     @Test
     fun repositoryDeleteRemovesStoredItem() = runBlocking {
-        val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
+        val metadataStorage = InMemoryScoreMetadataStorage()
+        val repository = DefaultSheetMusicRepository(
+            storage = InMemoryLibraryStorage(),
+            scoreMetadataStorage = metadataStorage,
+        )
 
         repository.initialize()
         val imported = repository.importDocuments(
@@ -156,7 +212,34 @@ class SharedCommonTest {
         repository.deleteItem(imported.single().id)
 
         assertNull(repository.getItem(imported.single().id))
+        assertNull(metadataStorage.readMetadata(imported.single().id))
         assertEquals(emptyList(), repository.library.value.items)
+    }
+
+    @Test
+    fun repositoryInitializeBackfillsMissingScoreMetadataForExistingItems() = runBlocking {
+        val metadataStorage = InMemoryScoreMetadataStorage()
+        val repository = DefaultSheetMusicRepository(
+            storage = InMemoryLibraryStorage(
+                initialItems = listOf(
+                    testItem(
+                        id = "existing",
+                        title = "Existing Score",
+                        composer = "Existing Composer",
+                        tags = listOf("practice"),
+                        dateAddedEpochMillis = 1L,
+                    )
+                )
+            ),
+            scoreMetadataStorage = metadataStorage,
+        )
+
+        repository.initialize()
+
+        val storedMetadata = metadataStorage.readMetadata("existing")
+        assertEquals("Existing Score", storedMetadata?.title)
+        assertEquals("Existing Composer", storedMetadata?.composer?.name)
+        assertEquals(listOf("practice"), storedMetadata?.tags)
     }
 
     @Test
@@ -382,7 +465,10 @@ class SharedCommonTest {
 
     @Test
     fun repositoryApplyRemoteSyncUpsertsProviderItems() = runBlocking {
-        val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
+        val repository = DefaultSheetMusicRepository(
+            storage = InMemoryLibraryStorage(),
+            scoreMetadataStorage = InMemoryScoreMetadataStorage(),
+        )
 
         repository.initialize()
         repository.applyRemoteSync(
@@ -411,6 +497,8 @@ class SharedCommonTest {
         assertEquals("supabase_public_storage", item.syncMetadata?.providerId)
         assertEquals("moonlight", item.syncMetadata?.remoteId)
         assertEquals("/scores/moonlight.pdf", item.document.storedPath)
+        assertEquals("Moonlight Sonata", repository.getScoreMetadata(item.id)?.title)
+        assertEquals("Beethoven", repository.getScoreMetadata(item.id)?.composer?.name)
     }
 
     @Test

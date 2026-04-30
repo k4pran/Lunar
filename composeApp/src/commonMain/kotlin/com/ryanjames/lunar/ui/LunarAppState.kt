@@ -17,6 +17,7 @@ import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.library.model.LibrarySetlist
 import com.ryanjames.lunar.library.model.LibraryQuery
 import com.ryanjames.lunar.library.model.LibrarySortOption
+import com.ryanjames.lunar.library.model.ScoreMetadata
 import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.library.model.SortDirection
 import com.ryanjames.lunar.platform.ImportRequestResult
@@ -103,6 +104,18 @@ class LunarAppState(
         private set
 
     var editingItemId: String? by mutableStateOf(null)
+        private set
+
+    var infoItemId: String? by mutableStateOf(null)
+        private set
+
+    var infoMetadata: ScoreMetadata? by mutableStateOf(null)
+        private set
+
+    var infoMetadataLoading: Boolean by mutableStateOf(false)
+        private set
+
+    var infoMetadataError: String? by mutableStateOf(null)
         private set
 
     var previewTarget: ViewerTarget? by mutableStateOf(null)
@@ -414,6 +427,43 @@ class LunarAppState(
         editingItemId = null
     }
 
+    fun showScoreInfo(itemId: String) {
+        if (runtime.repository.getItem(itemId) == null) {
+            bannerMessage = "That score is no longer available."
+            return
+        }
+
+        infoItemId = itemId
+        infoMetadata = null
+        infoMetadataError = null
+        infoMetadataLoading = true
+        scope.launch {
+            runCatching {
+                runtime.repository.getScoreMetadata(itemId)
+            }.onSuccess { metadata ->
+                if (infoItemId == itemId) {
+                    infoMetadata = metadata
+                    infoMetadataError = null
+                }
+            }.onFailure { error ->
+                if (infoItemId == itemId) {
+                    infoMetadata = null
+                    infoMetadataError = error.message ?: "Score info is unavailable."
+                }
+            }
+            if (infoItemId == itemId) {
+                infoMetadataLoading = false
+            }
+        }
+    }
+
+    fun dismissScoreInfo() {
+        infoItemId = null
+        infoMetadata = null
+        infoMetadataError = null
+        infoMetadataLoading = false
+    }
+
     fun requestDelete(itemId: String) {
         deleteCandidateItemId = itemId
     }
@@ -546,8 +596,36 @@ class LunarAppState(
     fun removeSource(sourceId: String) {
         scope.launch {
             runtime.repository.removeItemsBySource(sourceId)
+            runtime.syncManager.clearGoogleAccessToken(sourceId)
             runtime.sourceRegistry.removeSource(sourceId)
             bannerMessage = "Source removed."
+        }
+    }
+
+    fun updateCloudSource(source: CloudLibrarySource) {
+        scope.launch {
+            try {
+                val sourceToPersist = when (source) {
+                    is CloudGoogleDriveSource -> source.copy(
+                        settings = source.settings.copy(accessToken = ""),
+                    )
+                    else -> source
+                }
+                runtime.syncManager.clearGoogleAccessToken(source.id)
+                runtime.sourceRegistry.updateSource(sourceToPersist)
+                bannerMessage = when (sourceToPersist) {
+                    is CloudGoogleDriveSource -> {
+                        if (sourceToPersist.settings.refreshToken.isBlank()) {
+                            "Cloud source updated. Press Refresh to reconnect Google Drive."
+                        } else {
+                            "Cloud source updated. Press Refresh to sync with the new Google Drive token."
+                        }
+                    }
+                    else -> "Cloud source updated."
+                }
+            } catch (error: Throwable) {
+                bannerMessage = error.message ?: "Cloud source update failed."
+            }
         }
     }
 
@@ -675,6 +753,9 @@ class LunarAppState(
             }
             if (editingItemId == itemId) {
                 editingItemId = null
+            }
+            if (infoItemId == itemId) {
+                dismissScoreInfo()
             }
             deleteCandidateItemId = null
             selectedSection = AppSection.LIBRARY
@@ -855,6 +936,7 @@ class LunarAppState(
         songbookPickerVisible = false
         randomSetlistBuilderVisible = false
         saveTemporarySetlistDialogVisible = false
+        dismissScoreInfo()
     }
 
     private inline fun updateQuery(transform: LibraryQuery.() -> LibraryQuery) {

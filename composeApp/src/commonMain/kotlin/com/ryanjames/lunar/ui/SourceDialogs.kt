@@ -80,9 +80,9 @@ fun AddLocalSourceDialog(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     text = if (localImageImportSupported) {
-                        "Choose how to import local PDFs or image files into your library."
+                        "Choose how to import local PDFs or image files into your library. Matching .json metadata sidecars are imported automatically."
                     } else {
-                        "Choose how to import local PDFs into your library."
+                        "Choose how to import local PDFs into your library. Matching .json metadata sidecars are imported automatically."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -102,9 +102,9 @@ fun AddLocalSourceDialog(
                     enabled = true,
                     title = "Individual files",
                     subtitle = if (localImageImportSupported) {
-                        "Pick PDFs, PNGs, JPGs, or JPEGs"
+                        "Pick PDFs, PNGs, JPGs, or JPEGs. Matching .json sidecars are detected automatically."
                     } else {
-                        "Pick one or more PDF files"
+                        "Pick one or more PDF files. Matching .json sidecars are detected automatically."
                     },
                     onSelect = { selectedType = LocalSourceType.FILES },
                 )
@@ -115,9 +115,9 @@ fun AddLocalSourceDialog(
                     title = "Folder",
                     subtitle = if (folderImportSupported) {
                         if (localImageImportSupported) {
-                            "Scan a folder for PDFs and image files"
+                            "Scan a folder for PDFs, image files, and matching .json metadata"
                         } else {
-                            "Scan a folder for all PDFs"
+                            "Scan a folder for PDFs and matching .json metadata"
                         }
                     } else {
                         "Folder import not supported on this platform"
@@ -178,24 +178,58 @@ private fun LocalSourceOption(
 @Composable
 fun AddCloudSourceDialog(
     googleDriveOAuthSupported: Boolean,
+    existingSource: CloudLibrarySource? = null,
     onDismiss: () -> Unit,
     onConfirm: (CloudLibrarySource) -> Unit,
 ) {
     val providers = remember { supportedCloudProviders() }
-    var selectedProviderId by remember { mutableStateOf(SyncProviderIds.SUPABASE_PUBLIC_STORAGE) }
+    val initialProviderId = remember(existingSource) {
+        when (existingSource) {
+            is CloudGoogleDriveSource -> SyncProviderIds.GOOGLE_DRIVE
+            is CloudSupabaseSource -> SyncProviderIds.SUPABASE_PUBLIC_STORAGE
+            null -> SyncProviderIds.SUPABASE_PUBLIC_STORAGE
+        }
+    }
+    val isEditing = existingSource != null
+    var selectedProviderId by remember(existingSource) { mutableStateOf(initialProviderId) }
     var providerMenuExpanded by remember { mutableStateOf(false) }
-    var label by remember { mutableStateOf("") }
+    var label by remember(existingSource) { mutableStateOf(existingSource?.label.orEmpty()) }
 
-    var projectUrl by remember { mutableStateOf("") }
-    var bucketName by remember { mutableStateOf("") }
-    var anonKey by remember { mutableStateOf("") }
-    var rootDirectory by remember { mutableStateOf("") }
-    var supabaseStrategy by remember { mutableStateOf(CloudPathStrategy.FLAT) }
+    val existingSupabaseSource = existingSource as? CloudSupabaseSource
+    var projectUrl by remember(existingSource) { mutableStateOf(existingSupabaseSource?.settings?.projectUrl.orEmpty()) }
+    var bucketName by remember(existingSource) { mutableStateOf(existingSupabaseSource?.settings?.bucketName.orEmpty()) }
+    var anonKey by remember(existingSource) { mutableStateOf(existingSupabaseSource?.settings?.anonKey.orEmpty()) }
+    var rootDirectory by remember(existingSource) { mutableStateOf(existingSupabaseSource?.settings?.rootDirectory.orEmpty()) }
+    var supabaseStrategy by remember(existingSource) {
+        mutableStateOf(existingSupabaseSource?.settings?.folderStrategy ?: CloudPathStrategy.FLAT)
+    }
 
-    var driveApiKey by remember { mutableStateOf("") }
-    var driveClientId by remember { mutableStateOf("") }
-    var driveClientSecret by remember { mutableStateOf("") }
-    val driveRoots = remember { mutableStateListOf(EditableGoogleDriveRoot(id = generateSourceId())) }
+    val existingGoogleDriveSource = existingSource as? CloudGoogleDriveSource
+    var driveApiKey by remember(existingSource) { mutableStateOf(existingGoogleDriveSource?.settings?.apiKey.orEmpty()) }
+    var driveClientId by remember(existingSource) { mutableStateOf(existingGoogleDriveSource?.settings?.clientId.orEmpty()) }
+    var driveClientSecret by remember(existingSource) { mutableStateOf(existingGoogleDriveSource?.settings?.clientSecret.orEmpty()) }
+    var driveRefreshToken by remember(existingSource) {
+        mutableStateOf(existingGoogleDriveSource?.settings?.refreshToken.orEmpty())
+    }
+    val driveRoots = remember(existingSource) {
+        mutableStateListOf<EditableGoogleDriveRoot>().apply {
+            val existingRoots = existingGoogleDriveSource?.settings?.roots.orEmpty()
+            if (existingRoots.isEmpty()) {
+                add(EditableGoogleDriveRoot(id = generateSourceId()))
+            } else {
+                addAll(
+                    existingRoots.map { root ->
+                        EditableGoogleDriveRoot(
+                            id = root.id,
+                            label = root.label,
+                            folderRef = root.folderId,
+                            folderStrategy = root.folderStrategy,
+                        )
+                    }
+                )
+            }
+        }
+    }
 
     val isSupabaseSelected = selectedProviderId == SyncProviderIds.SUPABASE_PUBLIC_STORAGE
     val validDriveRoots = driveRoots.mapNotNull { root ->
@@ -205,16 +239,16 @@ fun AddCloudSourceDialog(
     val isValid = if (isSupabaseSelected) {
         projectUrl.isNotBlank() && bucketName.isNotBlank()
     } else {
-        googleDriveOAuthSupported &&
-            validDriveRoots.isNotEmpty() &&
-            driveClientId.isNotBlank()
+        validDriveRoots.isNotEmpty() &&
+            driveClientId.isNotBlank() &&
+            (googleDriveOAuthSupported || isEditing)
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "Add cloud source",
+                text = if (isEditing) "Edit cloud source" else "Add cloud source",
                 style = MaterialTheme.typography.titleLarge.copy(
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.SemiBold,
@@ -227,41 +261,53 @@ fun AddCloudSourceDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    text = "Connect a cloud source and merge its PDFs into the shared library.",
+                    text = if (isEditing) {
+                        "Update this cloud source and save the new settings for future syncs."
+                    } else {
+                        "Connect a cloud source and merge its PDFs into the shared library."
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                Box {
-                    OutlinedButton(
-                        onClick = { providerMenuExpanded = true },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            providers.firstOrNull { it.id == selectedProviderId }?.displayName ?: "Choose a provider",
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = providerMenuExpanded,
-                        onDismissRequest = { providerMenuExpanded = false },
-                    ) {
-                        providers.forEach { provider ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(provider.displayName)
-                                        Text(
-                                            provider.description,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                },
-                                onClick = {
-                                    selectedProviderId = provider.id
-                                    providerMenuExpanded = false
-                                },
+                if (isEditing) {
+                    Text(
+                        text = "Provider: ${providers.firstOrNull { it.id == selectedProviderId }?.displayName.orEmpty()}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Box {
+                        OutlinedButton(
+                            onClick = { providerMenuExpanded = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                providers.firstOrNull { it.id == selectedProviderId }?.displayName ?: "Choose a provider",
                             )
+                        }
+                        DropdownMenu(
+                            expanded = providerMenuExpanded,
+                            onDismissRequest = { providerMenuExpanded = false },
+                        ) {
+                            providers.forEach { provider ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(provider.displayName)
+                                            Text(
+                                                provider.description,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedProviderId = provider.id
+                                        providerMenuExpanded = false
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -298,7 +344,10 @@ fun AddCloudSourceDialog(
                         onClientIdChange = { driveClientId = it },
                         clientSecret = driveClientSecret,
                         onClientSecretChange = { driveClientSecret = it },
+                        refreshToken = driveRefreshToken,
+                        onRefreshTokenChange = { driveRefreshToken = it },
                         oauthSupported = googleDriveOAuthSupported,
+                        allowManualRefreshTokenEdit = isEditing,
                         roots = driveRoots,
                     )
                 }
@@ -309,9 +358,9 @@ fun AddCloudSourceDialog(
                 onClick = {
                     val source = if (isSupabaseSelected) {
                         CloudSupabaseSource(
-                            id = generateSourceId(),
+                            id = existingSource?.id ?: generateSourceId(),
                             label = label.ifBlank { "Supabase: $bucketName" },
-                            addedAtEpochMillis = Clock.System.now().toEpochMilliseconds(),
+                            addedAtEpochMillis = existingSource?.addedAtEpochMillis ?: Clock.System.now().toEpochMilliseconds(),
                             settings = SupabasePublicStorageSettings(
                                 projectUrl = projectUrl.trim(),
                                 bucketName = bucketName.trim(),
@@ -322,13 +371,15 @@ fun AddCloudSourceDialog(
                         )
                     } else {
                         CloudGoogleDriveSource(
-                            id = generateSourceId(),
+                            id = existingSource?.id ?: generateSourceId(),
                             label = label.ifBlank { "Google Drive" },
-                            addedAtEpochMillis = Clock.System.now().toEpochMilliseconds(),
+                            addedAtEpochMillis = existingSource?.addedAtEpochMillis ?: Clock.System.now().toEpochMilliseconds(),
                             settings = GoogleDriveStorageSettings(
                                 apiKey = driveApiKey.trim(),
                                 clientId = driveClientId.trim(),
                                 clientSecret = driveClientSecret.trim(),
+                                refreshToken = driveRefreshToken.trim(),
+                                accessToken = "",
                                 roots = validDriveRoots.map { (root, folderId) ->
                                     GoogleDriveImportRoot(
                                         id = root.id,
@@ -344,7 +395,7 @@ fun AddCloudSourceDialog(
                 },
                 enabled = isValid,
             ) {
-                Text("Connect")
+                Text(if (isEditing) "Save" else "Connect")
             }
         },
         dismissButton = {
@@ -425,11 +476,18 @@ private fun GoogleDriveFields(
     onClientIdChange: (String) -> Unit,
     clientSecret: String,
     onClientSecretChange: (String) -> Unit,
+    refreshToken: String,
+    onRefreshTokenChange: (String) -> Unit,
     oauthSupported: Boolean,
+    allowManualRefreshTokenEdit: Boolean,
     roots: MutableList<EditableGoogleDriveRoot>,
 ) {
     Text(
-        text = "Google Drive uses a desktop OAuth sign-in. Add one or more root folders, paste your desktop OAuth client details, and Lunar will open the browser when you press Connect.",
+        text = if (allowManualRefreshTokenEdit) {
+            "Google Drive stores its OAuth details with the source. Update the client settings, refresh token, or root folders here, then refresh the source when you're ready."
+        } else {
+            "Google Drive uses a desktop OAuth sign-in. Add one or more root folders, paste your desktop OAuth client details, and Lunar will open the browser when you press Connect."
+        },
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -462,14 +520,26 @@ private fun GoogleDriveFields(
     )
 
     Text(
-        text = if (oauthSupported) {
-            "Do not paste a refresh token. Lunar requests offline access during the first Google sign-in, stores the returned refresh token locally, and uses it for later background sync."
+        text = if (allowManualRefreshTokenEdit) {
+            "You can replace the saved refresh token here. Leave it blank if you want Lunar to ask for a new desktop sign-in the next time you refresh this source."
+        } else if (oauthSupported) {
+            "Lunar requests offline access during the first Google sign-in, stores the returned refresh token locally, and uses it for later background sync."
         } else {
             "Google Drive sign-in is currently available on the desktop build. Add this source from Windows or Linux to complete the OAuth connection."
         },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+
+    if (allowManualRefreshTokenEdit) {
+        OutlinedTextField(
+            value = refreshToken,
+            onValueChange = onRefreshTokenChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Refresh token") },
+            placeholder = { Text("Paste a replacement token or leave blank to reconnect later") },
+        )
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         roots.forEachIndexed { index, root ->

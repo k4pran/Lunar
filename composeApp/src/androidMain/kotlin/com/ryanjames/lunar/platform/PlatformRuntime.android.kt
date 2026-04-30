@@ -21,10 +21,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.documentfile.provider.DocumentFile
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.JsonLibraryStorage
+import com.ryanjames.lunar.library.data.JsonScoreMetadataStorage
 import com.ryanjames.lunar.library.data.OkioStoredDocumentCleaner
 import com.ryanjames.lunar.library.data.JsonSourceRegistry
 import com.ryanjames.lunar.library.data.StoredDocumentFingerprinter
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
+import com.ryanjames.lunar.library.model.ScoreMetadata
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.JsonAppSettingsStore
 import com.ryanjames.lunar.sync.LibrarySyncManager
@@ -38,6 +40,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import okio.FileSystem
 import okio.Path.Companion.toPath
 import java.io.File
@@ -62,6 +65,9 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
     val metadataPath = remember(metadataFile) {
         metadataFile.absolutePath.toPath()
     }
+    val scoreMetadataDirectoryPath = remember(context) {
+        File(appRoot, "metadata/scores").absolutePath.toPath()
+    }
     val sourcesFile = remember(context) {
         File(appRoot, "sources/sources.json")
     }
@@ -79,6 +85,10 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             storage = JsonLibraryStorage(
                 fileSystem = FileSystem.SYSTEM,
                 metadataPath = metadataPath,
+            ),
+            scoreMetadataStorage = JsonScoreMetadataStorage(
+                fileSystem = FileSystem.SYSTEM,
+                metadataDirectory = scoreMetadataDirectoryPath,
             ),
             storedDocumentCleaner = OkioStoredDocumentCleaner(FileSystem.SYSTEM),
             storedDocumentFingerprinter = AndroidStoredDocumentFingerprinter(),
@@ -99,12 +109,19 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             settingsProvider = { settingsStore.settings.value }
         )
     }
-    val syncManager = remember(repository, renderer, pdfStore, syncHttpClient) {
+    val sourceRegistry = remember(sourcesPath) {
+        JsonSourceRegistry(
+            fileSystem = FileSystem.SYSTEM,
+            sourcesPath = sourcesPath,
+        )
+    }
+    val syncManager = remember(repository, renderer, pdfStore, syncHttpClient, sourceRegistry) {
         LibrarySyncManager(
             repository = repository,
             httpClient = syncHttpClient,
             pdfStore = pdfStore,
             renderer = renderer,
+            sourceRegistry = sourceRegistry,
         )
     }
     val importer = remember(context, scoresDirectory, renderer) {
@@ -127,13 +144,6 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
 
     SideEffect {
         importer.bindLaunchers(fileLauncher = fileLauncher, folderLauncher = folderLauncher)
-    }
-
-    val sourceRegistry = remember(sourcesPath) {
-        JsonSourceRegistry(
-            fileSystem = FileSystem.SYSTEM,
-            sourcesPath = sourcesPath,
-        )
     }
     val cacheInspector = remember(appRoot, metadataFile, sourcesFile, scoresDirectory) {
         AndroidLibraryCacheInspector(
@@ -223,7 +233,7 @@ private class AndroidPdfImporter(
         }
 
         pendingFileContinuation = continuation
-        launcher.launch(arrayOf("application/pdf"))
+        launcher.launch(arrayOf("application/pdf", "application/json"))
     }
 
     override suspend fun importPdfFolder(): ImportRequestResult = suspendCancellableCoroutine { continuation ->
@@ -242,12 +252,29 @@ private class AndroidPdfImporter(
             return@withContext ImportRequestResult(emptyList())
         }
 
+        val selectedEntries = uris.mapNotNull { uri ->
+            persistReadPermission(uri)
+            val name = queryDisplayName(uri)
+                ?: uri.lastPathSegment
+                ?: return@mapNotNull null
+            AndroidImportEntry(
+                uri = uri,
+                name = name,
+            )
+        }
+        val scoreEntries = selectedEntries.filter { entry ->
+            isAndroidScoreFileName(entry.name)
+        }
+        val metadataByScoreUri = matchAndroidMetadataEntries(
+            scoreEntries = scoreEntries,
+            metadataEntries = selectedEntries.filter { entry -> isAndroidMetadataFileName(entry.name) },
+        )
         val documents = buildList {
-            uris.forEach { uri ->
-                persistReadPermission(uri)
+            scoreEntries.forEach { entry ->
                 copyUriToLibrary(
-                    uri = uri,
-                    originalName = queryDisplayName(uri) ?: "Imported Score.pdf",
+                    uri = entry.uri,
+                    originalName = entry.name,
+                    scoreMetadata = metadataByScoreUri[entry.uri],
                 )?.let(::add)
             }
         }
@@ -269,18 +296,29 @@ private class AndroidPdfImporter(
         val root = DocumentFile.fromTreeUri(context, treeUri)
             ?: return@withContext ImportRequestResult(emptyList(), "The selected folder could not be read.")
 
-        val pdfFiles = collectPdfDocuments(root)
-        if (pdfFiles.isEmpty()) {
+        val entriesByFolder = collectImportEntriesByFolder(root)
+        val totalScoreCount = entriesByFolder.values.sumOf { entries ->
+            entries.count { entry -> isAndroidScoreFileName(entry.name) }
+        }
+        if (totalScoreCount == 0) {
             refreshPermissionState()
             return@withContext ImportRequestResult(emptyList(), "No PDF files were found in the selected folder.")
         }
 
         val documents = buildList {
-            pdfFiles.forEach { file ->
-                copyUriToLibrary(
-                    uri = file.uri,
-                    originalName = file.name ?: "Imported Score.pdf",
-                )?.let(::add)
+            entriesByFolder.values.forEach { entries ->
+                val scoreEntries = entries.filter { entry -> isAndroidScoreFileName(entry.name) }
+                val metadataByScoreUri = matchAndroidMetadataEntries(
+                    scoreEntries = scoreEntries,
+                    metadataEntries = entries.filter { entry -> isAndroidMetadataFileName(entry.name) },
+                )
+                scoreEntries.forEach { entry ->
+                    copyUriToLibrary(
+                        uri = entry.uri,
+                        originalName = entry.name,
+                        scoreMetadata = metadataByScoreUri[entry.uri],
+                    )?.let(::add)
+                }
             }
         }
 
@@ -299,6 +337,7 @@ private class AndroidPdfImporter(
     private suspend fun copyUriToLibrary(
         uri: Uri,
         originalName: String,
+        scoreMetadata: ScoreMetadata? = null,
     ): ImportedPdfDescriptor? {
         val safeName = safeFileStem(originalName)
         val destination = File(
@@ -318,6 +357,7 @@ private class AndroidPdfImporter(
             contentFingerprint = contentFingerprint,
             pageCount = pageCount,
             suggestedTitle = originalName.substringBeforeLast('.'),
+            scoreMetadata = scoreMetadata,
         )
     }
 
@@ -340,19 +380,68 @@ private class AndroidPdfImporter(
         return digest.digest().toHexString()
     }
 
-    private fun collectPdfDocuments(root: DocumentFile): List<DocumentFile> {
-        val documents = mutableListOf<DocumentFile>()
+    private fun collectImportEntriesByFolder(root: DocumentFile): Map<String, List<AndroidImportEntry>> {
+        val entriesByFolder = linkedMapOf<String, MutableList<AndroidImportEntry>>()
 
         fun walk(node: DocumentFile) {
             when {
-                node.isFile && node.name?.endsWith(".pdf", ignoreCase = true) == true -> documents += node
                 node.isDirectory -> node.listFiles().forEach(::walk)
+                node.isFile -> {
+                    val name = node.name ?: return
+                    if (!isAndroidScoreFileName(name) && !isAndroidMetadataFileName(name)) {
+                        return
+                    }
+                    entriesByFolder
+                        .getOrPut(node.uri.buildFolderKey()) { mutableListOf() }
+                        .add(AndroidImportEntry(uri = node.uri, name = name))
+                }
             }
         }
 
         walk(root)
-        return documents
+        return entriesByFolder
     }
+
+    private fun matchAndroidMetadataEntries(
+        scoreEntries: List<AndroidImportEntry>,
+        metadataEntries: List<AndroidImportEntry>,
+    ): Map<Uri, ScoreMetadata> {
+        if (scoreEntries.isEmpty() || metadataEntries.isEmpty()) {
+            return emptyMap()
+        }
+
+        val metadataByStem = metadataEntries.associateBy { entry ->
+            entry.name.substringBeforeLast('.').lowercase()
+        }
+        val singleMetadata = metadataEntries.singleOrNull()
+            ?.takeIf { scoreEntries.size == 1 }
+        val metadataCache = mutableMapOf<Uri, ScoreMetadata?>()
+        val matches = mutableMapOf<Uri, ScoreMetadata>()
+
+        scoreEntries.forEach { scoreEntry ->
+            val matchedEntry = metadataByStem[scoreEntry.name.substringBeforeLast('.').lowercase()]
+                ?: singleMetadata
+            val metadata = matchedEntry?.let { entry ->
+                metadataCache.getOrPut(entry.uri) {
+                    parseAndroidScoreMetadata(entry.uri)
+                }
+            }
+            if (metadata != null) {
+                matches[scoreEntry.uri] = metadata
+            }
+        }
+
+        return matches
+    }
+
+    private fun parseAndroidScoreMetadata(uri: Uri): ScoreMetadata? = runCatching {
+        context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
+            androidScoreMetadataJson.decodeFromString(
+                ScoreMetadata.serializer(),
+                reader.readText(),
+            )
+        }
+    }.getOrNull()
 
     private fun refreshPermissionState() {
         val trackedPermissions = context.contentResolver.persistedUriPermissions
@@ -606,13 +695,27 @@ private class AndroidManagedPdfStore(
     }
 }
 
+private data class AndroidImportEntry(
+    val uri: Uri,
+    val name: String,
+)
+
 private fun safeFileStem(fileName: String): String = fileName
     .substringBeforeLast('.')
     .replace(Regex("[^A-Za-z0-9_-]+"), "_")
     .trim('_')
     .ifEmpty { "score" }
 
+private fun isAndroidScoreFileName(name: String): Boolean =
+    name.endsWith(".pdf", ignoreCase = true)
+
+private fun isAndroidMetadataFileName(name: String): Boolean =
+    name.endsWith(".json", ignoreCase = true)
+
+private fun Uri.buildFolderKey(): String = toString().substringBeforeLast('/', missingDelimiterValue = toString())
+
 private const val COPY_BUFFER_SIZE_BYTES = 8_192
+private val androidScoreMetadataJson = Json { ignoreUnknownKeys = true }
 
 private fun ByteArray.toHexString(): String = joinToString(separator = "") { byte ->
     byte.toUByte().toString(16).padStart(2, '0')

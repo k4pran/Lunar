@@ -44,6 +44,74 @@ class DesktopScoreImportTest {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun importDesktopScoreFilesMatchesSingleJsonToSingleScoreFolder() {
+        val root = Files.createTempDirectory("lunar-desktop-import-metadata-test").toFile()
+        try {
+            val scoresDirectory = File(root, "scores").apply { mkdirs() }
+            val sourceFile = File(root, "bell_piece.png")
+            writeTestImage(sourceFile, width = 180, height = 320)
+            File(root, "metadata.json").writeText(
+                """
+                {
+                  "schemaId": "score-metadata",
+                  "schemaVersion": "1.0",
+                  "id": "bell-piece",
+                  "title": "The Bell",
+                  "composer": {
+                    "name": "Holger Stief"
+                  }
+                }
+                """.trimIndent()
+            )
+
+            val descriptor = importDesktopScoreFiles(
+                files = listOf(sourceFile),
+                scoresDirectory = scoresDirectory,
+            ).single()
+
+            assertEquals("The Bell", descriptor.scoreMetadata?.title)
+            assertEquals("Holger Stief", descriptor.scoreMetadata?.composer?.name)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun importDesktopScoreFilesUsesSameStemJsonWhenFolderHasMultipleScores() {
+        val root = Files.createTempDirectory("lunar-desktop-import-same-stem-test").toFile()
+        try {
+            val scoresDirectory = File(root, "scores").apply { mkdirs() }
+            val preludeFile = File(root, "prelude_in_c.png")
+            val nocturneFile = File(root, "nocturne.png")
+            writeTestImage(preludeFile, width = 180, height = 320)
+            writeTestImage(nocturneFile, width = 180, height = 320)
+            File(root, "prelude_in_c.json").writeText(
+                """
+                {
+                  "schemaId": "score-metadata",
+                  "schemaVersion": "1.0",
+                  "id": "prelude-in-c",
+                  "title": "Prelude in C",
+                  "composer": {
+                    "name": "J. S. Bach"
+                  }
+                }
+                """.trimIndent()
+            )
+
+            val descriptors = importDesktopScoreFiles(
+                files = listOf(preludeFile, nocturneFile),
+                scoresDirectory = scoresDirectory,
+            ).associateBy { it.originalFileName }
+
+            assertEquals("Prelude in C", descriptors.getValue("prelude_in_c.pdf").scoreMetadata?.title)
+            assertEquals(null, descriptors.getValue("nocturne.pdf").scoreMetadata)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }
 
 private fun writeTestImage(

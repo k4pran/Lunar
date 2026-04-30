@@ -51,6 +51,8 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -252,17 +254,10 @@ fun ViewerScreen(
                     zoom = FitZoom
                 }
                 if (documentState.isFavorite != null && onToggleFavorite != null) {
-                    Text(
-                        text = if (documentState.isFavorite) "*" else "o",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = if (documentState.isFavorite) {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        } else {
-                            themePalette.headerForeground.copy(alpha = 0.55f)
-                        },
-                        modifier = Modifier
-                            .clickable(onClick = onToggleFavorite)
-                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                    ViewerFavoriteButton(
+                        title = documentState.title,
+                        isFavorite = documentState.isFavorite,
+                        onToggleFavorite = onToggleFavorite,
                     )
                 }
                 if (onEnterFullscreen != null) {
@@ -618,6 +613,42 @@ private fun CompactNavButton(
                 MaterialTheme.shapes.small,
             )
             .padding(horizontal = 10.dp, vertical = 5.dp),
+    )
+}
+
+@Composable
+private fun ViewerFavoriteButton(
+    title: String,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
+) {
+    val themePalette = lunarThemePalette()
+    val backgroundColor = if (isFavorite) {
+        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.82f)
+    } else {
+        themePalette.headerForeground.copy(alpha = 0.12f)
+    }
+    val iconColor = if (isFavorite) {
+        MaterialTheme.colorScheme.onTertiaryContainer
+    } else {
+        themePalette.headerForeground.copy(alpha = 0.82f)
+    }
+
+    Text(
+        text = if (isFavorite) "★" else "☆",
+        style = MaterialTheme.typography.titleMedium,
+        color = iconColor,
+        modifier = Modifier
+            .semantics {
+                contentDescription = if (isFavorite) {
+                    "Remove $title from favorites"
+                } else {
+                    "Mark $title as favorite"
+                }
+            }
+            .clickable(onClick = onToggleFavorite)
+            .background(backgroundColor, MaterialTheme.shapes.small)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
     )
 }
 

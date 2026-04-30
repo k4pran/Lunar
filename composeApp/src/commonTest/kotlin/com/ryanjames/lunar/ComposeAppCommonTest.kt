@@ -6,6 +6,7 @@ import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.GoogleDriveImportRoot
 import com.ryanjames.lunar.library.data.GoogleDriveStorageSettings
 import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
+import com.ryanjames.lunar.library.data.InMemorySourceRegistry
 import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.platform.PdfDocumentInfo
 import com.ryanjames.lunar.platform.PdfPageRenderer
@@ -16,6 +17,9 @@ import com.ryanjames.lunar.settings.AppColorTheme
 import com.ryanjames.lunar.settings.AutoRefreshSchedule
 import com.ryanjames.lunar.settings.InMemoryAppSettingsStore
 import com.ryanjames.lunar.settings.ViewerShortcutAction
+import com.ryanjames.lunar.sync.GoogleDriveAccessToken
+import com.ryanjames.lunar.sync.GoogleDriveOAuthCoordinator
+import com.ryanjames.lunar.sync.GoogleDriveOAuthSession
 import com.ryanjames.lunar.sync.LibrarySyncManager
 import com.ryanjames.lunar.sync.ManagedPdfStore
 import com.ryanjames.lunar.sync.SyncHttpClient
@@ -25,6 +29,7 @@ import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.buildRandomSightReadingSelection
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
+import java.io.IOException
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -178,6 +183,114 @@ class ComposeAppCommonTest {
         assertTrue(
             manager.state.value.activityLog.any { it.contains("ready Good Score.pdf") },
             "Expected the successful file to keep syncing after the failed one.",
+        )
+    }
+
+    @Test
+    fun googleDriveRefreshRenewsExpiredRefreshTokenAndRetries() = runBlocking {
+        val repository = DefaultSheetMusicRepository(InMemoryLibraryStorage())
+        val source = CloudGoogleDriveSource(
+            id = "drive_source",
+            label = "Google Drive",
+            addedAtEpochMillis = 1L,
+            settings = GoogleDriveStorageSettings(
+                clientId = "client-id",
+                refreshToken = "expired-refresh-token",
+                roots = listOf(
+                    GoogleDriveImportRoot(
+                        id = "root",
+                        label = "Root",
+                        folderId = "root-folder",
+                        folderStrategy = CloudPathStrategy.FLAT,
+                    )
+                ),
+            ),
+        )
+        val sourceRegistry = InMemorySourceRegistry(listOf(source))
+        val oauth = TestGoogleDriveOAuthCoordinator(
+            session = GoogleDriveOAuthSession(
+                accessToken = "fresh-access-token",
+                refreshToken = "fresh-refresh-token",
+                expiresAtEpochMillis = 60_000L,
+            )
+        )
+        val manager = LibrarySyncManager(
+            repository = repository,
+            httpClient = ExpiredRefreshTokenGoogleDriveHttpClient(),
+            pdfStore = FakeManagedPdfStore(),
+            renderer = FakePdfPageRenderer(),
+            sourceRegistry = sourceRegistry,
+            googleDriveOAuth = oauth,
+        )
+
+        repository.initialize()
+        sourceRegistry.initialize()
+        manager.initialize()
+        manager.refreshSource(source)
+
+        val syncedTitles = repository.library.value.items.map { it.title }
+        assertEquals(listOf("Recovered Score"), syncedTitles)
+        assertEquals(1, oauth.requestCount)
+        val updatedSource = sourceRegistry.getSource(source.id) as CloudGoogleDriveSource
+        assertEquals("fresh-refresh-token", updatedSource.settings.refreshToken)
+        assertTrue(
+            manager.state.value.activityLog.any { it.contains("Google rejected the saved refresh token") },
+            "Expected the activity log to mention automatic Google Drive reconnection.",
+        )
+    }
+
+    @Test
+    fun updatingGoogleDriveSourceReplacesSavedRefreshToken() = runBlocking {
+        val existingSource = CloudGoogleDriveSource(
+            id = "drive_source",
+            label = "Google Drive",
+            addedAtEpochMillis = 1L,
+            settings = GoogleDriveStorageSettings(
+                clientId = "client-id",
+                refreshToken = "old-refresh-token",
+                accessToken = "stale-access-token",
+                roots = listOf(
+                    GoogleDriveImportRoot(
+                        id = "root",
+                        label = "Root",
+                        folderId = "folder-123",
+                        folderStrategy = CloudPathStrategy.FLAT,
+                    )
+                ),
+            ),
+        )
+        val runtime = createTestPlatformRuntime(
+            initialSources = listOf(existingSource),
+        )
+        val appState = createTestLunarAppState(
+            scope = this,
+            runtime = runtime,
+        )
+
+        appState.updateCloudSource(
+            existingSource.copy(
+                label = "Main Drive library",
+                settings = existingSource.settings.copy(
+                    refreshToken = "new-refresh-token",
+                    accessToken = "should-be-cleared",
+                ),
+            )
+        )
+        repeat(10) {
+            val updatedSource = runtime.sourceRegistry.getSource(existingSource.id) as? CloudGoogleDriveSource
+            if (updatedSource?.label == "Main Drive library") {
+                return@repeat
+            }
+            yield()
+        }
+
+        val updatedSource = runtime.sourceRegistry.getSource(existingSource.id) as CloudGoogleDriveSource
+        assertEquals("Main Drive library", updatedSource.label)
+        assertEquals("new-refresh-token", updatedSource.settings.refreshToken)
+        assertEquals("", updatedSource.settings.accessToken)
+        assertEquals(
+            "Cloud source updated. Press Refresh to sync with the new Google Drive token.",
+            appState.bannerMessage,
         )
     }
 
@@ -495,6 +608,59 @@ private class FakeGoogleDriveHttpClient : SyncHttpClient {
             else -> error("Unexpected GET bytes URL: $url")
         }
     }
+}
+
+private class ExpiredRefreshTokenGoogleDriveHttpClient : SyncHttpClient {
+    override suspend fun getText(url: String, headers: Map<String, String>): String {
+        assertEquals("Bearer fresh-access-token", headers["Authorization"])
+        return """
+            {
+              "files": [
+                {
+                  "id": "recovered-file",
+                  "name": "Recovered Score.pdf",
+                  "mimeType": "application/pdf",
+                  "modifiedTime": "2026-04-12T00:00:01Z"
+                }
+              ]
+            }
+        """.trimIndent()
+    }
+
+    override suspend fun getBytes(url: String, headers: Map<String, String>): ByteArray {
+        assertEquals("Bearer fresh-access-token", headers["Authorization"])
+        return byteArrayOf(1, 2, 3, 4)
+    }
+
+    override suspend fun postForm(url: String, formBody: String, headers: Map<String, String>): String {
+        if (formBody.contains("refresh_token=expired-refresh-token")) {
+            throw IOException(
+                "HTTP 400 from POST https://oauth2.googleapis.com/token: {\"error\":\"invalid_grant\",\"error_description\":\"Bad Request\"}"
+            )
+        }
+        error("Unexpected POST form request: $url")
+    }
+}
+
+private class TestGoogleDriveOAuthCoordinator(
+    private val session: GoogleDriveOAuthSession,
+) : GoogleDriveOAuthCoordinator {
+    var requestCount: Int = 0
+        private set
+
+    override val isSupported: Boolean = true
+
+    override suspend fun getOrFetchRefreshToken(settings: GoogleDriveStorageSettings): GoogleDriveOAuthSession {
+        requestCount += 1
+        assertEquals("", settings.refreshToken)
+        return session
+    }
+
+    override suspend fun refreshAccessToken(
+        refreshToken: String,
+        clientId: String,
+        clientSecret: String,
+    ): GoogleDriveAccessToken = error("refreshAccessToken should not be called in this test")
 }
 
 private class FakeManagedPdfStore : ManagedPdfStore {

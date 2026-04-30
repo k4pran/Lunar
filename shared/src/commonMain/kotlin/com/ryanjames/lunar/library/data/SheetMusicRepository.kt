@@ -5,6 +5,9 @@ import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.library.model.LibrarySetlist
 import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.library.model.RemoteSyncMetadata
+import com.ryanjames.lunar.library.model.ScoreMetadata
+import com.ryanjames.lunar.library.model.ScoreMetadataComposer
+import com.ryanjames.lunar.library.model.ScoreMetadataSource
 import com.ryanjames.lunar.library.model.SheetMusicItem
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -97,6 +100,7 @@ data class SyncedSheetMusicDescriptor(
     val collection: String? = null,
     val pageCount: Int? = null,
     val dateAddedEpochMillis: Long? = null,
+    val scoreMetadata: ScoreMetadata? = null,
 )
 
 data class SkippedImportDocument(
@@ -167,6 +171,8 @@ interface SheetMusicRepository {
 
     suspend fun updateSyncStatus(syncStatus: SyncStatus)
 
+    suspend fun getScoreMetadata(itemId: String): ScoreMetadata?
+
     fun getItem(itemId: String): SheetMusicItem?
 
     fun getSetlist(setlistId: String): LibrarySetlist?
@@ -178,6 +184,7 @@ interface SheetMusicRepository {
 
 class DefaultSheetMusicRepository(
     private val storage: LibraryStorage,
+    private val scoreMetadataStorage: ScoreMetadataStorage = InMemoryScoreMetadataStorage(),
     private val syncGateway: LibrarySyncGateway = LocalOnlySyncGateway,
     private val storedDocumentCleaner: StoredDocumentCleaner = NoOpStoredDocumentCleaner,
     private val storedDocumentFingerprinter: StoredDocumentFingerprinter = NoOpStoredDocumentFingerprinter,
@@ -218,6 +225,7 @@ class DefaultSheetMusicRepository(
                 songbooks = sanitizedSongbooks,
                 syncStatus = syncGateway.currentStatus(),
             )
+            ensureStoredMetadataForItems(storedLibrary.items)
             initialized = true
         }
     }
@@ -240,7 +248,7 @@ class DefaultSheetMusicRepository(
         val importedFingerprints = mutableSetOf<String>()
         val stalePaths = mutableListOf<String>()
         val skippedDocuments = mutableListOf<SkippedImportDocument>()
-        val importedItems = buildList {
+        val importedRecords = buildList {
             documents.forEach { document ->
                 val fingerprint = normalizeContentFingerprint(document.contentFingerprint)
                 val duplicateReason = when {
@@ -263,25 +271,45 @@ class DefaultSheetMusicRepository(
                 }
 
                 val importIndex = size
+                val itemId = buildStableId(importedAt, importIndex)
+                val fallbackTitle = normalizeTitle(document.suggestedTitle, document.originalFileName)
+                val resolvedMetadata = resolveImportedScoreMetadata(
+                    itemId = itemId,
+                    incomingMetadata = document.scoreMetadata,
+                    fallbackTitle = fallbackTitle,
+                    fallbackComposer = null,
+                    fallbackTags = emptyList(),
+                    originalFileName = document.originalFileName,
+                    sourceUri = document.sourceUri,
+                    pageCount = document.pageCount,
+                    contentFingerprint = fingerprint,
+                )
                 add(
-                    SheetMusicItem(
-                        id = buildStableId(importedAt, importIndex),
-                        title = normalizeTitle(document.suggestedTitle, document.originalFileName),
-                        document = PdfDocumentReference(
-                            storedPath = document.storedPath,
-                            originalFileName = document.originalFileName,
-                            sourceUri = document.sourceUri,
-                            contentFingerprint = fingerprint,
+                    ImportedItemRecord(
+                        item = SheetMusicItem(
+                            id = itemId,
+                            title = normalizeTitle(resolvedMetadata.title, document.originalFileName),
+                            composer = resolvedMetadata.composer.name.takeIf(String::isNotBlank),
+                            tags = normalizeTags(resolvedMetadata.tags),
+                            document = PdfDocumentReference(
+                                storedPath = document.storedPath,
+                                originalFileName = document.originalFileName,
+                                sourceUri = document.sourceUri,
+                                contentFingerprint = fingerprint,
+                            ),
+                            pageCount = resolvedMetadata.pageCount ?: document.pageCount,
+                            dateAddedEpochMillis = importedAt + importIndex,
+                            sourceId = sourceId,
                         ),
-                        pageCount = document.pageCount,
-                        dateAddedEpochMillis = importedAt + importIndex,
-                        sourceId = sourceId,
+                        metadata = resolvedMetadata,
                     )
                 )
             }
         }
+        val importedItems = importedRecords.map(ImportedItemRecord::item)
 
         mutateItems { items -> items + importedItems }
+        persistMetadataRecords(importedRecords)
         stalePaths
             .distinct()
             .forEach { stalePath ->
@@ -305,6 +333,9 @@ class DefaultSheetMusicRepository(
         mutateItems { items ->
             items.filterNot { it.sourceId == sourceId }
         }
+        toRemove.forEach { item ->
+            runCatching { scoreMetadataStorage.deleteMetadata(item.id) }
+        }
     }
 
     override suspend fun updateMetadata(itemId: String, metadata: SheetMusicMetadataInput) {
@@ -317,6 +348,16 @@ class DefaultSheetMusicRepository(
                 tags = normalizeTags(metadata.tags),
                 collection = metadata.collection?.trim()?.ifEmpty { null },
                 isFavorite = metadata.isFavorite,
+            )
+        }
+        getItem(itemId)?.let { item ->
+            val existingMetadata = scoreMetadataStorage.readMetadata(item.id)
+            persistMetadataRecord(
+                itemId = item.id,
+                metadata = metadataForLibraryItem(
+                    item = item,
+                    metadataId = existingMetadata?.id,
+                ),
             )
         }
     }
@@ -351,6 +392,16 @@ class DefaultSheetMusicRepository(
                 item.copy(pageCount = pageCount)
             }
         }
+        getItem(itemId)?.let { item ->
+            val existingMetadata = scoreMetadataStorage.readMetadata(item.id)
+            persistMetadataRecord(
+                itemId = item.id,
+                metadata = metadataForLibraryItem(
+                    item = item,
+                    metadataId = existingMetadata?.id,
+                ),
+            )
+        }
     }
 
     override suspend fun deleteItem(itemId: String) {
@@ -364,6 +415,7 @@ class DefaultSheetMusicRepository(
         mutateItems { items ->
             items.filterNot { existing -> existing.id == itemId }
         }
+        runCatching { scoreMetadataStorage.deleteMetadata(itemId) }
     }
 
     override suspend fun createSetlist(name: String, itemIds: List<String>): LibrarySetlist {
@@ -521,6 +573,8 @@ class DefaultSheetMusicRepository(
         ensureInitialized()
 
         val stalePaths = mutableListOf<String>()
+        val removedRemoteItemIds = mutableListOf<String>()
+        val syncedMetadataRecords = mutableListOf<ImportedItemRecord>()
 
         mutationLock.withLock {
             val existingItems = _library.value.items
@@ -541,7 +595,7 @@ class DefaultSheetMusicRepository(
                     stalePaths += existing.document.storedPath
                 }
 
-                existing?.copy(
+                val syncedItem = existing?.copy(
                     title = descriptor.title,
                     composer = descriptor.composer,
                     tags = normalizeTags(descriptor.tags),
@@ -573,11 +627,25 @@ class DefaultSheetMusicRepository(
                     ),
                     sourceId = sourceId,
                 )
+                syncedMetadataRecords += ImportedItemRecord(
+                    item = syncedItem,
+                    metadata = mergeScoreMetadata(
+                        existingMetadata = metadataForLibraryItem(
+                            item = syncedItem,
+                            metadataId = descriptor.scoreMetadata?.id,
+                        ),
+                        incomingMetadata = descriptor.scoreMetadata,
+                    ),
+                )
+                syncedItem
             }
 
             existingRemoteItems
                 .filter { existing -> existing.syncMetadata?.remoteId !in incomingRemoteIds }
-                .forEach { stalePaths += it.document.storedPath }
+                .forEach {
+                    stalePaths += it.document.storedPath
+                    removedRemoteItemIds += it.id
+                }
 
             val updatedItems = keptLocalItems + syncedItems
             val updatedSetlists = sanitizeSetlists(_library.value.setlists, updatedItems)
@@ -601,6 +669,12 @@ class DefaultSheetMusicRepository(
             .forEach { stalePath ->
                 runCatching { storedDocumentCleaner.deleteStoredDocument(stalePath) }
             }
+        persistMetadataRecords(syncedMetadataRecords)
+        removedRemoteItemIds
+            .distinct()
+            .forEach { itemId ->
+                runCatching { scoreMetadataStorage.deleteMetadata(itemId) }
+            }
     }
 
     override suspend fun updateSyncStatus(syncStatus: SyncStatus) {
@@ -608,6 +682,21 @@ class DefaultSheetMusicRepository(
         mutationLock.withLock {
             _library.value = _library.value.copy(syncStatus = syncStatus)
         }
+    }
+
+    override suspend fun getScoreMetadata(itemId: String): ScoreMetadata? {
+        ensureInitialized()
+        val item = getItem(itemId) ?: return null
+        val existingMetadata = scoreMetadataStorage.readMetadata(itemId)
+        val resolvedMetadata = mergeScoreMetadata(
+            existingMetadata = existingMetadata,
+            incomingMetadata = metadataForLibraryItem(
+                item = item,
+                metadataId = existingMetadata?.id,
+            ),
+        )
+        persistMetadataRecord(itemId = itemId, metadata = resolvedMetadata)
+        return resolvedMetadata
     }
 
     override fun getItem(itemId: String): SheetMusicItem? = _library.value.items.firstOrNull { it.id == itemId }
@@ -649,6 +738,78 @@ class DefaultSheetMusicRepository(
         }
         return fingerprints
     }
+
+    private suspend fun ensureStoredMetadataForItems(items: List<SheetMusicItem>) {
+        items.forEach { item ->
+            val existingMetadata = scoreMetadataStorage.readMetadata(item.id)
+            persistMetadataRecord(
+                itemId = item.id,
+                metadata = metadataForLibraryItem(
+                    item = item,
+                    metadataId = existingMetadata?.id,
+                ),
+            )
+        }
+    }
+
+    private suspend fun persistMetadataRecords(records: List<ImportedItemRecord>) {
+        records.forEach { record ->
+            persistMetadataRecord(
+                itemId = record.item.id,
+                metadata = record.metadata,
+            )
+        }
+    }
+
+    private suspend fun persistMetadataRecord(
+        itemId: String,
+        metadata: ScoreMetadata,
+    ) {
+        val mergedMetadata = mergeScoreMetadata(
+            existingMetadata = scoreMetadataStorage.readMetadata(itemId),
+            incomingMetadata = metadata,
+        )
+        scoreMetadataStorage.writeMetadata(itemId, mergedMetadata)
+    }
+
+    private fun resolveImportedScoreMetadata(
+        itemId: String,
+        incomingMetadata: ScoreMetadata?,
+        fallbackTitle: String,
+        fallbackComposer: String?,
+        fallbackTags: List<String>,
+        originalFileName: String,
+        sourceUri: String?,
+        pageCount: Int?,
+        contentFingerprint: String?,
+    ): ScoreMetadata = mergeScoreMetadata(
+        existingMetadata = defaultScoreMetadata(
+            itemId = itemId,
+            title = fallbackTitle,
+            composer = fallbackComposer,
+            tags = fallbackTags,
+            originalFileName = originalFileName,
+            sourceUri = sourceUri,
+            pageCount = pageCount,
+            contentFingerprint = contentFingerprint,
+        ),
+        incomingMetadata = incomingMetadata,
+    )
+
+    private fun metadataForLibraryItem(
+        item: SheetMusicItem,
+        metadataId: String? = null,
+    ): ScoreMetadata = defaultScoreMetadata(
+        itemId = item.id,
+        title = item.title,
+        composer = item.composer,
+        tags = item.tags,
+        originalFileName = item.document.originalFileName,
+        sourceUri = item.document.sourceUri,
+        pageCount = item.pageCount,
+        contentFingerprint = item.document.contentFingerprint,
+        metadataId = metadataId,
+    )
 
     private suspend fun mutateItem(
         itemId: String,
@@ -730,6 +891,11 @@ class DefaultSheetMusicRepository(
     ): String = "remote_${providerId}_${remoteId}"
 }
 
+private data class ImportedItemRecord(
+    val item: SheetMusicItem,
+    val metadata: ScoreMetadata,
+)
+
 private fun normalizeTitle(
     suggestedTitle: String,
     originalFileName: String,
@@ -810,3 +976,189 @@ private fun normalizeTags(tags: List<String>): List<String> = tags
     .filter(String::isNotEmpty)
     .distinctBy(String::lowercase)
     .sortedWith(String.CASE_INSENSITIVE_ORDER)
+
+private fun defaultScoreMetadata(
+    itemId: String,
+    title: String,
+    composer: String?,
+    tags: List<String>,
+    originalFileName: String,
+    sourceUri: String?,
+    pageCount: Int?,
+    contentFingerprint: String?,
+    metadataId: String? = null,
+): ScoreMetadata {
+    val fallbackId = buildScoreMetadataId(
+        itemId = itemId,
+        contentFingerprint = contentFingerprint,
+        metadataId = metadataId,
+    )
+    return sanitizeScoreMetadata(
+        metadata = ScoreMetadata(
+            id = fallbackId,
+            title = title,
+            composer = ScoreMetadataComposer(name = composer.orEmpty()),
+            pageCount = pageCount,
+            tags = normalizeMetadataStringList(tags),
+            source = ScoreMetadataSource(
+                filename = originalFileName,
+                fileType = "pdf",
+                url = sourceUri.orEmpty(),
+            ),
+        ),
+        fallbackId = fallbackId,
+    )
+}
+
+private fun mergeScoreMetadata(
+    existingMetadata: ScoreMetadata?,
+    incomingMetadata: ScoreMetadata?,
+): ScoreMetadata {
+    val fallbackId = incomingMetadata?.id?.trim().orEmpty()
+        .ifEmpty { existingMetadata?.id?.trim().orEmpty() }
+        .ifEmpty { "score" }
+    val merged = when {
+        existingMetadata == null && incomingMetadata == null -> ScoreMetadata(id = fallbackId)
+        existingMetadata == null -> incomingMetadata ?: ScoreMetadata(id = fallbackId)
+        incomingMetadata == null -> existingMetadata
+        else -> existingMetadata.copy(
+            schemaId = incomingMetadata.schemaId.takeIf { it.isNotBlank() } ?: existingMetadata.schemaId,
+            schemaVersion = incomingMetadata.schemaVersion.takeIf { it.isNotBlank() } ?: existingMetadata.schemaVersion,
+            id = incomingMetadata.id.takeIf { it.isNotBlank() } ?: existingMetadata.id,
+            title = incomingMetadata.title.takeIf { it.isNotBlank() } ?: existingMetadata.title,
+            subtitle = incomingMetadata.subtitle.takeIf { it.isNotBlank() } ?: existingMetadata.subtitle,
+            alternativeTitles = incomingMetadata.alternativeTitles.takeIf { it.any(String::isNotBlank) }
+                ?: existingMetadata.alternativeTitles,
+            composer = mergeScoreMetadataComposer(
+                existing = existingMetadata.composer,
+                incoming = incomingMetadata.composer,
+            ),
+            catalogueNumber = incomingMetadata.catalogueNumber.takeIf { it.isNotBlank() } ?: existingMetadata.catalogueNumber,
+            opusNumber = incomingMetadata.opusNumber.takeIf { it.isNotBlank() } ?: existingMetadata.opusNumber,
+            workNumber = incomingMetadata.workNumber.takeIf { it.isNotBlank() } ?: existingMetadata.workNumber,
+            genre = incomingMetadata.genre.takeIf { it.isNotBlank() } ?: existingMetadata.genre,
+            form = incomingMetadata.form.takeIf { it.isNotBlank() } ?: existingMetadata.form,
+            stylePeriod = incomingMetadata.stylePeriod.takeIf { it.isNotBlank() } ?: existingMetadata.stylePeriod,
+            instrumentation = incomingMetadata.instrumentation.takeIf { it.any(String::isNotBlank) }
+                ?: existingMetadata.instrumentation,
+            key = incomingMetadata.key.takeIf { it.isNotBlank() } ?: existingMetadata.key,
+            timeSignature = incomingMetadata.timeSignature.takeIf { it.isNotBlank() } ?: existingMetadata.timeSignature,
+            tempoMarkings = incomingMetadata.tempoMarkings.takeIf { it.any(String::isNotBlank) }
+                ?: existingMetadata.tempoMarkings,
+            movements = incomingMetadata.movements.takeIf { it.any(String::isNotBlank) }
+                ?: existingMetadata.movements,
+            yearComposed = incomingMetadata.yearComposed ?: existingMetadata.yearComposed,
+            publisher = incomingMetadata.publisher.takeIf { it.isNotBlank() } ?: existingMetadata.publisher,
+            editor = incomingMetadata.editor.takeIf { it.isNotBlank() } ?: existingMetadata.editor,
+            arranger = incomingMetadata.arranger.takeIf { it.isNotBlank() } ?: existingMetadata.arranger,
+            edition = incomingMetadata.edition.takeIf { it.isNotBlank() } ?: existingMetadata.edition,
+            language = incomingMetadata.language.takeIf { it.isNotBlank() } ?: existingMetadata.language,
+            pageCount = incomingMetadata.pageCount ?: existingMetadata.pageCount,
+            durationSeconds = incomingMetadata.durationSeconds ?: existingMetadata.durationSeconds,
+            difficulty = incomingMetadata.difficulty.takeIf { it.isNotBlank() } ?: existingMetadata.difficulty,
+            tags = incomingMetadata.tags.takeIf { it.any(String::isNotBlank) } ?: existingMetadata.tags,
+            notes = mergeScoreMetadataNotes(
+                existing = existingMetadata.notes,
+                incoming = incomingMetadata.notes,
+            ),
+            source = mergeScoreMetadataSource(
+                existing = existingMetadata.source,
+                incoming = incomingMetadata.source,
+            ),
+        )
+    }
+    return sanitizeScoreMetadata(
+        metadata = merged,
+        fallbackId = fallbackId,
+    )
+}
+
+private fun mergeScoreMetadataComposer(
+    existing: ScoreMetadataComposer,
+    incoming: ScoreMetadataComposer,
+): ScoreMetadataComposer = ScoreMetadataComposer(
+    name = incoming.name.takeIf { it.isNotBlank() } ?: existing.name,
+    birthYear = incoming.birthYear ?: existing.birthYear,
+    deathYear = incoming.deathYear ?: existing.deathYear,
+)
+
+private fun mergeScoreMetadataSource(
+    existing: ScoreMetadataSource,
+    incoming: ScoreMetadataSource,
+): ScoreMetadataSource = ScoreMetadataSource(
+    filename = incoming.filename.takeIf { it.isNotBlank() } ?: existing.filename,
+    fileType = incoming.fileType.takeIf { it.isNotBlank() } ?: existing.fileType,
+    url = incoming.url.takeIf { it.isNotBlank() } ?: existing.url,
+)
+
+private fun mergeScoreMetadataNotes(
+    existing: String,
+    incoming: String,
+): String {
+    val normalizedExisting = existing.trim()
+    val normalizedIncoming = incoming.trim()
+    return when {
+        normalizedIncoming.isEmpty() -> normalizedExisting
+        normalizedExisting.isEmpty() -> normalizedIncoming
+        normalizedIncoming in normalizedExisting -> normalizedExisting
+        else -> "$normalizedExisting\n$normalizedIncoming"
+    }
+}
+
+private fun sanitizeScoreMetadata(
+    metadata: ScoreMetadata,
+    fallbackId: String,
+): ScoreMetadata = metadata.copy(
+    schemaId = metadata.schemaId.trim().ifEmpty { com.ryanjames.lunar.library.model.SCORE_METADATA_SCHEMA_ID },
+    schemaVersion = metadata.schemaVersion.trim().ifEmpty { com.ryanjames.lunar.library.model.SCORE_METADATA_SCHEMA_VERSION },
+    id = metadata.id.trim().ifEmpty { fallbackId.trim().ifEmpty { "score" } },
+    title = metadata.title.trim(),
+    subtitle = metadata.subtitle.trim(),
+    alternativeTitles = normalizeMetadataStringList(metadata.alternativeTitles),
+    composer = metadata.composer.copy(
+        name = metadata.composer.name.trim(),
+    ),
+    catalogueNumber = metadata.catalogueNumber.trim(),
+    opusNumber = metadata.opusNumber.trim(),
+    workNumber = metadata.workNumber.trim(),
+    genre = metadata.genre.trim(),
+    form = metadata.form.trim(),
+    stylePeriod = metadata.stylePeriod.trim(),
+    instrumentation = normalizeMetadataStringList(metadata.instrumentation),
+    key = metadata.key.trim(),
+    timeSignature = metadata.timeSignature.trim(),
+    tempoMarkings = normalizeMetadataStringList(metadata.tempoMarkings),
+    movements = normalizeMetadataStringList(metadata.movements),
+    publisher = metadata.publisher.trim(),
+    editor = metadata.editor.trim(),
+    arranger = metadata.arranger.trim(),
+    edition = metadata.edition.trim(),
+    language = metadata.language.trim(),
+    pageCount = metadata.pageCount?.takeIf { it > 0 },
+    durationSeconds = metadata.durationSeconds?.takeIf { it > 0 },
+    difficulty = metadata.difficulty.trim(),
+    tags = normalizeMetadataStringList(metadata.tags),
+    notes = metadata.notes.trim(),
+    source = metadata.source.copy(
+        filename = metadata.source.filename.trim(),
+        fileType = metadata.source.fileType.trim().ifEmpty { "pdf" },
+        url = metadata.source.url.trim(),
+    ),
+)
+
+private fun normalizeMetadataStringList(values: List<String>): List<String> = values
+    .map(String::trim)
+    .filter(String::isNotEmpty)
+    .distinctBy(String::lowercase)
+
+private fun buildScoreMetadataId(
+    itemId: String,
+    contentFingerprint: String?,
+    metadataId: String? = null,
+): String = metadataId
+    ?.trim()
+    ?.ifEmpty { null }
+    ?: normalizeContentFingerprint(contentFingerprint)
+        ?.take(16)
+        ?.ifEmpty { null }
+    ?: itemId.trim().ifEmpty { "score" }

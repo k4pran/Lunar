@@ -18,6 +18,10 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.foundation.layout.fillMaxSize
+import com.ryanjames.lunar.library.data.CloudGoogleDriveSource
+import com.ryanjames.lunar.library.data.CloudPathStrategy
+import com.ryanjames.lunar.library.data.GoogleDriveImportRoot
+import com.ryanjames.lunar.library.data.GoogleDriveStorageSettings
 import com.ryanjames.lunar.platform.ImporterState
 import com.ryanjames.lunar.platform.LibraryCacheSnapshot
 import com.ryanjames.lunar.settings.AppColorTheme
@@ -108,8 +112,14 @@ class ScreenSmokeTest {
                 appState.bannerMessage == "Saved \"Moon River\" to Downloads/Moon River.pdf."
             }
             rule.onNodeWithContentDescription("Mark Moon River as favorite").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Show info for Moon River").assertIsDisplayed()
             rule.onNodeWithContentDescription("Edit Moon River").assertIsDisplayed()
             rule.onNodeWithContentDescription("Delete Moon River").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Show info for Moon River").performClick()
+            rule.onNodeWithText("Score info").assertIsDisplayed()
+            rule.onNodeWithText("Filename").assertIsDisplayed()
+            rule.onNodeWithText("Moon River.pdf").assertIsDisplayed()
+            rule.onNodeWithText("Close").performClick()
             rule.onNodeWithContentDescription("Library search").assertIsDisplayed()
             rule.runOnIdle {
                 assertTrue(
@@ -246,8 +256,8 @@ class ScreenSmokeTest {
             rule.onNodeWithText("Add local source").assertIsDisplayed()
             rule.onNodeWithText("Add cloud source").assertIsDisplayed()
             rule.onNodeWithText("Add local source").performClick()
-            rule.onNodeWithText("Choose how to import local PDFs or image files into your library.").assertIsDisplayed()
-            rule.onNodeWithText("Pick PDFs, PNGs, JPGs, or JPEGs").assertIsDisplayed()
+            rule.onNodeWithText("Choose how to import local PDFs or image files into your library. Matching .json metadata sidecars are imported automatically.").assertIsDisplayed()
+            rule.onNodeWithText("Pick PDFs, PNGs, JPGs, or JPEGs. Matching .json sidecars are detected automatically.").assertIsDisplayed()
             rule.onNodeWithText("Cancel").performClick()
             rule.waitUntil(timeoutMillis = 5_000) {
                 rule.onAllNodesWithText("On-device cache").fetchSemanticsNodes().isNotEmpty()
@@ -298,6 +308,57 @@ class ScreenSmokeTest {
             rule.runOnIdle {
                 assertEquals(AppSection.LIBRARY, appState.selectedSection)
             }
+        }
+    }
+
+    @Test
+    fun importScreenLetsYouEditExistingGoogleDriveSource() {
+        runBlocking {
+            val runtime = createTestPlatformRuntime(
+                initialSources = listOf(
+                    CloudGoogleDriveSource(
+                        id = "drive_source",
+                        label = "Main Drive library",
+                        addedAtEpochMillis = 1L,
+                        settings = GoogleDriveStorageSettings(
+                            clientId = "client-id",
+                            refreshToken = "refresh-token",
+                            roots = listOf(
+                                GoogleDriveImportRoot(
+                                    id = "root",
+                                    label = "Scores",
+                                    folderId = "folder-123",
+                                    folderStrategy = CloudPathStrategy.FLAT,
+                                )
+                            ),
+                        ),
+                    )
+                ),
+            )
+            val appState = createTestLunarAppState(
+                scope = backgroundScope(),
+                runtime = runtime,
+            )
+
+            rule.setContent {
+                LunarTheme(theme = AppColorTheme.OCEAN) {
+                    ImportScreen(
+                        runtime = runtime,
+                        importerState = ImporterState(statusMessage = "Ready to import PDFs."),
+                        syncState = CloudSyncState(),
+                        settings = runtime.settingsStore.settings.value,
+                        libraryCount = 0,
+                        appState = appState,
+                    )
+                }
+            }
+
+            rule.onNodeWithText("Main Drive library").assertIsDisplayed()
+            rule.onNodeWithText("Edit").assertIsDisplayed()
+            rule.onNodeWithText("Edit").performClick()
+            rule.onNodeWithText("Edit cloud source").assertIsDisplayed()
+            rule.onNodeWithText("Refresh token").assertIsDisplayed()
+            rule.onNodeWithText("Save").assertIsDisplayed()
         }
     }
 

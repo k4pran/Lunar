@@ -67,6 +67,7 @@ fun ImportScreen(
 
     var showLocalDialog by remember { mutableStateOf(false) }
     var showCloudDialog by remember { mutableStateOf(false) }
+    var editingCloudSource by remember { mutableStateOf<CloudLibrarySource?>(null) }
     var cacheSnapshot by remember { mutableStateOf<LibraryCacheSnapshot?>(null) }
     var cacheInspectionError by remember { mutableStateOf<String?>(null) }
 
@@ -293,6 +294,9 @@ fun ImportScreen(
                     source = source,
                     itemCount = runtime.repository.itemCountForSource(source.id),
                     onRemove = { appState.removeSource(source.id) },
+                    onEdit = if (source is CloudLibrarySource) {
+                        { editingCloudSource = source }
+                    } else null,
                     onRefresh = if (source is CloudLibrarySource) {
                         { appState.refreshCloudSource(source) }
                     } else null,
@@ -517,6 +521,18 @@ fun ImportScreen(
             },
         )
     }
+
+    editingCloudSource?.let { source ->
+        AddCloudSourceDialog(
+            googleDriveOAuthSupported = runtime.googleDriveOAuth.isSupported,
+            existingSource = source,
+            onDismiss = { editingCloudSource = null },
+            onConfirm = { updatedSource ->
+                editingCloudSource = null
+                appState.updateCloudSource(updatedSource)
+            },
+        )
+    }
 }
 
 @Composable
@@ -524,6 +540,7 @@ private fun SourceCard(
     source: LibrarySource,
     itemCount: Int,
     onRemove: () -> Unit,
+    onEdit: (() -> Unit)?,
     onRefresh: (() -> Unit)?,
     isSyncing: Boolean,
 ) {
@@ -613,6 +630,14 @@ private fun SourceCard(
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                if (onEdit != null) {
+                    OutlinedButton(
+                        onClick = onEdit,
+                        enabled = !isSyncing,
+                    ) {
+                        Text("Edit")
+                    }
+                }
                 if (onRefresh != null) {
                     OutlinedButton(
                         onClick = onRefresh,

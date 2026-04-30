@@ -4,6 +4,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -112,6 +113,34 @@ class ViewerShortcutTest {
         rule.onNodeWithText("Tap Tempo").assertIsDisplayed()
         rule.onNodeWithText("Time: 4/4").assertIsDisplayed()
         rule.onNodeWithText("Start").assertIsDisplayed()
+    }
+
+    @Test
+    fun viewerScreenShowsStarFavoriteMarkerLikeLibraryView() {
+        val runtime = createShortcutTestRuntime()
+        val documentState = ViewerDocumentState(
+            id = "moon_river",
+            title = "Moon River",
+            document = testSheetMusicItem(id = "moon_river", title = "Moon River").document,
+            pageCount = 6,
+            isFavorite = true,
+        )
+
+        rule.setContent {
+            LunarTheme(theme = AppColorTheme.OCEAN) {
+                ViewerScreen(
+                    runtime = runtime,
+                    documentState = documentState,
+                    onBack = {},
+                    onToggleFavorite = {},
+                    onPageChanged = { _ -> },
+                    onPageCountResolved = { _ -> },
+                )
+            }
+        }
+
+        rule.onNodeWithText("★").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Remove Moon River from favorites").assertIsDisplayed()
     }
 }
 

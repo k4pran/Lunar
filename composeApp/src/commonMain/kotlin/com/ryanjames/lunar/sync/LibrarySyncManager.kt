@@ -7,6 +7,7 @@ import com.ryanjames.lunar.library.data.CloudSupabaseSource
 import com.ryanjames.lunar.library.data.GoogleDriveImportRoot
 import com.ryanjames.lunar.library.data.GoogleDriveStorageSettings
 import com.ryanjames.lunar.library.data.LibrarySource
+import com.ryanjames.lunar.library.data.SourceRegistry
 import com.ryanjames.lunar.library.data.SheetMusicRepository
 import com.ryanjames.lunar.library.data.SupabasePublicStorageSettings
 import com.ryanjames.lunar.library.data.SyncProviderIds
@@ -17,6 +18,8 @@ import com.ryanjames.lunar.library.model.DuplicateMatchReason
 import com.ryanjames.lunar.library.model.collectionDuplicateKey
 import com.ryanjames.lunar.library.model.composerDuplicateKey
 import com.ryanjames.lunar.library.model.SheetMusicItem
+import com.ryanjames.lunar.sync.GoogleDriveOAuthCoordinator
+import com.ryanjames.lunar.sync.UnsupportedGoogleDriveOAuthCoordinator
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -147,6 +150,8 @@ class LibrarySyncManager(
     private val httpClient: SyncHttpClient,
     private val pdfStore: ManagedPdfStore,
     private val renderer: PdfPageRenderer,
+    private val sourceRegistry: SourceRegistry? = null,
+    private val googleDriveOAuth: GoogleDriveOAuthCoordinator = UnsupportedGoogleDriveOAuthCoordinator,
     private val clock: Clock = Clock.System,
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -173,6 +178,10 @@ class LibrarySyncManager(
             token = accessToken,
             expiresAtEpochMillis = expiresAtEpochMillis,
         )
+    }
+
+    fun clearGoogleAccessToken(sourceId: String) {
+        googleAccessTokens.remove(sourceId)
     }
 
     suspend fun refresh(force: Boolean) {
@@ -870,21 +879,65 @@ class LibrarySyncManager(
                 fields["client_secret"] = config.clientSecret
             }
 
-            val response = httpClient.postForm(
-                url = GOOGLE_OAUTH_TOKEN_URL,
-                formBody = buildFormBody(fields),
-                headers = mapOf("Accept" to "application/json"),
-            )
-            val token = json.decodeFromString(GoogleOAuthTokenResponse.serializer(), response)
-            googleAccessTokens[source.id] = CachedAccessToken(
-                token = token.accessToken,
-                expiresAtEpochMillis = tokenExpiryEpochMillis(now, token.expiresInSeconds),
-            )
-            return token.accessToken
+            try {
+                val response = httpClient.postForm(
+                    url = GOOGLE_OAUTH_TOKEN_URL,
+                    formBody = buildFormBody(fields),
+                    headers = mapOf("Accept" to "application/json"),
+                )
+                val token = json.decodeFromString(GoogleOAuthTokenResponse.serializer(), response)
+                googleAccessTokens[source.id] = CachedAccessToken(
+                    token = token.accessToken,
+                    expiresAtEpochMillis = tokenExpiryEpochMillis(now, token.expiresInSeconds),
+                )
+                return token.accessToken
+            } catch (error: Throwable) {
+                if (error.isGoogleInvalidGrantFailure() && googleDriveOAuth.isSupported && sourceRegistry != null) {
+                    return renewExpiredGoogleRefreshToken(source, config)
+                }
+                throw error
+            }
         }
 
         return config.accessToken.takeIf(String::isNotBlank)
             ?: throw IllegalStateException("Google Drive requires an access token or refresh token.")
+    }
+
+    private suspend fun renewExpiredGoogleRefreshToken(
+        source: CloudGoogleDriveSource,
+        config: GoogleDriveStorageSettings,
+    ): String {
+        val registry = sourceRegistry
+            ?: throw IllegalStateException("Source registry is unavailable for Google Drive reconnection.")
+        appendActivity(
+            message = "${source.label}: Google rejected the saved refresh token, starting a new Google sign-in.",
+            currentStep = "Reconnecting ${source.label}",
+        )
+        clearGoogleAccessToken(source.id)
+        val session = googleDriveOAuth.getOrFetchRefreshToken(
+            config.copy(
+                refreshToken = "",
+                accessToken = "",
+            )
+        )
+        primeGoogleAccessToken(
+            sourceId = source.id,
+            accessToken = session.accessToken,
+            expiresAtEpochMillis = session.expiresAtEpochMillis,
+        )
+        registry.updateSource(
+            source.copy(
+                settings = config.copy(
+                    refreshToken = session.refreshToken,
+                    accessToken = "",
+                ).normalized()
+            )
+        )
+        appendActivity(
+            message = "${source.label}: Google Drive reconnected. Retrying with the renewed token.",
+            currentStep = "Retrying ${source.label}",
+        )
+        return session.accessToken
     }
 
     private fun resolveMetadata(
@@ -1099,6 +1152,9 @@ private fun Throwable.describeSyncFailure(): String {
         else -> "sync failed."
     }
 }
+
+private fun Throwable.isGoogleInvalidGrantFailure(): Boolean =
+    message?.contains("invalid_grant", ignoreCase = true) == true
 
 private fun buildSupabasePublicUrl(projectUrl: String, bucketName: String, objectPath: String): String =
     "${projectUrl.trimEnd('/')}/storage/v1/object/public/${bucketName.trim()}/${objectPath.trimStart('/')}"

@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -69,6 +70,7 @@ import com.ryanjames.lunar.library.data.SyncStatus
 import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.library.model.LibrarySetlist
 import com.ryanjames.lunar.library.model.LibrarySortOption
+import com.ryanjames.lunar.library.model.ScoreMetadata
 import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.library.model.SortDirection
 import com.ryanjames.lunar.library.model.applyLibraryQuery
@@ -370,6 +372,16 @@ fun LibraryScreen(
             songbook = screenModel.deleteSongbookCandidate,
             onDismiss = appState::dismissDeleteSongbookRequest,
             onConfirm = appState::confirmDeleteSongbook,
+        )
+    }
+
+    if (screenModel.infoItem != null) {
+        ScoreInfoDialog(
+            item = screenModel.infoItem,
+            metadata = screenModel.infoMetadata,
+            loading = appState.infoMetadataLoading,
+            errorMessage = appState.infoMetadataError,
+            onDismiss = appState::dismissScoreInfo,
         )
     }
 }
@@ -1734,6 +1746,17 @@ private fun LibraryItemQuickActions(
             )
         }
         LibraryActionIconButton(
+            onClick = { appState.showScoreInfo(item.id) },
+            contentDescription = "Show info for ${item.title}",
+        ) {
+            Text(
+                text = "i",
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        LibraryActionIconButton(
             onClick = { appState.startEditing(item.id) },
             contentDescription = "Edit ${item.title}",
         ) {
@@ -2881,6 +2904,233 @@ private fun MetadataEditorDialog(
     )
 }
 
+@Composable
+private fun ScoreInfoDialog(
+    item: SheetMusicItem,
+    metadata: ScoreMetadata?,
+    loading: Boolean,
+    errorMessage: String?,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Score info") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                when {
+                    loading -> {
+                        Text(
+                            text = "Loading score info...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    !errorMessage.isNullOrBlank() -> {
+                        Text(
+                            text = errorMessage,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+
+                    metadata == null -> {
+                        Text(
+                            text = "No metadata is available for this score yet.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    else -> {
+                        val hasWorkSection = metadata.alternativeTitles.isNotEmpty() ||
+                            metadata.catalogueNumber.isNotBlank() ||
+                            metadata.opusNumber.isNotBlank() ||
+                            metadata.workNumber.isNotBlank() ||
+                            metadata.yearComposed != null ||
+                            metadata.movements.isNotEmpty()
+                        val hasMusicalDetailsSection = metadata.genre.isNotBlank() ||
+                            metadata.form.isNotBlank() ||
+                            metadata.stylePeriod.isNotBlank() ||
+                            metadata.instrumentation.isNotEmpty() ||
+                            metadata.key.isNotBlank() ||
+                            metadata.timeSignature.isNotBlank() ||
+                            metadata.tempoMarkings.isNotEmpty() ||
+                            metadata.difficulty.isNotBlank() ||
+                            metadata.pageCount != null ||
+                            metadata.durationSeconds != null
+                        val hasPublicationSection = metadata.publisher.isNotBlank() ||
+                            metadata.editor.isNotBlank() ||
+                            metadata.arranger.isNotBlank() ||
+                            metadata.edition.isNotBlank() ||
+                            metadata.language.isNotBlank()
+
+                        Text(
+                            text = metadata.title.ifBlank { item.title },
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontFamily = FontFamily.Serif,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        scoreMetadataComposerLine(metadata)?.let { composerLine ->
+                            Text(
+                                text = composerLine,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        scoreInfoValue(metadata.subtitle)?.let { ScoreInfoField("Subtitle", it) }
+
+                        if (hasWorkSection) {
+                            ScoreInfoSection("Work")
+                            scoreInfoValue(metadata.alternativeTitles.joinToString(", "))?.let {
+                                ScoreInfoField("Alternative titles", it)
+                            }
+                            scoreInfoValue(metadata.catalogueNumber)?.let { ScoreInfoField("Catalogue number", it) }
+                            scoreInfoValue(metadata.opusNumber)?.let { ScoreInfoField("Opus number", it) }
+                            scoreInfoValue(metadata.workNumber)?.let { ScoreInfoField("Work number", it) }
+                            metadata.yearComposed?.let { ScoreInfoField("Year composed", it.toString()) }
+                            scoreInfoValue(metadata.movements.joinToString(", "))?.let { ScoreInfoField("Movements", it) }
+                        }
+
+                        if (hasMusicalDetailsSection) {
+                            ScoreInfoSection("Musical details")
+                            scoreInfoValue(metadata.genre)?.let { ScoreInfoField("Genre", it) }
+                            scoreInfoValue(metadata.form)?.let { ScoreInfoField("Form", it) }
+                            scoreInfoValue(metadata.stylePeriod)?.let { ScoreInfoField("Style period", it) }
+                            scoreInfoValue(metadata.instrumentation.joinToString(", "))?.let {
+                                ScoreInfoField("Instrumentation", it)
+                            }
+                            scoreInfoValue(metadata.key)?.let { ScoreInfoField("Key", it) }
+                            scoreInfoValue(metadata.timeSignature)?.let { ScoreInfoField("Time signature", it) }
+                            scoreInfoValue(metadata.tempoMarkings.joinToString(", "))?.let {
+                                ScoreInfoField("Tempo markings", it)
+                            }
+                            scoreInfoValue(metadata.difficulty)?.let { ScoreInfoField("Difficulty", it) }
+                            metadata.pageCount?.let { ScoreInfoField("Pages", it.toString()) }
+                            metadata.durationSeconds?.let { ScoreInfoField("Duration", "${it}s") }
+                        }
+
+                        if (hasPublicationSection) {
+                            ScoreInfoSection("Publication")
+                            scoreInfoValue(metadata.publisher)?.let { ScoreInfoField("Publisher", it) }
+                            scoreInfoValue(metadata.editor)?.let { ScoreInfoField("Editor", it) }
+                            scoreInfoValue(metadata.arranger)?.let { ScoreInfoField("Arranger", it) }
+                            scoreInfoValue(metadata.edition)?.let { ScoreInfoField("Edition", it) }
+                            scoreInfoValue(metadata.language)?.let { ScoreInfoField("Language", it) }
+                        }
+
+                        ScoreInfoSection("Library")
+                        scoreInfoValue(item.collection).let { value ->
+                            if (value != null) {
+                                ScoreInfoField("Collection", value)
+                            }
+                        }
+                        if (item.isFavorite) {
+                            ScoreInfoField("Favorite", "Yes")
+                        }
+                        ScoreInfoField("Added", formatEpochMillis(item.dateAddedEpochMillis))
+                        item.lastOpenedEpochMillis?.let { ScoreInfoField("Last opened", formatEpochMillis(it)) }
+                        if (item.lastViewedPage > 0) {
+                            ScoreInfoField("Resume page", (item.lastViewedPage + 1).toString())
+                        }
+
+                        ScoreInfoSection("Source")
+                        scoreInfoValue(metadata.source.filename.ifBlank { item.document.originalFileName })?.let {
+                            ScoreInfoField("Filename", it)
+                        }
+                        scoreInfoValue(metadata.source.fileType)?.let { ScoreInfoField("File type", it) }
+                        scoreInfoValue(metadata.source.url.ifBlank { item.document.sourceUri.orEmpty() })?.let {
+                            ScoreInfoField("URL", it)
+                        }
+                        ScoreInfoField("Schema", "${metadata.schemaId} ${metadata.schemaVersion}")
+
+                        scoreInfoValue(metadata.tags.joinToString(", "))?.let {
+                            ScoreInfoSection("Tags")
+                            ScoreInfoField("Keywords", it)
+                        }
+                        scoreInfoValue(metadata.notes)?.let {
+                            ScoreInfoSection("Notes")
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                shape = MaterialTheme.shapes.medium,
+                            ) {
+                                Text(
+                                    text = it,
+                                    modifier = Modifier.padding(12.dp),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
+}
+
+@Composable
+private fun ScoreInfoSection(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+        color = MaterialTheme.colorScheme.primary,
+    )
+}
+
+@Composable
+private fun ScoreInfoField(
+    label: String,
+    value: String,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+private fun scoreMetadataComposerLine(metadata: ScoreMetadata): String? {
+    val composerName = scoreInfoValue(metadata.composer.name) ?: return null
+    val lifespan = when {
+        metadata.composer.birthYear != null && metadata.composer.deathYear != null ->
+            "${metadata.composer.birthYear}-${metadata.composer.deathYear}"
+
+        metadata.composer.birthYear != null ->
+            "born ${metadata.composer.birthYear}"
+
+        metadata.composer.deathYear != null ->
+            "died ${metadata.composer.deathYear}"
+
+        else -> null
+    }
+    return listOfNotNull(composerName, lifespan).joinToString(" ")
+}
+
+private fun scoreInfoValue(value: String?): String? = value
+    ?.trim()
+    ?.takeIf(String::isNotEmpty)
+
 private data class LibraryScreenModel(
     val visibleItems: List<SheetMusicItem>,
     val headerVisibleCount: Int,
@@ -2897,6 +3147,8 @@ private data class LibraryScreenModel(
     val randomScopeLabel: String,
     val selectedItems: List<SheetMusicItem>,
     val editingItem: SheetMusicItem?,
+    val infoItem: SheetMusicItem?,
+    val infoMetadata: ScoreMetadata?,
     val deleteCandidate: SheetMusicItem?,
     val deleteSetlistCandidate: LibrarySetlist?,
     val deleteSongbookCandidate: LibrarySongbook?,
@@ -2985,6 +3237,8 @@ private fun buildLibraryScreenModel(
         ),
         selectedItems = currentScopeItems.filter { it.id in appState.selectedScoreIds },
         editingItem = snapshot.items.firstOrNull { it.id == appState.editingItemId },
+        infoItem = snapshot.items.firstOrNull { it.id == appState.infoItemId },
+        infoMetadata = appState.infoMetadata,
         deleteCandidate = snapshot.items.firstOrNull { it.id == appState.deleteCandidateItemId },
         deleteSetlistCandidate = snapshot.setlists.firstOrNull { it.id == appState.deleteCandidateSetlistId },
         deleteSongbookCandidate = snapshot.songbooks.firstOrNull { it.id == appState.deleteCandidateSongbookId },

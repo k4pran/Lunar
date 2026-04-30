@@ -5,11 +5,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.JsonLibraryStorage
+import com.ryanjames.lunar.library.data.JsonScoreMetadataStorage
 import com.ryanjames.lunar.library.data.OkioStoredDocumentCleaner
 import com.ryanjames.lunar.library.data.JsonSourceRegistry
 import com.ryanjames.lunar.library.data.StoredDocumentFingerprinter
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.library.model.PdfDocumentReference
+import com.ryanjames.lunar.library.model.ScoreMetadata
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.JsonAppSettingsStore
 import com.ryanjames.lunar.sync.LibrarySyncManager
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.swing.Swing
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import okio.FileSystem
 import okio.Path.Companion.toPath
 import org.apache.pdfbox.Loader
@@ -47,6 +50,9 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
     val metadataPath = remember(appRoot) {
         File(appRoot, "metadata/library.json").absolutePath.toPath()
     }
+    val scoreMetadataDirectoryPath = remember(appRoot) {
+        File(appRoot, "metadata/scores").absolutePath.toPath()
+    }
     val sourcesPath = remember(appRoot) {
         File(appRoot, "sources/sources.json").absolutePath.toPath()
     }
@@ -61,6 +67,10 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             storage = JsonLibraryStorage(
                 fileSystem = FileSystem.SYSTEM,
                 metadataPath = metadataPath,
+            ),
+            scoreMetadataStorage = JsonScoreMetadataStorage(
+                fileSystem = FileSystem.SYSTEM,
+                metadataDirectory = scoreMetadataDirectoryPath,
             ),
             storedDocumentCleaner = OkioStoredDocumentCleaner(FileSystem.SYSTEM),
             storedDocumentFingerprinter = DesktopStoredDocumentFingerprinter(),
@@ -89,23 +99,25 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
     val googleDriveOAuth = remember(syncHttpClient) {
         DesktopGoogleDriveOAuthCoordinator(httpClient = syncHttpClient)
     }
-    val syncManager = remember(repository, renderer, pdfStore, syncHttpClient) {
+    val sourceRegistry = remember(sourcesPath) {
+        JsonSourceRegistry(
+            fileSystem = FileSystem.SYSTEM,
+            sourcesPath = sourcesPath,
+        )
+    }
+    val syncManager = remember(repository, renderer, pdfStore, syncHttpClient, sourceRegistry, googleDriveOAuth) {
         LibrarySyncManager(
             repository = repository,
             httpClient = syncHttpClient,
             pdfStore = pdfStore,
             renderer = renderer,
+            sourceRegistry = sourceRegistry,
+            googleDriveOAuth = googleDriveOAuth,
         )
     }
     val importer = remember(scoresDirectory) {
         DesktopPdfImporter(
             scoresDirectory = scoresDirectory,
-        )
-    }
-    val sourceRegistry = remember(sourcesPath) {
-        JsonSourceRegistry(
-            fileSystem = FileSystem.SYSTEM,
-            sourcesPath = sourcesPath,
         )
     }
     val cacheInspector = remember(appRoot, metadataPath, sourcesPath, scoresDirectory) {
@@ -177,11 +189,7 @@ private class DesktopPdfImporter(
         }
 
         val documents = withContext(Dispatchers.IO) {
-            buildList {
-                files.forEach { file ->
-                    importDesktopScoreFile(file = file, scoresDirectory = scoresDirectory)?.let(::add)
-                }
-            }
+            importDesktopScoreFiles(files = files, scoresDirectory = scoresDirectory)
         }
 
         return ImportRequestResult(
@@ -199,13 +207,12 @@ private class DesktopPdfImporter(
             ?: return ImportRequestResult(emptyList())
 
         val documents = withContext(Dispatchers.IO) {
-            buildList {
-                folder.walkTopDown()
-                    .filter(::isSupportedDesktopScoreFile)
-                    .forEach { file ->
-                        importDesktopScoreFile(file = file, scoresDirectory = scoresDirectory)?.let(::add)
-                    }
-            }
+            importDesktopScoreFiles(
+                files = folder.walkTopDown()
+                    .filter(::isSupportedDesktopImportFile)
+                    .toList(),
+                scoresDirectory = scoresDirectory,
+            )
         }
 
         return ImportRequestResult(
@@ -250,6 +257,7 @@ private class DesktopPdfImporter(
 internal fun importDesktopScoreFile(
     file: File,
     scoresDirectory: File,
+    scoreMetadata: ScoreMetadata? = null,
 ): ImportedPdfDescriptor? {
     if (!isSupportedDesktopScoreFile(file)) {
         return null
@@ -280,8 +288,74 @@ internal fun importDesktopScoreFile(
         contentFingerprint = contentFingerprint,
         pageCount = pageCount,
         suggestedTitle = file.nameWithoutExtension,
+        scoreMetadata = scoreMetadata,
     )
 }
+
+internal fun importDesktopScoreFiles(
+    files: List<File>,
+    scoresDirectory: File,
+): List<ImportedPdfDescriptor> {
+    val scoreFiles = files.filter(::isSupportedDesktopScoreFile)
+    if (scoreFiles.isEmpty()) {
+        return emptyList()
+    }
+
+    val metadataByScoreFile = resolveDesktopMetadataSidecars(scoreFiles)
+    return scoreFiles.mapNotNull { file ->
+        importDesktopScoreFile(
+            file = file,
+            scoresDirectory = scoresDirectory,
+            scoreMetadata = metadataByScoreFile[file],
+        )
+    }
+}
+
+private fun resolveDesktopMetadataSidecars(
+    scoreFiles: List<File>,
+): Map<File, ScoreMetadata> {
+    val metadataCache = mutableMapOf<File, ScoreMetadata?>()
+    val metadataByScoreFile = mutableMapOf<File, ScoreMetadata>()
+
+    scoreFiles.groupBy { it.parentFile?.absolutePath.orEmpty() }
+        .values
+        .forEach { filesInDirectory ->
+            val parentDirectory = filesInDirectory.firstOrNull()?.parentFile
+            val siblingFiles = parentDirectory
+                ?.listFiles()
+                ?.toList()
+                .orEmpty()
+            val scoreSiblings = siblingFiles.filter(::isSupportedDesktopScoreFile)
+            val metadataSiblings = siblingFiles.filter(::isSupportedDesktopMetadataFile)
+            val metadataByStem = metadataSiblings.associateBy { sibling ->
+                sibling.nameWithoutExtension.lowercase()
+            }
+            val singleMetadata = metadataSiblings.singleOrNull()
+                ?.takeIf { scoreSiblings.size == 1 }
+
+            filesInDirectory.forEach { scoreFile ->
+                val matchedMetadataFile = metadataByStem[scoreFile.nameWithoutExtension.lowercase()]
+                    ?: singleMetadata
+                val metadata = matchedMetadataFile?.let { file ->
+                    metadataCache.getOrPut(file) {
+                        parseDesktopScoreMetadata(file)
+                    }
+                }
+                if (metadata != null) {
+                    metadataByScoreFile[scoreFile] = metadata
+                }
+            }
+        }
+
+    return metadataByScoreFile
+}
+
+private fun parseDesktopScoreMetadata(file: File): ScoreMetadata? = runCatching {
+    desktopScoreMetadataJson.decodeFromString(
+        ScoreMetadata.serializer(),
+        file.readText(),
+    )
+}.getOrNull()
 
 private class DesktopPdfPageRenderer : PdfPageRenderer {
     override suspend fun inspect(documentPath: String): PdfDocumentInfo? = withContext(Dispatchers.IO) {
@@ -598,8 +672,14 @@ private class DesktopLibraryCacheInspector(
     }
 }
 
+private fun isSupportedDesktopImportFile(file: File): Boolean =
+    isSupportedDesktopScoreFile(file) || isSupportedDesktopMetadataFile(file)
+
 private fun isSupportedDesktopScoreFile(file: File): Boolean =
     file.isFile && file.extension.lowercase() in DesktopSupportedScoreExtensions
+
+private fun isSupportedDesktopMetadataFile(file: File): Boolean =
+    file.isFile && file.extension.equals("json", ignoreCase = true)
 
 private fun copyFileToManagedPdf(
     source: File,
@@ -757,6 +837,7 @@ private fun safeExportFileName(fileName: String): String {
 
 private const val COPY_BUFFER_SIZE_BYTES = 8_192
 private val DesktopSupportedScoreExtensions = setOf("pdf", "png", "jpg", "jpeg")
+private val desktopScoreMetadataJson = Json { ignoreUnknownKeys = true }
 
 private fun ByteArray.toHexString(): String = joinToString(separator = "") { byte ->
     byte.toUByte().toString(16).padStart(2, '0')

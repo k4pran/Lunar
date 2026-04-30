@@ -64,6 +64,7 @@ data class ImportedPdfDescriptor(
     val contentFingerprint: String? = null,
     val pageCount: Int? = null,
     val suggestedTitle: String = originalFileName.substringBeforeLast('.'),
+    val scoreMetadata: ScoreMetadata? = null,
 )
 
 enum class LibrarySortOption {
