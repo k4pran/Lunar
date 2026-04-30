@@ -4,19 +4,25 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.foundation.layout.fillMaxSize
 import com.ryanjames.lunar.platform.ImporterState
 import com.ryanjames.lunar.platform.LibraryCacheSnapshot
 import com.ryanjames.lunar.settings.AppColorTheme
 import com.ryanjames.lunar.settings.AppSettings
+import com.ryanjames.lunar.settings.ViewerKeybindings
 import com.ryanjames.lunar.sync.CloudSyncState
 import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.ComposeScreen
@@ -40,6 +46,7 @@ class ScreenSmokeTest {
     val rule = createComposeRule()
 
     @Test
+    @OptIn(ExperimentalTestApi::class)
     fun libraryScreenOpensRandomSetlistDialogAndSavedSetlistDetail() {
         runBlocking {
             val items = listOf(
@@ -84,12 +91,17 @@ class ScreenSmokeTest {
                         runtime = runtime,
                         snapshot = snapshot,
                         appState = appState,
+                        viewerKeybindings = ViewerKeybindings(openRandomScore = "R"),
                     )
                 }
             }
 
             rule.onNodeWithText("Open random sheet").assertIsDisplayed()
             rule.onNodeWithText("Random setlist").assertIsDisplayed()
+            rule.onRoot().performKeyInput { pressKey(Key.R) }
+            rule.waitUntil(timeoutMillis = 5_000) {
+                appState.previewTarget is ViewerTarget.Score
+            }
             rule.onNodeWithContentDescription("Download Moon River").assertIsDisplayed()
             rule.onNodeWithContentDescription("Download Moon River").performClick()
             rule.waitUntil(timeoutMillis = 5_000) {
@@ -324,6 +336,11 @@ class ScreenSmokeTest {
             }
 
             rule.onNodeWithText("Compose").assertIsDisplayed()
+            rule.runOnIdle {
+                assertTrue(
+                    rule.onAllNodesWithText("Metronome").fetchSemanticsNodes().isEmpty()
+                )
+            }
             rule.onNodeWithText("Compose").performClick()
             rule.onNodeWithText("Internal renderer preview").assertIsDisplayed()
             rule.runOnIdle {

@@ -84,6 +84,7 @@ class ComposeAppCommonTest {
         assertEquals("ArrowRight", runtime.settingsStore.settings.value.viewerKeybindings.nextPage)
         assertEquals("ArrowUp", runtime.settingsStore.settings.value.viewerKeybindings.zoomIn)
         assertEquals("ArrowDown", runtime.settingsStore.settings.value.viewerKeybindings.zoomOut)
+        assertEquals(null, runtime.settingsStore.settings.value.viewerKeybindings.openRandomScore)
     }
 
     @Test
@@ -108,6 +109,31 @@ class ComposeAppCommonTest {
 
         assertEquals(ViewerTarget.Score(item.id), appState.previewTarget)
         assertEquals(null, appState.fullscreenTarget)
+    }
+
+    @Test
+    fun openingRandomSheetInFullscreenReplacesBothViewerTargets() = runBlocking {
+        val first = testSheetMusicItem(
+            id = "moon_river",
+            title = "Moon River",
+        )
+        val second = testSheetMusicItem(
+            id = "blue_bossa",
+            title = "Blue Bossa",
+        )
+        val runtime = createTestPlatformRuntime(initialItems = listOf(first, second))
+        val appState = createTestLunarAppState(
+            scope = this,
+            runtime = runtime,
+        )
+
+        appState.openPreview(first)
+        appState.openFullscreen(first.id)
+        appState.openRandomSheetInCurrentViewer(listOf(second))
+
+        assertEquals(ViewerTarget.Score(second.id), appState.previewTarget)
+        assertEquals(ViewerTarget.Score(second.id), appState.fullscreenTarget)
+        assertEquals("Opening a random sheet.", appState.bannerMessage)
     }
 
     @Test

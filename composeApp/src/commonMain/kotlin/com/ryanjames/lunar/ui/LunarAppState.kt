@@ -340,6 +340,29 @@ class LunarAppState(
         bannerMessage = "Opening a random sheet."
     }
 
+    fun openRandomSheetInCurrentViewer(items: List<SheetMusicItem>) {
+        val randomItem = buildRandomSightReadingSelection(
+            items = items,
+            requestedCount = 1,
+        ).firstOrNull()
+
+        if (randomItem == null) {
+            bannerMessage = "No scores are available for a random pick."
+            return
+        }
+
+        val target = ViewerTarget.Score(randomItem.id)
+        focusLibrarySection()
+        previewTarget = target
+        if (fullscreenTarget != null) {
+            fullscreenTarget = target
+        }
+        scope.launch {
+            runtime.repository.recordOpened(randomItem.id, randomItem.lastViewedPage)
+        }
+        bannerMessage = "Opening a random sheet."
+    }
+
     fun showRandomSetlistBuilder() {
         randomSetlistBuilderVisible = true
     }

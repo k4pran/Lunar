@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import com.ryanjames.lunar.platform.PdfDocumentInfo
@@ -45,9 +46,11 @@ class ViewerShortcutTest {
             zoomIn = "I",
             zoomOut = "O",
             togglePageViewMode = "T",
+            openRandomScore = "R",
         )
         var toggledFavoriteCount = 0
         var enteredFullscreenCount = 0
+        var openedRandomCount = 0
 
         rule.setContent {
             LunarTheme(theme = AppColorTheme.OCEAN) {
@@ -56,6 +59,7 @@ class ViewerShortcutTest {
                     documentState = documentState,
                     onBack = {},
                     onToggleFavorite = { toggledFavoriteCount += 1 },
+                    onOpenRandomScore = { openedRandomCount += 1 },
                     onPageChanged = { _ -> },
                     onPageCountResolved = { _ -> },
                     viewerKeybindings = keybindings,
@@ -73,11 +77,41 @@ class ViewerShortcutTest {
         rule.onNodeWithText("1 / 6").assertIsDisplayed()
         rule.onRoot().performKeyInput { pressKey(Key.F) }
         rule.onRoot().performKeyInput { pressKey(Key.Q) }
+        rule.onRoot().performKeyInput { pressKey(Key.R) }
 
         rule.runOnIdle {
             assertEquals(1, toggledFavoriteCount)
             assertEquals(1, enteredFullscreenCount)
+            assertEquals(1, openedRandomCount)
         }
+    }
+
+    @Test
+    fun viewerScreenOpensMetronomeDialogFromToolbar() {
+        val runtime = createShortcutTestRuntime()
+        val documentState = ViewerDocumentState(
+            id = "moon_river",
+            title = "Moon River",
+            document = testSheetMusicItem(id = "moon_river", title = "Moon River").document,
+            pageCount = 6,
+        )
+
+        rule.setContent {
+            LunarTheme(theme = AppColorTheme.OCEAN) {
+                ViewerScreen(
+                    runtime = runtime,
+                    documentState = documentState,
+                    onBack = {},
+                    onPageChanged = { _ -> },
+                    onPageCountResolved = { _ -> },
+                )
+            }
+        }
+
+        rule.onNodeWithText("\u2669").performClick()
+        rule.onNodeWithText("Tap Tempo").assertIsDisplayed()
+        rule.onNodeWithText("Time: 4/4").assertIsDisplayed()
+        rule.onNodeWithText("Start").assertIsDisplayed()
     }
 }
 

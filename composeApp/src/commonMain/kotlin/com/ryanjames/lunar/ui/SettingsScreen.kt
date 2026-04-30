@@ -367,7 +367,7 @@ private fun KeybindingsSettingsPage(
 ) {
     SettingsSection(
         title = "Viewer keybindings",
-        description = "Choose the keyboard shortcuts Lunar should use while a score or songbook viewer has focus.",
+        description = "Choose the keyboard shortcuts Lunar should use while a score viewer has focus, plus the random-score shortcut available from the library.",
     ) {
         bindingFeedback?.let { message ->
             Surface(

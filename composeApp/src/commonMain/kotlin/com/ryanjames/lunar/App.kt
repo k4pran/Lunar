@@ -45,6 +45,7 @@ import com.ryanjames.lunar.ui.SettingsScreen
 import com.ryanjames.lunar.ui.ViewerDocumentState
 import com.ryanjames.lunar.ui.ViewerScreen
 import com.ryanjames.lunar.ui.ViewerTarget
+import com.ryanjames.lunar.ui.currentLibraryScopeItems
 import com.ryanjames.lunar.ui.lunarThemePalette
 import com.ryanjames.lunar.ui.rememberLunarAppState
 import com.ryanjames.lunar.ui.toViewerDocumentState
@@ -64,6 +65,7 @@ fun App() {
     val previewDocument = snapshot.resolveViewerDocument(appState.previewTarget)
     val fullscreenDocument = snapshot.resolveViewerDocument(appState.fullscreenTarget)
     val defaultTwoPageMode = appSettings.defaultViewerPageMode == ViewerPageModePreference.TWO_PAGE
+    val libraryScopeItems = currentLibraryScopeItems(snapshot = snapshot, appState = appState)
 
     LaunchedEffect(runtime.repository, runtime.syncManager, runtime.sourceRegistry, runtime.settingsStore) {
         runtime.repository.initialize()
@@ -108,6 +110,7 @@ fun App() {
                 documentState = fullscreenDocument,
                 onBack = appState::closeFullscreen,
                 onToggleFavorite = appState.fullscreenTarget.favoriteToggle(appState),
+                onOpenRandomScore = { appState.openRandomSheetInCurrentViewer(libraryScopeItems) },
                 onPageChanged = appState.fullscreenTarget.pageChanged(appState),
                 onPageCountResolved = appState.fullscreenTarget.pageCountResolved(appState),
                 defaultTwoPageMode = defaultTwoPageMode,
@@ -151,6 +154,7 @@ fun App() {
                             runtime = runtime,
                             snapshot = snapshot,
                             appState = appState,
+                            viewerKeybindings = appSettings.viewerKeybindings,
                             modifier = Modifier.padding(innerPadding),
                         )
 
@@ -200,6 +204,7 @@ fun App() {
                                             documentState = previewDocument,
                                             onBack = appState::closePreview,
                                             onToggleFavorite = appState.previewTarget.favoriteToggle(appState),
+                                            onOpenRandomScore = { appState.openRandomSheetInCurrentViewer(libraryScopeItems) },
                                             onPageChanged = appState.previewTarget.pageChanged(appState),
                                             onPageCountResolved = appState.previewTarget.pageCountResolved(appState),
                                             defaultTwoPageMode = defaultTwoPageMode,

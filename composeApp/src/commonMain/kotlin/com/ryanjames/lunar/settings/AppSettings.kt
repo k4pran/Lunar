@@ -30,6 +30,7 @@ data class ViewerKeybindings(
     val zoomIn: String? = "ArrowUp",
     val zoomOut: String? = "ArrowDown",
     val togglePageViewMode: String? = "V",
+    val openRandomScore: String? = null,
 ) {
     fun bindingFor(action: ViewerShortcutAction): String? = when (action) {
         ViewerShortcutAction.TOGGLE_FULLSCREEN -> toggleFullscreen
@@ -39,6 +40,7 @@ data class ViewerKeybindings(
         ViewerShortcutAction.ZOOM_IN -> zoomIn
         ViewerShortcutAction.ZOOM_OUT -> zoomOut
         ViewerShortcutAction.TOGGLE_PAGE_VIEW_MODE -> togglePageViewMode
+        ViewerShortcutAction.OPEN_RANDOM_SCORE -> openRandomScore
     }
 
     fun withBinding(
@@ -52,6 +54,7 @@ data class ViewerKeybindings(
         ViewerShortcutAction.ZOOM_IN -> copy(zoomIn = keyId)
         ViewerShortcutAction.ZOOM_OUT -> copy(zoomOut = keyId)
         ViewerShortcutAction.TOGGLE_PAGE_VIEW_MODE -> copy(togglePageViewMode = keyId)
+        ViewerShortcutAction.OPEN_RANDOM_SCORE -> copy(openRandomScore = keyId)
     }
 
     fun clear(action: ViewerShortcutAction): ViewerKeybindings = withBinding(
@@ -69,6 +72,7 @@ enum class ViewerShortcutAction {
     ZOOM_IN,
     ZOOM_OUT,
     TOGGLE_PAGE_VIEW_MODE,
+    OPEN_RANDOM_SCORE,
 }
 
 internal val LegacyDefaultViewerKeybindings = ViewerKeybindings(
@@ -79,6 +83,7 @@ internal val LegacyDefaultViewerKeybindings = ViewerKeybindings(
     zoomIn = "Equal",
     zoomOut = "Minus",
     togglePageViewMode = "V",
+    openRandomScore = null,
 )
 
 internal fun AppSettings.normalize(): AppSettings = if (viewerKeybindings == LegacyDefaultViewerKeybindings) {

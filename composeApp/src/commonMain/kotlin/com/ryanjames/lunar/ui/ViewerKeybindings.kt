@@ -12,11 +12,15 @@ internal fun ViewerShortcutAction.displayLabel(): String = when (this) {
     ViewerShortcutAction.ZOOM_IN -> "Zoom in"
     ViewerShortcutAction.ZOOM_OUT -> "Zoom out"
     ViewerShortcutAction.TOGGLE_PAGE_VIEW_MODE -> "Toggle 1-page / 2-page view"
+    ViewerShortcutAction.OPEN_RANDOM_SCORE -> "Open random score"
 }
 
 internal fun ViewerShortcutAction.supportingText(): String? = when (this) {
     ViewerShortcutAction.TOGGLE_FAVORITE ->
         "Applies to score viewers. Songbooks stay read-only."
+
+    ViewerShortcutAction.OPEN_RANDOM_SCORE ->
+        "Works in the library and score viewers. Uses the current browse scope and filters."
 
     else -> null
 }

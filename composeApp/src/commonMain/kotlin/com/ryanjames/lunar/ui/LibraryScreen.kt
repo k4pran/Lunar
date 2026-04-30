@@ -39,6 +39,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,10 +48,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -69,6 +77,8 @@ import com.ryanjames.lunar.library.model.availableComposers
 import com.ryanjames.lunar.library.model.availableTags
 import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.SelectedCoverImage
+import com.ryanjames.lunar.settings.ViewerKeybindings
+import com.ryanjames.lunar.settings.ViewerShortcutAction
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.launch
@@ -79,13 +89,31 @@ fun LibraryScreen(
     runtime: PlatformRuntime,
     snapshot: LibrarySnapshot,
     appState: LunarAppState,
+    viewerKeybindings: ViewerKeybindings = ViewerKeybindings(),
     modifier: Modifier = Modifier,
 ) {
     val screenModel = buildLibraryScreenModel(snapshot = snapshot, appState = appState)
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
 
     Column(
         modifier = modifier
             .fillMaxSize()
+            .focusRequester(focusRequester)
+            .focusable()
+            .onKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) {
+                    return@onKeyEvent false
+                }
+                if (viewerKeybindings.actionForKeyId(viewerShortcutKeyId(event.key)) != ViewerShortcutAction.OPEN_RANDOM_SCORE) {
+                    return@onKeyEvent false
+                }
+                appState.openRandomSheet(screenModel.currentScopeItems)
+                true
+            }
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -2876,6 +2904,35 @@ private data class LibraryScreenModel(
     val composerGroups: Map<String, List<SheetMusicItem>>,
 )
 
+internal fun currentLibraryScopeItems(
+    snapshot: LibrarySnapshot,
+    appState: LunarAppState,
+): List<SheetMusicItem> {
+    val visibleItems = snapshot.items.applyLibraryQuery(appState.query)
+    val itemsById = snapshot.items.associateBy { it.id }
+    val temporarySetlist = appState.temporarySetlist
+    val activeTemporarySetlist = temporarySetlist.takeIf { appState.temporarySetlistOpen }
+    val activeTemporarySetlistItems = activeTemporarySetlist
+        ?.itemIds
+        ?.mapNotNull(itemsById::get)
+        .orEmpty()
+    val activeSetlist = snapshot.setlists.firstOrNull { it.id == appState.selectedSetlistId }
+    val activeSetlistItems = activeSetlist
+        ?.itemIds
+        ?.mapNotNull(itemsById::get)
+        .orEmpty()
+    return currentScopeItems(
+        snapshotItems = snapshot.items,
+        visibleItems = visibleItems,
+        browseMode = appState.browseMode,
+        selectedGroup = appState.selectedGroup,
+        activeTemporarySetlistItems = activeTemporarySetlistItems,
+        activeSetlistItems = activeSetlistItems,
+        hasActiveTemporarySetlist = activeTemporarySetlist != null,
+        hasActiveSetlist = activeSetlist != null,
+    )
+}
+
 private fun buildLibraryScreenModel(
     snapshot: LibrarySnapshot,
     appState: LunarAppState,
@@ -2896,15 +2953,9 @@ private fun buildLibraryScreenModel(
         ?.itemIds
         ?.mapNotNull(itemsById::get)
         .orEmpty()
-    val currentScopeItems = currentScopeItems(
-        snapshotItems = snapshot.items,
-        visibleItems = visibleItems,
-        browseMode = appState.browseMode,
-        selectedGroup = appState.selectedGroup,
-        activeTemporarySetlistItems = activeTemporarySetlistItems,
-        activeSetlistItems = activeSetlistItems,
-        hasActiveTemporarySetlist = activeTemporarySetlist != null,
-        hasActiveSetlist = activeSetlist != null,
+    val currentScopeItems = currentLibraryScopeItems(
+        snapshot = snapshot,
+        appState = appState,
     )
     return LibraryScreenModel(
         visibleItems = visibleItems,

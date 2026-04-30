@@ -93,6 +93,7 @@ fun ViewerScreen(
     documentState: ViewerDocumentState,
     onBack: () -> Unit,
     onToggleFavorite: (() -> Unit)? = null,
+    onOpenRandomScore: (() -> Unit)? = null,
     onPageChanged: (Int) -> Unit,
     onPageCountResolved: (Int) -> Unit,
     defaultTwoPageMode: Boolean = false,
@@ -111,6 +112,7 @@ fun ViewerScreen(
     }
     var errorMessage by remember(documentState.id, currentPage) { mutableStateOf<String?>(null) }
     var isLoading by remember(documentState.id, currentPage) { mutableStateOf(true) }
+    var showMetronomeDialog by remember { mutableStateOf(false) }
     val themePalette = lunarThemePalette()
     val focusRequester = remember { FocusRequester() }
 
@@ -181,6 +183,7 @@ fun ViewerScreen(
                     }
                 },
                 onToggleFavorite = onToggleFavorite,
+                onOpenRandomScore = onOpenRandomScore,
                 onZoomIn = {
                     zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom)
                 },
@@ -265,6 +268,7 @@ fun ViewerScreen(
                 if (onEnterFullscreen != null) {
                     CompactNavButton("Full", true, onClick = onEnterFullscreen)
                 }
+                CompactNavButton("\u2669", true, onClick = { showMetronomeDialog = true })
                 CompactNavButton(backButtonLabel, true, onClick = onBack)
             }
         }
@@ -286,6 +290,10 @@ fun ViewerScreen(
             }
         }
     }
+
+    if (showMetronomeDialog) {
+        MetronomeDialog(onDismiss = { showMetronomeDialog = false })
+    }
 }
 
 @Composable
@@ -294,6 +302,7 @@ fun FullscreenViewerScreen(
     documentState: ViewerDocumentState,
     onBack: () -> Unit,
     onToggleFavorite: (() -> Unit)? = null,
+    onOpenRandomScore: (() -> Unit)? = null,
     onPageChanged: (Int) -> Unit,
     onPageCountResolved: (Int) -> Unit,
     defaultTwoPageMode: Boolean = false,
@@ -311,6 +320,7 @@ fun FullscreenViewerScreen(
     var errorMessage by remember(documentState.id, currentPage) { mutableStateOf<String?>(null) }
     var isLoading by remember(documentState.id, currentPage) { mutableStateOf(true) }
     var overlayVisible by remember { mutableStateOf(false) }
+    var showMetronomeDialog by remember { mutableStateOf(false) }
     val themePalette = lunarThemePalette()
     val focusRequester = remember { FocusRequester() }
 
@@ -382,6 +392,7 @@ fun FullscreenViewerScreen(
                     }
                 },
                 onToggleFavorite = onToggleFavorite,
+                onOpenRandomScore = onOpenRandomScore,
                 onZoomIn = {
                     zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom)
                 },
@@ -542,6 +553,12 @@ fun FullscreenViewerScreen(
                             ) {
                                 Text(if (twoPageMode) "Single Page" else "Two Pages")
                             }
+                            FilledTonalButton(
+                                onClick = { showMetronomeDialog = true },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text("\u2669 Metronome")
+                            }
                         }
 
                         Row(
@@ -567,6 +584,10 @@ fun FullscreenViewerScreen(
                 }
             }
         }
+    }
+
+    if (showMetronomeDialog) {
+        MetronomeDialog(onDismiss = { showMetronomeDialog = false })
     }
 }
 
@@ -702,6 +723,7 @@ private fun Modifier.viewerShortcutHandler(
     onNextPage: (() -> Unit)?,
     onPreviousPage: (() -> Unit)?,
     onToggleFavorite: (() -> Unit)?,
+    onOpenRandomScore: (() -> Unit)?,
     onZoomIn: () -> Unit,
     onZoomOut: () -> Unit,
     onTogglePageViewMode: () -> Unit,
@@ -731,6 +753,12 @@ private fun Modifier.viewerShortcutHandler(
 
         com.ryanjames.lunar.settings.ViewerShortcutAction.TOGGLE_FAVORITE ->
             onToggleFavorite?.let {
+                it()
+                true
+            } ?: false
+
+        com.ryanjames.lunar.settings.ViewerShortcutAction.OPEN_RANDOM_SCORE ->
+            onOpenRandomScore?.let {
                 it()
                 true
             } ?: false
