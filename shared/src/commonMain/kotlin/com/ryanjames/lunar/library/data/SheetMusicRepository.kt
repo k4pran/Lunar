@@ -203,29 +203,31 @@ class DefaultSheetMusicRepository(
             }
 
             val storedLibrary = storage.readLibraryData()
+            val synchronizedItems = synchronizeItemsWithStoredMetadata(storedLibrary.items)
             val sanitizedSetlists = sanitizeSetlists(
                 setlists = storedLibrary.setlists,
-                items = storedLibrary.items,
+                items = synchronizedItems,
             )
             val sanitizedSongbooks = sanitizeSongbooks(storedLibrary.songbooks)
             if (
+                synchronizedItems != storedLibrary.items ||
                 sanitizedSetlists != storedLibrary.setlists ||
                 sanitizedSongbooks != storedLibrary.songbooks
             ) {
                 storage.writeLibraryData(
                     storedLibrary.copy(
+                        items = synchronizedItems,
                         setlists = sanitizedSetlists,
                         songbooks = sanitizedSongbooks,
                     )
                 )
             }
             _library.value = LibrarySnapshot(
-                items = storedLibrary.items,
+                items = synchronizedItems,
                 setlists = sanitizedSetlists,
                 songbooks = sanitizedSongbooks,
                 syncStatus = syncGateway.currentStatus(),
             )
-            ensureStoredMetadataForItems(storedLibrary.items)
             initialized = true
         }
     }
@@ -275,6 +277,7 @@ class DefaultSheetMusicRepository(
                 val fallbackTitle = normalizeTitle(document.suggestedTitle, document.originalFileName)
                 val resolvedMetadata = resolveImportedScoreMetadata(
                     itemId = itemId,
+                    storedMetadata = null,
                     incomingMetadata = document.scoreMetadata,
                     fallbackTitle = fallbackTitle,
                     fallbackComposer = null,
@@ -284,20 +287,24 @@ class DefaultSheetMusicRepository(
                     pageCount = document.pageCount,
                     contentFingerprint = fingerprint,
                 )
+                val libraryFields = metadataFieldsForLibraryItem(
+                    metadata = resolvedMetadata,
+                    originalFileName = document.originalFileName,
+                )
                 add(
                     ImportedItemRecord(
                         item = SheetMusicItem(
                             id = itemId,
-                            title = normalizeTitle(resolvedMetadata.title, document.originalFileName),
-                            composer = resolvedMetadata.composer.name.takeIf(String::isNotBlank),
-                            tags = normalizeTags(resolvedMetadata.tags),
+                            title = libraryFields.title,
+                            composer = libraryFields.composer,
+                            tags = libraryFields.tags,
                             document = PdfDocumentReference(
                                 storedPath = document.storedPath,
                                 originalFileName = document.originalFileName,
                                 sourceUri = document.sourceUri,
                                 contentFingerprint = fingerprint,
                             ),
-                            pageCount = resolvedMetadata.pageCount ?: document.pageCount,
+                            pageCount = libraryFields.pageCount,
                             dateAddedEpochMillis = importedAt + importIndex,
                             sourceId = sourceId,
                         ),
@@ -585,23 +592,42 @@ class DefaultSheetMusicRepository(
 
             val syncedItems = items.map { descriptor ->
                 val existing = existingRemoteById[descriptor.remoteId]
+                val itemId = existing?.id ?: buildRemoteItemId(providerId, descriptor.remoteId)
                 val nextDocument = PdfDocumentReference(
                     storedPath = descriptor.storedPath,
                     originalFileName = descriptor.originalFileName,
                     sourceUri = descriptor.sourceUri,
                 )
+                val resolvedMetadata = resolveImportedScoreMetadata(
+                    itemId = itemId,
+                    storedMetadata = scoreMetadataStorage.readMetadata(itemId),
+                    incomingMetadata = descriptor.scoreMetadata,
+                    fallbackTitle = normalizeTitle(descriptor.title, descriptor.originalFileName),
+                    fallbackComposer = descriptor.composer,
+                    fallbackTags = descriptor.tags,
+                    originalFileName = descriptor.originalFileName,
+                    sourceUri = descriptor.sourceUri,
+                    pageCount = descriptor.pageCount ?: existing?.pageCount,
+                    contentFingerprint = existing?.document?.contentFingerprint,
+                )
+                val libraryFields = metadataFieldsForLibraryItem(
+                    metadata = resolvedMetadata,
+                    originalFileName = descriptor.originalFileName,
+                )
+                val resolvedCollection = descriptor.collection?.trim()?.ifEmpty { null }
+                    ?: existing?.collection?.trim()?.ifEmpty { null }
 
                 if (existing != null && existing.document.storedPath != descriptor.storedPath) {
                     stalePaths += existing.document.storedPath
                 }
 
                 val syncedItem = existing?.copy(
-                    title = descriptor.title,
-                    composer = descriptor.composer,
-                    tags = normalizeTags(descriptor.tags),
-                    collection = descriptor.collection?.trim()?.ifEmpty { null },
+                    title = libraryFields.title,
+                    composer = libraryFields.composer,
+                    tags = libraryFields.tags,
+                    collection = resolvedCollection,
                     document = nextDocument,
-                    pageCount = descriptor.pageCount ?: existing.pageCount,
+                    pageCount = libraryFields.pageCount ?: existing.pageCount,
                     syncMetadata = RemoteSyncMetadata(
                         providerId = providerId,
                         providerName = providerName,
@@ -610,13 +636,13 @@ class DefaultSheetMusicRepository(
                         lastSyncedEpochMillis = syncedAtEpochMillis,
                     ),
                 ) ?: SheetMusicItem(
-                    id = buildRemoteItemId(providerId, descriptor.remoteId),
-                    title = descriptor.title,
-                    composer = descriptor.composer,
-                    tags = normalizeTags(descriptor.tags),
-                    collection = descriptor.collection?.trim()?.ifEmpty { null },
+                    id = itemId,
+                    title = libraryFields.title,
+                    composer = libraryFields.composer,
+                    tags = libraryFields.tags,
+                    collection = resolvedCollection,
                     document = nextDocument,
-                    pageCount = descriptor.pageCount,
+                    pageCount = libraryFields.pageCount,
                     dateAddedEpochMillis = descriptor.dateAddedEpochMillis ?: syncedAtEpochMillis,
                     syncMetadata = RemoteSyncMetadata(
                         providerId = providerId,
@@ -629,13 +655,7 @@ class DefaultSheetMusicRepository(
                 )
                 syncedMetadataRecords += ImportedItemRecord(
                     item = syncedItem,
-                    metadata = mergeScoreMetadata(
-                        existingMetadata = metadataForLibraryItem(
-                            item = syncedItem,
-                            metadataId = descriptor.scoreMetadata?.id,
-                        ),
-                        incomingMetadata = descriptor.scoreMetadata,
-                    ),
+                    metadata = resolvedMetadata,
                 )
                 syncedItem
             }
@@ -688,12 +708,17 @@ class DefaultSheetMusicRepository(
         ensureInitialized()
         val item = getItem(itemId) ?: return null
         val existingMetadata = scoreMetadataStorage.readMetadata(itemId)
-        val resolvedMetadata = mergeScoreMetadata(
-            existingMetadata = existingMetadata,
-            incomingMetadata = metadataForLibraryItem(
-                item = item,
-                metadataId = existingMetadata?.id,
-            ),
+        val resolvedMetadata = resolveImportedScoreMetadata(
+            itemId = item.id,
+            storedMetadata = existingMetadata,
+            incomingMetadata = null,
+            fallbackTitle = normalizeTitle(item.title, item.document.originalFileName),
+            fallbackComposer = item.composer,
+            fallbackTags = item.tags,
+            originalFileName = item.document.originalFileName,
+            sourceUri = item.document.sourceUri,
+            pageCount = item.pageCount,
+            contentFingerprint = item.document.contentFingerprint,
         )
         persistMetadataRecord(itemId = itemId, metadata = resolvedMetadata)
         return resolvedMetadata
@@ -739,18 +764,23 @@ class DefaultSheetMusicRepository(
         return fingerprints
     }
 
-    private suspend fun ensureStoredMetadataForItems(items: List<SheetMusicItem>) {
-        items.forEach { item ->
-            val existingMetadata = scoreMetadataStorage.readMetadata(item.id)
-            persistMetadataRecord(
+    private suspend fun synchronizeItemsWithStoredMetadata(items: List<SheetMusicItem>): List<SheetMusicItem> =
+        items.map { item ->
+            val resolvedMetadata = resolveImportedScoreMetadata(
                 itemId = item.id,
-                metadata = metadataForLibraryItem(
-                    item = item,
-                    metadataId = existingMetadata?.id,
-                ),
+                storedMetadata = scoreMetadataStorage.readMetadata(item.id),
+                incomingMetadata = null,
+                fallbackTitle = normalizeTitle(item.title, item.document.originalFileName),
+                fallbackComposer = item.composer,
+                fallbackTags = item.tags,
+                originalFileName = item.document.originalFileName,
+                sourceUri = item.document.sourceUri,
+                pageCount = item.pageCount,
+                contentFingerprint = item.document.contentFingerprint,
             )
+            scoreMetadataStorage.writeMetadata(item.id, resolvedMetadata)
+            applyMetadataToLibraryItem(item, resolvedMetadata)
         }
-    }
 
     private suspend fun persistMetadataRecords(records: List<ImportedItemRecord>) {
         records.forEach { record ->
@@ -774,6 +804,7 @@ class DefaultSheetMusicRepository(
 
     private fun resolveImportedScoreMetadata(
         itemId: String,
+        storedMetadata: ScoreMetadata?,
         incomingMetadata: ScoreMetadata?,
         fallbackTitle: String,
         fallbackComposer: String?,
@@ -782,8 +813,8 @@ class DefaultSheetMusicRepository(
         sourceUri: String?,
         pageCount: Int?,
         contentFingerprint: String?,
-    ): ScoreMetadata = mergeScoreMetadata(
-        existingMetadata = defaultScoreMetadata(
+    ): ScoreMetadata {
+        val fallbackMetadata = defaultScoreMetadata(
             itemId = itemId,
             title = fallbackTitle,
             composer = fallbackComposer,
@@ -792,9 +823,16 @@ class DefaultSheetMusicRepository(
             sourceUri = sourceUri,
             pageCount = pageCount,
             contentFingerprint = contentFingerprint,
-        ),
-        incomingMetadata = incomingMetadata,
-    )
+        )
+        val storedResolvedMetadata = mergeScoreMetadata(
+            existingMetadata = fallbackMetadata,
+            incomingMetadata = storedMetadata,
+        )
+        return mergeScoreMetadata(
+            existingMetadata = storedResolvedMetadata,
+            incomingMetadata = incomingMetadata,
+        )
+    }
 
     private fun metadataForLibraryItem(
         item: SheetMusicItem,
@@ -895,6 +933,39 @@ private data class ImportedItemRecord(
     val item: SheetMusicItem,
     val metadata: ScoreMetadata,
 )
+
+private data class LibraryItemMetadataFields(
+    val title: String,
+    val composer: String?,
+    val tags: List<String>,
+    val pageCount: Int?,
+)
+
+private fun metadataFieldsForLibraryItem(
+    metadata: ScoreMetadata,
+    originalFileName: String,
+): LibraryItemMetadataFields = LibraryItemMetadataFields(
+    title = normalizeTitle(metadata.title, originalFileName),
+    composer = metadata.composer.name.takeIf(String::isNotBlank),
+    tags = normalizeTags(metadata.tags),
+    pageCount = metadata.pageCount,
+)
+
+private fun applyMetadataToLibraryItem(
+    item: SheetMusicItem,
+    metadata: ScoreMetadata,
+): SheetMusicItem {
+    val fields = metadataFieldsForLibraryItem(
+        metadata = metadata,
+        originalFileName = item.document.originalFileName,
+    )
+    return item.copy(
+        title = fields.title,
+        composer = fields.composer,
+        tags = fields.tags,
+        pageCount = fields.pageCount ?: item.pageCount,
+    )
+}
 
 private fun normalizeTitle(
     suggestedTitle: String,

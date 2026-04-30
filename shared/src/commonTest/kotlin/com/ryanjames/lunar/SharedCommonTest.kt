@@ -243,6 +243,43 @@ class SharedCommonTest {
     }
 
     @Test
+    fun repositoryInitializeUsesStoredScoreMetadataToOrganizeExistingItems() = runBlocking {
+        val metadataStorage = InMemoryScoreMetadataStorage(
+            initialMetadata = mapOf(
+                "existing" to ScoreMetadata(
+                    id = "266ec2f19ddb0cbb",
+                    title = "The Bell",
+                    composer = ScoreMetadataComposer(name = "Holger Stief"),
+                    tags = listOf("bell", "solo"),
+                )
+            )
+        )
+        val repository = DefaultSheetMusicRepository(
+            storage = InMemoryLibraryStorage(
+                initialItems = listOf(
+                    testItem(
+                        id = "existing",
+                        title = "H.Stief_The_Bell",
+                        composer = "Fallback Composer",
+                        tags = listOf("cloud"),
+                        collection = "Recital",
+                        dateAddedEpochMillis = 1L,
+                    )
+                )
+            ),
+            scoreMetadataStorage = metadataStorage,
+        )
+
+        repository.initialize()
+
+        val item = repository.library.value.items.single()
+        assertEquals("The Bell", item.title)
+        assertEquals("Holger Stief", item.composer)
+        assertEquals(listOf("bell", "solo"), item.tags)
+        assertEquals("Recital", item.collection)
+    }
+
+    @Test
     fun repositoryPersistsSetlistsAcrossInitializations() = runBlocking {
         val storage = InMemoryLibraryStorage()
         val firstRepository = DefaultSheetMusicRepository(storage)
@@ -499,6 +536,48 @@ class SharedCommonTest {
         assertEquals("/scores/moonlight.pdf", item.document.storedPath)
         assertEquals("Moonlight Sonata", repository.getScoreMetadata(item.id)?.title)
         assertEquals("Beethoven", repository.getScoreMetadata(item.id)?.composer?.name)
+    }
+
+    @Test
+    fun repositoryApplyRemoteSyncUsesScoreMetadataWhenAvailable() = runBlocking {
+        val repository = DefaultSheetMusicRepository(
+            storage = InMemoryLibraryStorage(),
+            scoreMetadataStorage = InMemoryScoreMetadataStorage(),
+        )
+
+        repository.initialize()
+        repository.applyRemoteSync(
+            providerId = "src_google_drive",
+            providerName = "Google Drive",
+            syncedAtEpochMillis = 100L,
+            sourceId = "src_google_drive",
+            items = listOf(
+                SyncedSheetMusicDescriptor(
+                    remoteId = "the-bell",
+                    remoteVersion = "v1",
+                    storedPath = "/scores/the-bell.pdf",
+                    originalFileName = "H.Stief_The_Bell.pdf",
+                    title = "Fallback Title",
+                    composer = "Fallback Composer",
+                    tags = listOf("cloud"),
+                    collection = "Drive",
+                    pageCount = 6,
+                    scoreMetadata = ScoreMetadata(
+                        id = "266ec2f19ddb0cbb",
+                        title = "The Bell",
+                        composer = ScoreMetadataComposer(name = "Holger Stief"),
+                        tags = listOf("bell", "stief"),
+                    ),
+                )
+            ),
+        )
+
+        val item = repository.library.value.items.single()
+        assertEquals("The Bell", item.title)
+        assertEquals("Holger Stief", item.composer)
+        assertEquals(listOf("bell", "stief"), item.tags)
+        assertEquals("Drive", item.collection)
+        assertEquals("The Bell", repository.getScoreMetadata(item.id)?.title)
     }
 
     @Test
