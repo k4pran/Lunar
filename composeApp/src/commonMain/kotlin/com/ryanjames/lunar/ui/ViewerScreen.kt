@@ -77,6 +77,7 @@ data class ViewerDocumentState(
     val lastViewedPage: Int = 0,
     val pageCount: Int? = null,
     val isFavorite: Boolean? = null,
+    val isHidden: Boolean = false,
 )
 
 fun SheetMusicItem.toViewerDocumentState(): ViewerDocumentState = ViewerDocumentState(
@@ -87,6 +88,7 @@ fun SheetMusicItem.toViewerDocumentState(): ViewerDocumentState = ViewerDocument
     lastViewedPage = lastViewedPage,
     pageCount = pageCount,
     isFavorite = isFavorite,
+    isHidden = isHidden,
 )
 
 @Composable
@@ -95,6 +97,7 @@ fun ViewerScreen(
     documentState: ViewerDocumentState,
     onBack: () -> Unit,
     onToggleFavorite: (() -> Unit)? = null,
+    onHideScore: (() -> Unit)? = null,
     onOpenRandomScore: (() -> Unit)? = null,
     onPageChanged: (Int) -> Unit,
     onPageCountResolved: (Int) -> Unit,
@@ -260,6 +263,9 @@ fun ViewerScreen(
                         onToggleFavorite = onToggleFavorite,
                     )
                 }
+                if (!documentState.isHidden && onHideScore != null) {
+                    CompactNavButton("Hide", true, onClick = onHideScore)
+                }
                 if (onEnterFullscreen != null) {
                     CompactNavButton("Full", true, onClick = onEnterFullscreen)
                 }
@@ -297,6 +303,7 @@ fun FullscreenViewerScreen(
     documentState: ViewerDocumentState,
     onBack: () -> Unit,
     onToggleFavorite: (() -> Unit)? = null,
+    onHideScore: (() -> Unit)? = null,
     onOpenRandomScore: (() -> Unit)? = null,
     onPageChanged: (Int) -> Unit,
     onPageCountResolved: (Int) -> Unit,
@@ -566,6 +573,14 @@ fun FullscreenViewerScreen(
                                     modifier = Modifier.weight(1f),
                                 ) {
                                     Text(if (documentState.isFavorite) "Unfavorite" else "Favorite")
+                                }
+                            }
+                            if (!documentState.isHidden && onHideScore != null) {
+                                OutlinedButton(
+                                    onClick = onHideScore,
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text("Hide score")
                                 }
                             }
                             Button(

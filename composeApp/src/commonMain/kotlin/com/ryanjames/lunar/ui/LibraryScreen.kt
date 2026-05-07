@@ -67,6 +67,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ryanjames.lunar.library.data.LibrarySnapshot
 import com.ryanjames.lunar.library.data.SyncStatus
+import com.ryanjames.lunar.library.model.HiddenScoreFilter
 import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.library.model.LibrarySetlist
 import com.ryanjames.lunar.library.model.LibrarySortOption
@@ -120,12 +121,17 @@ fun LibraryScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         HeaderPanel(
-            runtime = runtime,
-            snapshot = snapshot,
             visibleCount = screenModel.headerVisibleCount,
+            headerTotalCount = screenModel.headerTotalCount,
+            visibleScoreCount = screenModel.visibleScoreCount,
+            hiddenScoreCount = screenModel.hiddenScoreCount,
         )
         BrowseModeSwitcher(appState = appState)
-        if (snapshot.items.isNotEmpty() && appState.browseMode != LibraryBrowseMode.SONGBOOKS) {
+        if (
+            screenModel.visibleScoreCount > 0 &&
+            appState.browseMode != LibraryBrowseMode.SONGBOOKS &&
+            appState.browseMode != LibraryBrowseMode.HIDDEN
+        ) {
             RandomLibraryActionsRow(
                 availableCount = screenModel.currentScopeItems.size,
                 onOpenRandomSheet = { appState.openRandomSheet(screenModel.currentScopeItems) },
@@ -138,14 +144,14 @@ fun LibraryScreen(
         ) {
             SearchAndSortBar(appState = appState)
             RefineLibraryPanel(
-                availableCollections = screenModel.collections,
-                availableTags = screenModel.tags,
+                availableCollections = screenModel.filterCollections,
+                availableTags = screenModel.filterTags,
                 visibleCount = screenModel.visibleItems.size,
-                totalCount = snapshot.items.size,
+                totalCount = screenModel.refinementTotalCount,
                 appState = appState,
             )
         }
-        if (screenModel.selectedItems.isNotEmpty()) {
+        if (screenModel.selectedItems.isNotEmpty() && appState.browseMode != LibraryBrowseMode.HIDDEN) {
             SelectionActionBar(
                 selectedCount = screenModel.selectedItems.size,
                 onAddToSetlist = appState::showSetlistPicker,
@@ -161,12 +167,27 @@ fun LibraryScreen(
                 LibraryBrowseMode.ALL -> {
                     if (screenModel.visibleItems.isEmpty()) {
                         EmptyLibraryState(
-                            totalItemCount = snapshot.items.size,
+                            totalItemCount = screenModel.visibleScoreCount,
                             onOpenImport = { appState.selectSection(AppSection.IMPORT) },
                             onClearFilters = appState::clearFilters,
                         )
                     } else {
                         FlatScoreList(items = screenModel.visibleItems, appState = appState)
+                    }
+                }
+
+                LibraryBrowseMode.HIDDEN -> {
+                    if (screenModel.visibleItems.isEmpty()) {
+                        HiddenScoresEmptyState(
+                            hiddenCount = screenModel.hiddenScoreCount,
+                            onClearFilters = appState::clearFilters,
+                        )
+                    } else {
+                        FlatScoreList(
+                            items = screenModel.visibleItems,
+                            appState = appState,
+                            mode = ScoreListMode.HIDDEN,
+                        )
                     }
                 }
 
@@ -388,9 +409,10 @@ fun LibraryScreen(
 
 @Composable
 private fun HeaderPanel(
-    runtime: PlatformRuntime,
-    snapshot: LibrarySnapshot,
     visibleCount: Int,
+    headerTotalCount: Int,
+    visibleScoreCount: Int,
+    hiddenScoreCount: Int,
 ) {
     val themePalette = lunarThemePalette()
 
@@ -422,8 +444,11 @@ private fun HeaderPanel(
                 color = themePalette.headerForeground,
                 modifier = Modifier.weight(1f),
             )
-            SummaryPill("${snapshot.items.size} scores")
-            if (visibleCount != snapshot.items.size) {
+            SummaryPill("${visibleScoreCount.scoreLabel()}")
+            if (hiddenScoreCount > 0) {
+                SummaryPill("$hiddenScoreCount hidden")
+            }
+            if (visibleCount != headerTotalCount) {
                 SummaryPill("$visibleCount shown")
             }
         }
@@ -472,6 +497,9 @@ private fun BrowseModeSwitcher(appState: LunarAppState) {
         BrowseModeTab("Songbooks", appState.browseMode == LibraryBrowseMode.SONGBOOKS) {
             appState.updateBrowseMode(LibraryBrowseMode.SONGBOOKS)
         }
+        BrowseModeTab("Hidden", appState.browseMode == LibraryBrowseMode.HIDDEN) {
+            appState.updateBrowseMode(LibraryBrowseMode.HIDDEN)
+        }
     }
 }
 
@@ -499,11 +527,20 @@ private fun BrowseModeTab(label: String, selected: Boolean, onClick: () -> Unit)
 
 // ─── Flat score list (All view) ──────────────────────────────────────────────
 
+private enum class ScoreListMode {
+    NORMAL,
+    HIDDEN,
+}
+
 @Composable
-private fun FlatScoreList(items: List<SheetMusicItem>, appState: LunarAppState) {
+private fun FlatScoreList(
+    items: List<SheetMusicItem>,
+    appState: LunarAppState,
+    mode: ScoreListMode = ScoreListMode.NORMAL,
+) {
     when (appState.layoutMode) {
-        LibraryLayoutMode.GRID -> LibraryGrid(items = items, appState = appState)
-        LibraryLayoutMode.LIST -> LibraryList(items = items, appState = appState)
+        LibraryLayoutMode.GRID -> LibraryGrid(items = items, appState = appState, mode = mode)
+        LibraryLayoutMode.LIST -> LibraryList(items = items, appState = appState, mode = mode)
     }
 }
 
@@ -1711,6 +1748,7 @@ private fun LibraryItemQuickActions(
     item: SheetMusicItem,
     appState: LunarAppState,
     includeDownload: Boolean,
+    mode: ScoreListMode,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -1755,6 +1793,31 @@ private fun LibraryItemQuickActions(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
+        }
+        if (mode == ScoreListMode.HIDDEN) {
+            LibraryActionIconButton(
+                onClick = { appState.restoreScore(item.id) },
+                contentDescription = "Restore ${item.title}",
+            ) {
+                Text(
+                    text = "+",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        } else {
+            LibraryActionIconButton(
+                onClick = { appState.hideScore(item.id) },
+                contentDescription = "Hide ${item.title}",
+            ) {
+                Text(
+                    text = "\u2298",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
         LibraryActionIconButton(
             onClick = { appState.startEditing(item.id) },
@@ -2015,6 +2078,7 @@ private fun DownloadGlyph(color: Color) {
 private fun LibraryGrid(
     items: List<SheetMusicItem>,
     appState: LunarAppState,
+    mode: ScoreListMode,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 260.dp),
@@ -2029,6 +2093,7 @@ private fun LibraryGrid(
             LibraryCard(
                 item = items[index],
                 appState = appState,
+                mode = mode,
             )
         }
     }
@@ -2038,6 +2103,7 @@ private fun LibraryGrid(
 private fun LibraryList(
     items: List<SheetMusicItem>,
     appState: LunarAppState,
+    mode: ScoreListMode,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -2050,6 +2116,7 @@ private fun LibraryList(
             LibraryCard(
                 item = items[index],
                 appState = appState,
+                mode = mode,
             )
         }
     }
@@ -2059,6 +2126,7 @@ private fun LibraryList(
 private fun LibraryCard(
     item: SheetMusicItem,
     appState: LunarAppState,
+    mode: ScoreListMode,
 ) {
     val themePalette = lunarThemePalette()
     val isSelected = item.id in appState.selectedScoreIds
@@ -2171,6 +2239,7 @@ private fun LibraryCard(
                     GridLibraryCardFooter(
                         item = item,
                         appState = appState,
+                        mode = mode,
                     )
                 } else {
                     Row(
@@ -2192,6 +2261,7 @@ private fun LibraryCard(
                                 item = item,
                                 appState = appState,
                                 includeDownload = appState.canDownloadScores,
+                                mode = mode,
                             )
                             androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
                                 Text("Open")
@@ -2208,6 +2278,7 @@ private fun LibraryCard(
 private fun GridLibraryCardFooter(
     item: SheetMusicItem,
     appState: LunarAppState,
+    mode: ScoreListMode,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -2228,6 +2299,7 @@ private fun GridLibraryCardFooter(
                 item = item,
                 appState = appState,
                 includeDownload = false,
+                mode = mode,
                 modifier = Modifier
                     .weight(1f)
                     .horizontalScroll(rememberScrollState()),
@@ -2831,6 +2903,59 @@ private fun EmptyLibraryState(
 }
 
 @Composable
+private fun HiddenScoresEmptyState(
+    hiddenCount: Int,
+    onClearFilters: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color.Transparent,
+        shape = MaterialTheme.shapes.extraLarge,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = if (hiddenCount == 0) {
+                    "No hidden scores"
+                } else {
+                    "No hidden scores match the current view"
+                },
+                style = MaterialTheme.typography.headlineSmall.copy(
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = if (hiddenCount == 0) {
+                    "Scores you hide from the viewer or library will appear here for review and restoration."
+                } else {
+                    "Clear the current search or filters to review every hidden score."
+                },
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(top = 12.dp)
+                    .widthIn(max = 520.dp),
+            )
+            if (hiddenCount > 0) {
+                Button(
+                    onClick = onClearFilters,
+                    modifier = Modifier.padding(top = 18.dp),
+                ) {
+                    Text("Clear filters")
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun MetadataEditorDialog(
     item: SheetMusicItem,
     onDismiss: () -> Unit,
@@ -3036,6 +3161,9 @@ private fun ScoreInfoDialog(
                         if (item.isFavorite) {
                             ScoreInfoField("Favorite", "Yes")
                         }
+                        if (item.isHidden) {
+                            ScoreInfoField("Hidden", "Yes")
+                        }
                         ScoreInfoField("Added", formatEpochMillis(item.dateAddedEpochMillis))
                         item.lastOpenedEpochMillis?.let { ScoreInfoField("Last opened", formatEpochMillis(it)) }
                         if (item.lastViewedPage > 0) {
@@ -3134,9 +3262,14 @@ private fun scoreInfoValue(value: String?): String? = value
 private data class LibraryScreenModel(
     val visibleItems: List<SheetMusicItem>,
     val headerVisibleCount: Int,
+    val headerTotalCount: Int,
+    val visibleScoreCount: Int,
+    val hiddenScoreCount: Int,
+    val refinementTotalCount: Int,
     val collections: List<String>,
     val composers: List<String>,
-    val tags: List<String>,
+    val filterCollections: List<String>,
+    val filterTags: List<String>,
     val itemsById: Map<String, SheetMusicItem>,
     val temporarySetlist: TemporarySetlistSession?,
     val activeTemporarySetlist: TemporarySetlistSession?,
@@ -3160,8 +3293,11 @@ internal fun currentLibraryScopeItems(
     snapshot: LibrarySnapshot,
     appState: LunarAppState,
 ): List<SheetMusicItem> {
-    val visibleItems = snapshot.items.applyLibraryQuery(appState.query)
-    val itemsById = snapshot.items.associateBy { it.id }
+    val visibleItems = snapshot.items.applyLibraryQuery(
+        appState.query.withHiddenFilterFor(appState.browseMode)
+    )
+    val visibleLibraryItems = snapshot.items.filterNot { it.isHidden }
+    val itemsById = visibleLibraryItems.associateBy { it.id }
     val temporarySetlist = appState.temporarySetlist
     val activeTemporarySetlist = temporarySetlist.takeIf { appState.temporarySetlistOpen }
     val activeTemporarySetlistItems = activeTemporarySetlist
@@ -3174,7 +3310,7 @@ internal fun currentLibraryScopeItems(
         ?.mapNotNull(itemsById::get)
         .orEmpty()
     return currentScopeItems(
-        snapshotItems = snapshot.items,
+        snapshotItems = visibleLibraryItems,
         visibleItems = visibleItems,
         browseMode = appState.browseMode,
         selectedGroup = appState.selectedGroup,
@@ -3189,11 +3325,18 @@ private fun buildLibraryScreenModel(
     snapshot: LibrarySnapshot,
     appState: LunarAppState,
 ): LibraryScreenModel {
-    val visibleItems = snapshot.items.applyLibraryQuery(appState.query)
-    val collections = snapshot.items.availableCollections().toList()
-    val composers = snapshot.items.availableComposers().toList()
-    val tags = snapshot.items.availableTags().toList()
-    val itemsById = snapshot.items.associateBy { it.id }
+    val visibleLibraryItems = snapshot.items.filterNot { it.isHidden }
+    val hiddenLibraryItems = snapshot.items.filter { it.isHidden }
+    val query = appState.query.withHiddenFilterFor(appState.browseMode)
+    val visibleItems = snapshot.items.applyLibraryQuery(query)
+    val collections = visibleLibraryItems.availableCollections().toList()
+    val composers = visibleLibraryItems.availableComposers().toList()
+    val filterBaseItems = if (appState.browseMode == LibraryBrowseMode.HIDDEN) {
+        hiddenLibraryItems
+    } else {
+        visibleLibraryItems
+    }
+    val itemsById = visibleLibraryItems.associateBy { it.id }
     val temporarySetlist = appState.temporarySetlist
     val activeTemporarySetlist = temporarySetlist.takeIf { appState.temporarySetlistOpen }
     val activeTemporarySetlistItems = activeTemporarySetlist
@@ -3215,13 +3358,22 @@ private fun buildLibraryScreenModel(
             appState.browseMode == LibraryBrowseMode.SETLISTS ||
             appState.browseMode == LibraryBrowseMode.SONGBOOKS
         ) {
-            snapshot.items.size
+            visibleLibraryItems.size
         } else {
             visibleItems.size
         },
+        headerTotalCount = if (appState.browseMode == LibraryBrowseMode.HIDDEN) {
+            hiddenLibraryItems.size
+        } else {
+            visibleLibraryItems.size
+        },
+        visibleScoreCount = visibleLibraryItems.size,
+        hiddenScoreCount = hiddenLibraryItems.size,
+        refinementTotalCount = filterBaseItems.size,
         collections = collections,
         composers = composers,
-        tags = tags,
+        filterCollections = filterBaseItems.availableCollections().toList(),
+        filterTags = filterBaseItems.availableTags().toList(),
         itemsById = itemsById,
         temporarySetlist = temporarySetlist,
         activeTemporarySetlist = activeTemporarySetlist,
@@ -3270,7 +3422,18 @@ private fun currentScopeItems(
         else -> snapshotItems
     }
     LibraryBrowseMode.SONGBOOKS -> emptyList()
+    LibraryBrowseMode.HIDDEN -> emptyList()
 }
+
+private fun com.ryanjames.lunar.library.model.LibraryQuery.withHiddenFilterFor(
+    browseMode: LibraryBrowseMode,
+): com.ryanjames.lunar.library.model.LibraryQuery = copy(
+    hiddenFilter = if (browseMode == LibraryBrowseMode.HIDDEN) {
+        HiddenScoreFilter.HIDDEN
+    } else {
+        HiddenScoreFilter.VISIBLE
+    },
+)
 
 private fun randomScopeLabel(
     browseMode: LibraryBrowseMode,
@@ -3287,6 +3450,7 @@ private fun randomScopeLabel(
         else -> "the full library"
     }
     LibraryBrowseMode.SONGBOOKS -> "songbooks"
+    LibraryBrowseMode.HIDDEN -> "hidden scores"
 }
 
 private fun List<SheetMusicItem>.groupByCollectionName(): Map<String, List<SheetMusicItem>> =

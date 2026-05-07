@@ -27,6 +27,7 @@ import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.LibraryBrowseMode
 import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.buildRandomSightReadingSelection
+import com.ryanjames.lunar.ui.currentLibraryScopeItems
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
 import java.io.IOException
@@ -139,6 +140,83 @@ class ComposeAppCommonTest {
         assertEquals(ViewerTarget.Score(second.id), appState.previewTarget)
         assertEquals(ViewerTarget.Score(second.id), appState.fullscreenTarget)
         assertEquals("Opening a random sheet.", appState.bannerMessage)
+    }
+
+    @Test
+    fun hidingScoreClearsViewersAndRestoreMakesItVisibleAgain() = runBlocking {
+        val item = testSheetMusicItem(
+            id = "bad_scan",
+            title = "Bad Scan",
+        )
+        val runtime = createTestPlatformRuntime(initialItems = listOf(item))
+        val appState = createTestLunarAppState(
+            scope = this,
+            runtime = runtime,
+        )
+
+        appState.openPreview(item)
+        appState.openFullscreen(item.id)
+        appState.hideScore(item.id)
+        repeat(10) {
+            if (runtime.repository.library.value.items.single().isHidden) {
+                return@repeat
+            }
+            yield()
+        }
+
+        assertTrue(runtime.repository.library.value.items.single().isHidden)
+        assertEquals(null, appState.previewTarget)
+        assertEquals(null, appState.fullscreenTarget)
+        assertEquals("Score hidden. You can restore it from Hidden.", appState.bannerMessage)
+
+        appState.updateBrowseMode(LibraryBrowseMode.HIDDEN)
+        appState.restoreScore(item.id)
+        repeat(10) {
+            if (!runtime.repository.library.value.items.single().isHidden) {
+                return@repeat
+            }
+            yield()
+        }
+
+        assertFalse(runtime.repository.library.value.items.single().isHidden)
+        assertEquals("Score restored to your library.", appState.bannerMessage)
+    }
+
+    @Test
+    fun hiddenScoresAreExcludedFromNormalLibraryScopes() = runBlocking {
+        val visible = testSheetMusicItem(id = "visible", title = "Visible")
+        val hidden = testSheetMusicItem(id = "hidden", title = "Hidden", isHidden = true)
+        val setlist = testLibrarySetlist(
+            id = "mixed_setlist",
+            name = "Mixed",
+            itemIds = listOf(visible.id, hidden.id),
+        )
+        val runtime = createTestPlatformRuntime(
+            initialItems = listOf(visible, hidden),
+            initialSetlists = listOf(setlist),
+        )
+        val appState = createTestLunarAppState(
+            scope = this,
+            runtime = runtime,
+        )
+
+        assertEquals(
+            listOf(visible.id),
+            currentLibraryScopeItems(
+                snapshot = runtime.repository.library.value,
+                appState = appState,
+            ).map { it.id },
+        )
+
+        appState.openSetlist(setlist.id)
+
+        assertEquals(
+            listOf(visible.id),
+            currentLibraryScopeItems(
+                snapshot = runtime.repository.library.value,
+                appState = appState,
+            ).map { it.id },
+        )
     }
 
     @Test

@@ -46,6 +46,7 @@ enum class LibraryBrowseMode {
     BY_COMPOSER,
     SETLISTS,
     SONGBOOKS,
+    HIDDEN,
 }
 
 enum class AppSection {
@@ -690,6 +691,42 @@ class LunarAppState(
     fun toggleFavorite(itemId: String) {
         scope.launch {
             runtime.repository.toggleFavorite(itemId)
+        }
+    }
+
+    fun hideScore(itemId: String) {
+        scope.launch {
+            runtime.repository.updateHidden(itemId, isHidden = true)
+            selectedScoreIds = selectedScoreIds - itemId
+            if (selectedScoreIds.isEmpty()) {
+                setlistPickerVisible = false
+                songbookPickerVisible = false
+            }
+            if (previewTarget == ViewerTarget.Score(itemId)) {
+                previewTarget = null
+            }
+            if (fullscreenTarget == ViewerTarget.Score(itemId)) {
+                fullscreenTarget = null
+            }
+            if (editingItemId == itemId) {
+                editingItemId = null
+            }
+            if (infoItemId == itemId) {
+                dismissScoreInfo()
+            }
+            bannerMessage = "Score hidden. You can restore it from Hidden."
+        }
+    }
+
+    fun restoreScore(itemId: String) {
+        scope.launch {
+            runtime.repository.updateHidden(itemId, isHidden = false)
+            selectedScoreIds = selectedScoreIds - itemId
+            if (selectedScoreIds.isEmpty()) {
+                setlistPickerVisible = false
+                songbookPickerVisible = false
+            }
+            bannerMessage = "Score restored to your library."
         }
     }
 

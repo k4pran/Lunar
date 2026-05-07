@@ -131,6 +131,8 @@ interface SheetMusicRepository {
 
     suspend fun toggleFavorite(itemId: String)
 
+    suspend fun updateHidden(itemId: String, isHidden: Boolean)
+
     suspend fun recordOpened(itemId: String, pageIndex: Int)
 
     suspend fun updateCurrentPage(itemId: String, pageIndex: Int)
@@ -372,6 +374,13 @@ class DefaultSheetMusicRepository(
     override suspend fun toggleFavorite(itemId: String) {
         ensureInitialized()
         mutateItem(itemId) { item -> item.copy(isFavorite = !item.isFavorite) }
+    }
+
+    override suspend fun updateHidden(itemId: String, isHidden: Boolean) {
+        ensureInitialized()
+        mutateItem(itemId) { item ->
+            if (item.isHidden == isHidden) item else item.copy(isHidden = isHidden)
+        }
     }
 
     override suspend fun recordOpened(itemId: String, pageIndex: Int) {

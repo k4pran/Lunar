@@ -28,6 +28,7 @@ data class SheetMusicItem(
     val tags: List<String> = emptyList(),
     val collection: String? = null,
     val isFavorite: Boolean = false,
+    val isHidden: Boolean = false,
     val document: PdfDocumentReference,
     val dateAddedEpochMillis: Long,
     val lastOpenedEpochMillis: Long? = null,

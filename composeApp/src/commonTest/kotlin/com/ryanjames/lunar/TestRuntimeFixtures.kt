@@ -105,6 +105,7 @@ internal fun testSheetMusicItem(
     composer: String = "Composer",
     collection: String? = null,
     tags: List<String> = emptyList(),
+    isHidden: Boolean = false,
     dateAddedEpochMillis: Long = 1L,
     pageCount: Int? = null,
 ): SheetMusicItem = SheetMusicItem(
@@ -113,6 +114,7 @@ internal fun testSheetMusicItem(
     composer = composer,
     tags = tags,
     collection = collection,
+    isHidden = isHidden,
     document = PdfDocumentReference(
         storedPath = "/scores/$id.pdf",
         originalFileName = "$title.pdf",

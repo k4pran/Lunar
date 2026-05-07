@@ -110,6 +110,7 @@ fun App() {
                 documentState = fullscreenDocument,
                 onBack = appState::closeFullscreen,
                 onToggleFavorite = appState.fullscreenTarget.favoriteToggle(appState),
+                onHideScore = appState.fullscreenTarget.hideScore(appState),
                 onOpenRandomScore = { appState.openRandomSheetInCurrentViewer(libraryScopeItems) },
                 onPageChanged = appState.fullscreenTarget.pageChanged(appState),
                 onPageCountResolved = appState.fullscreenTarget.pageCountResolved(appState),
@@ -204,6 +205,7 @@ fun App() {
                                             documentState = previewDocument,
                                             onBack = appState::closePreview,
                                             onToggleFavorite = appState.previewTarget.favoriteToggle(appState),
+                                            onHideScore = appState.previewTarget.hideScore(appState),
                                             onOpenRandomScore = { appState.openRandomSheetInCurrentViewer(libraryScopeItems) },
                                             onPageChanged = appState.previewTarget.pageChanged(appState),
                                             onPageCountResolved = appState.previewTarget.pageCountResolved(appState),
@@ -301,6 +303,12 @@ private fun LibrarySongbook.toViewerDocumentState(): ViewerDocumentState = Viewe
 private fun ViewerTarget?.favoriteToggle(appState: com.ryanjames.lunar.ui.LunarAppState): (() -> Unit)? =
     when (this) {
         is ViewerTarget.Score -> { { appState.toggleFavorite(itemId) } }
+        is ViewerTarget.Songbook, null -> null
+    }
+
+private fun ViewerTarget?.hideScore(appState: com.ryanjames.lunar.ui.LunarAppState): (() -> Unit)? =
+    when (this) {
+        is ViewerTarget.Score -> { { appState.hideScore(itemId) } }
         is ViewerTarget.Songbook, null -> null
     }
 

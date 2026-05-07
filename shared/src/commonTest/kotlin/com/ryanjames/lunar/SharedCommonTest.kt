@@ -6,6 +6,7 @@ import com.ryanjames.lunar.library.data.InMemoryScoreMetadataStorage
 import com.ryanjames.lunar.library.data.SheetMusicMetadataInput
 import com.ryanjames.lunar.library.data.SyncedSheetMusicDescriptor
 import com.ryanjames.lunar.library.data.StoredDocumentFingerprinter
+import com.ryanjames.lunar.library.model.HiddenScoreFilter
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.library.model.LibraryQuery
@@ -192,6 +193,37 @@ class SharedCommonTest {
     }
 
     @Test
+    fun libraryQueryExcludesHiddenScoresUnlessHiddenViewIsRequested() {
+        val visible = testItem(
+            id = "visible",
+            title = "Visible Score",
+            composer = "Composer",
+            tags = listOf("piano"),
+            dateAddedEpochMillis = 10L,
+        )
+        val hidden = testItem(
+            id = "hidden",
+            title = "Hidden Score",
+            composer = "Composer",
+            tags = listOf("piano"),
+            dateAddedEpochMillis = 20L,
+            isHidden = true,
+        )
+        val items = listOf(visible, hidden)
+
+        assertEquals(
+            listOf("Visible Score"),
+            items.applyLibraryQuery(LibraryQuery()).map { it.title },
+        )
+        assertEquals(
+            listOf("Hidden Score"),
+            items.applyLibraryQuery(
+                LibraryQuery(hiddenFilter = HiddenScoreFilter.HIDDEN)
+            ).map { it.title },
+        )
+    }
+
+    @Test
     fun repositoryDeleteRemovesStoredItem() = runBlocking {
         val metadataStorage = InMemoryScoreMetadataStorage()
         val repository = DefaultSheetMusicRepository(
@@ -214,6 +246,37 @@ class SharedCommonTest {
         assertNull(repository.getItem(imported.single().id))
         assertNull(metadataStorage.readMetadata(imported.single().id))
         assertEquals(emptyList(), repository.library.value.items)
+    }
+
+    @Test
+    fun repositoryUpdatesHiddenStateWithoutDeletingScore() = runBlocking {
+        val item = testItem(
+            id = "bad_scan",
+            title = "Bad Scan",
+            composer = "Composer",
+            tags = emptyList(),
+            dateAddedEpochMillis = 1L,
+        )
+        val repository = DefaultSheetMusicRepository(
+            storage = InMemoryLibraryStorage(initialItems = listOf(item)),
+        )
+
+        repository.initialize()
+        repository.updateHidden(item.id, isHidden = true)
+
+        assertTrue(repository.getItem(item.id)?.isHidden == true)
+        assertEquals(
+            emptyList(),
+            repository.library.value.items.applyLibraryQuery(LibraryQuery()),
+        )
+
+        repository.updateHidden(item.id, isHidden = false)
+
+        assertEquals(false, repository.getItem(item.id)?.isHidden)
+        assertEquals(
+            listOf("Bad Scan"),
+            repository.library.value.items.applyLibraryQuery(LibraryQuery()).map { it.title },
+        )
     }
 
     @Test
@@ -712,6 +775,7 @@ private fun testItem(
     tags: List<String>,
     collection: String? = null,
     isFavorite: Boolean = false,
+    isHidden: Boolean = false,
     dateAddedEpochMillis: Long,
     lastOpenedEpochMillis: Long? = null,
 ) = com.ryanjames.lunar.library.model.SheetMusicItem(
@@ -721,6 +785,7 @@ private fun testItem(
     tags = tags,
     collection = collection,
     isFavorite = isFavorite,
+    isHidden = isHidden,
     document = com.ryanjames.lunar.library.model.PdfDocumentReference(
         storedPath = "/scores/$id.pdf",
         originalFileName = "$title.pdf",

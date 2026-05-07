@@ -5,9 +5,15 @@ data class LibraryQuery(
     val selectedTags: Set<String> = emptySet(),
     val selectedCollection: String? = null,
     val favoritesOnly: Boolean = false,
+    val hiddenFilter: HiddenScoreFilter = HiddenScoreFilter.VISIBLE,
     val sortOption: LibrarySortOption = LibrarySortOption.DATE_ADDED,
     val sortDirection: SortDirection = SortDirection.DESCENDING,
 )
+
+enum class HiddenScoreFilter {
+    VISIBLE,
+    HIDDEN,
+}
 
 fun List<SheetMusicItem>.applyLibraryQuery(query: LibraryQuery): List<SheetMusicItem> {
     val normalizedSearch = query.searchText.trim().lowercase()
@@ -15,6 +21,16 @@ fun List<SheetMusicItem>.applyLibraryQuery(query: LibraryQuery): List<SheetMusic
     val normalizedTags = query.selectedTags.map { it.trim().lowercase() }.toSet()
 
     val filtered = filter { item ->
+        when (query.hiddenFilter) {
+            HiddenScoreFilter.VISIBLE -> if (item.isHidden) {
+                return@filter false
+            }
+
+            HiddenScoreFilter.HIDDEN -> if (!item.isHidden) {
+                return@filter false
+            }
+        }
+
         if (query.favoritesOnly && !item.isFavorite) {
             return@filter false
         }
