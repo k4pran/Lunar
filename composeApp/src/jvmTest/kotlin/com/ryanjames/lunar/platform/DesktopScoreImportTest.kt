@@ -116,6 +116,45 @@ class DesktopScoreImportTest {
     }
 
     @Test
+    fun importDesktopDroppedScorePathsExpandsFoldersAndFileUris() {
+        val root = Files.createTempDirectory("lunar-desktop-drop-import-test").toFile()
+        try {
+            val scoresDirectory = File(root, "scores").apply { mkdirs() }
+            val dropFolder = File(root, "drop").apply { mkdirs() }
+            val nestedFolder = File(dropFolder, "nested").apply { mkdirs() }
+            val imageFile = File(nestedFolder, "autumn_leaves.png")
+            writeTestImage(imageFile, width = 180, height = 320)
+            File(nestedFolder, "autumn_leaves.json").writeText(
+                """
+                {
+                  "schemaId": "score-metadata",
+                  "schemaVersion": "1.0",
+                  "id": "autumn-leaves",
+                  "title": "Autumn Leaves",
+                  "composer": {
+                    "name": "Joseph Kosma"
+                  }
+                }
+                """.trimIndent()
+            )
+            val directPdf = File(root, "blue_bossa.pdf")
+            writeTestPdf(directPdf)
+
+            val descriptors = importDesktopDroppedScorePaths(
+                pathOrUris = listOf(dropFolder.toURI().toString(), directPdf.absolutePath),
+                scoresDirectory = scoresDirectory,
+            ).associateBy { it.suggestedTitle }
+
+            assertEquals(setOf("autumn_leaves", "blue_bossa"), descriptors.keys)
+            assertEquals("Autumn Leaves", descriptors.getValue("autumn_leaves").scoreMetadata?.title)
+            assertEquals("Joseph Kosma", descriptors.getValue("autumn_leaves").scoreMetadata?.composer?.name)
+            assertEquals(1, descriptors.getValue("blue_bossa").pageCount)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun importDesktopScoreFileRendersLilyPondIntoManagedPdf() {
         val root = Files.createTempDirectory("lunar-desktop-import-lilypond-test").toFile()
         try {

@@ -52,7 +52,6 @@ enum class LibraryBrowseMode {
 enum class AppSection {
     IMPORT,
     LIBRARY,
-    COMPOSE,
     SETTINGS,
 }
 
@@ -553,6 +552,23 @@ class LunarAppState(
         runImport { runtime.importer.importPdfFolder() }
     }
 
+    fun importDroppedPaths(paths: List<String>) {
+        val normalizedPaths = paths
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .distinct()
+        if (normalizedPaths.isEmpty()) return
+
+        runImport(
+            startMessage = "Starting drag-and-drop import.",
+            selectionMessage = "Reading dropped files and folders.",
+            resultMessage = { count ->
+                "Drop contained $count score file${if (count == 1) "" else "s"}."
+            },
+            importerAction = { runtime.importer.importDroppedPaths(normalizedPaths) },
+        )
+    }
+
     fun addLocalFilesSource(label: String) {
         val sourceId = generateSourceId()
         val source = LocalFilesSource(
@@ -1025,21 +1041,26 @@ class LunarAppState(
     }
 
     private fun runImport(
+        startMessage: String = "Starting local import.",
+        selectionMessage: String = "Opening file picker.",
+        resultMessage: (Int) -> String = { count ->
+            "Importer returned $count score file${if (count == 1) "" else "s"}."
+        },
         importerAction: suspend () -> ImportRequestResult,
     ) {
         if (importInProgress) return
 
         scope.launch {
             importInProgress = true
-            startImportActivity("Starting local import.")
+            startImportActivity(startMessage)
             try {
                 appendImportActivity(
-                    message = "Opening file picker.",
+                    message = selectionMessage,
                     currentStep = "Selecting local scores",
                 )
                 val result = importerAction()
                 appendImportActivity(
-                    message = "Importer returned ${result.documents.size} score file${if (result.documents.size == 1) "" else "s"}.",
+                    message = resultMessage(result.documents.size),
                     currentStep = "Importing local scores",
                     discoveredDelta = result.documents.size,
                 )

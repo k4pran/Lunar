@@ -1,7 +1,14 @@
 package com.ryanjames.lunar.platform
 
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draganddrop.DragAndDropEvent
+import androidx.compose.ui.draganddrop.DragAndDropTarget
+import androidx.compose.ui.draganddrop.DragData
+import androidx.compose.ui.draganddrop.dragData
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.JsonLibraryStorage
@@ -37,6 +44,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.net.URI
 import java.nio.file.Files
 import java.security.MessageDigest
 import javax.imageio.ImageIO
@@ -237,6 +245,29 @@ private class DesktopPdfImporter(
         )
     }
 
+    override suspend fun importDroppedPaths(paths: List<String>): ImportRequestResult {
+        if (paths.isEmpty()) {
+            return ImportRequestResult(emptyList())
+        }
+
+        val documents = withContext(Dispatchers.IO) {
+            importDesktopDroppedScorePaths(
+                pathOrUris = paths,
+                scoresDirectory = scoresDirectory,
+                lilyPondCompiler = lilyPondCompiler,
+                museScoreConverter = museScoreConverter,
+            )
+        }
+
+        return ImportRequestResult(
+            documents = documents,
+            notice = when {
+                documents.isEmpty() -> "No PDF, LilyPond, MuseScore, or image files were found in the dropped files."
+                else -> null
+            },
+        )
+    }
+
     private fun selectFiles(): List<File> {
         val chooser = JFileChooser().apply {
             dialogTitle = "Import sheet music files"
@@ -265,6 +296,33 @@ private class DesktopPdfImporter(
             null
         }
     }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+actual fun Modifier.externalScoreDropTarget(
+    enabled: Boolean,
+    onDroppedPaths: (List<String>) -> Unit,
+): Modifier {
+    if (!enabled) {
+        return this
+    }
+
+    return dragAndDropTarget(
+        shouldStartDragAndDrop = { event -> event.dragData() is DragData.FilesList },
+        target = object : DragAndDropTarget {
+            override fun onDrop(event: DragAndDropEvent): Boolean {
+                val files = (event.dragData() as? DragData.FilesList)
+                    ?.readFiles()
+                    .orEmpty()
+                if (files.isEmpty()) {
+                    return false
+                }
+
+                onDroppedPaths(files)
+                return true
+            }
+        },
+    )
 }
 
 internal fun importDesktopScoreFile(
@@ -349,6 +407,34 @@ internal fun importDesktopScoreFiles(
             museScoreConverter = museScoreConverter,
         )
     }
+}
+
+internal fun importDesktopDroppedScorePaths(
+    pathOrUris: List<String>,
+    scoresDirectory: File,
+    lilyPondCompiler: DesktopLilyPondCompiler = SystemDesktopLilyPondCompiler,
+    museScoreConverter: DesktopMuseScoreConverter = SystemDesktopMuseScoreConverter,
+): List<ImportedPdfDescriptor> {
+    val importFiles = pathOrUris
+        .mapNotNull(::desktopFileFromPathOrUri)
+        .flatMap { file ->
+            when {
+                file.isDirectory -> file.walkTopDown()
+                    .filter(::isSupportedDesktopImportFile)
+                    .toList()
+
+                isSupportedDesktopImportFile(file) -> listOf(file)
+                else -> emptyList()
+            }
+        }
+        .distinctBy(File::stableImportKey)
+
+    return importDesktopScoreFiles(
+        files = importFiles,
+        scoresDirectory = scoresDirectory,
+        lilyPondCompiler = lilyPondCompiler,
+        museScoreConverter = museScoreConverter,
+    )
 }
 
 internal fun interface DesktopLilyPondCompiler {
@@ -857,6 +943,25 @@ private fun isSupportedDesktopScoreFile(file: File): Boolean =
 
 private fun isSupportedDesktopMetadataFile(file: File): Boolean =
     file.isFile && file.extension.equals("json", ignoreCase = true)
+
+private fun desktopFileFromPathOrUri(pathOrUri: String): File? {
+    val value = pathOrUri.trim().trim('"')
+    if (value.isBlank()) {
+        return null
+    }
+
+    return runCatching {
+        if (value.startsWith("file:", ignoreCase = true)) {
+            File(URI(value))
+        } else {
+            File(value)
+        }
+    }.getOrNull()
+        ?.takeIf { it.exists() }
+}
+
+private fun File.stableImportKey(): String =
+    runCatching { canonicalFile.absolutePath }.getOrDefault(absolutePath)
 
 private fun copyFileToManagedPdf(
     source: File,

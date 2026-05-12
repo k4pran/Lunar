@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.documentfile.provider.DocumentFile
@@ -716,6 +717,11 @@ private fun Uri.buildFolderKey(): String = toString().substringBeforeLast('/', m
 
 private const val COPY_BUFFER_SIZE_BYTES = 8_192
 private val androidScoreMetadataJson = Json { ignoreUnknownKeys = true }
+
+actual fun Modifier.externalScoreDropTarget(
+    enabled: Boolean,
+    onDroppedPaths: (List<String>) -> Unit,
+): Modifier = this
 
 private fun ByteArray.toHexString(): String = joinToString(separator = "") { byte ->
     byte.toUByte().toString(16).padStart(2, '0')

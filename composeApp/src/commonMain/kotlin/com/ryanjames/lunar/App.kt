@@ -34,9 +34,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.ryanjames.lunar.library.data.LibrarySnapshot
 import com.ryanjames.lunar.library.model.LibrarySongbook
+import com.ryanjames.lunar.platform.externalScoreDropTarget
 import com.ryanjames.lunar.platform.rememberPlatformRuntime
 import com.ryanjames.lunar.ui.AppSection
-import com.ryanjames.lunar.ui.ComposeScreen
 import com.ryanjames.lunar.ui.FullscreenViewerScreen
 import com.ryanjames.lunar.ui.ImportScreen
 import com.ryanjames.lunar.ui.LibraryScreen
@@ -121,6 +121,10 @@ fun App() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .externalScoreDropTarget(
+                        enabled = runtime.capabilities.fileImportSupported,
+                        onDroppedPaths = appState::importDroppedPaths,
+                    )
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
@@ -156,11 +160,6 @@ fun App() {
                             snapshot = snapshot,
                             appState = appState,
                             viewerKeybindings = appSettings.viewerKeybindings,
-                            modifier = Modifier.padding(innerPadding),
-                        )
-
-                        AppSection.COMPOSE -> ComposeScreen(
-                            appState = appState,
                             modifier = Modifier.padding(innerPadding),
                         )
 
@@ -349,11 +348,6 @@ internal fun BottomNavigationPanel(
                 title = "Library",
                 selected = selectedSection == AppSection.LIBRARY,
                 onClick = { onSelectSection(AppSection.LIBRARY) },
-            )
-            BottomNavItem(
-                title = "Compose",
-                selected = selectedSection == AppSection.COMPOSE,
-                onClick = { onSelectSection(AppSection.COMPOSE) },
             )
             BottomNavItem(
                 title = "Settings",

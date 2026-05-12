@@ -2,6 +2,7 @@ package com.ryanjames.lunar.platform
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
@@ -133,6 +134,11 @@ interface PdfImporter {
     suspend fun importPdfFiles(): ImportRequestResult
 
     suspend fun importPdfFolder(): ImportRequestResult
+
+    suspend fun importDroppedPaths(paths: List<String>): ImportRequestResult = ImportRequestResult(
+        documents = emptyList(),
+        notice = "Drag-and-drop import is unavailable on this target.",
+    )
 }
 
 interface PdfPageRenderer {
@@ -268,6 +274,11 @@ fun rememberUnsupportedPlatformRuntime(
 
 @Composable
 expect fun rememberPlatformRuntime(): PlatformRuntime
+
+expect fun Modifier.externalScoreDropTarget(
+    enabled: Boolean,
+    onDroppedPaths: (List<String>) -> Unit,
+): Modifier
 
 fun formatStorageSize(bytes: Long): String {
     if (bytes <= 0L) return "0 B"
