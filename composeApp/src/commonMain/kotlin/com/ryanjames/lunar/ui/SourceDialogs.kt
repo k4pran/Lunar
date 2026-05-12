@@ -60,6 +60,7 @@ fun AddLocalSourceDialog(
     folderImportSupported: Boolean,
     localImageImportSupported: Boolean,
     lilyPondImportSupported: Boolean,
+    museScoreImportSupported: Boolean,
     onDismiss: () -> Unit,
     onConfirm: (type: LocalSourceType, label: String) -> Unit,
 ) {
@@ -83,6 +84,7 @@ fun AddLocalSourceDialog(
                     text = localImportDialogDescription(
                         localImageImportSupported = localImageImportSupported,
                         lilyPondImportSupported = lilyPondImportSupported,
+                        museScoreImportSupported = museScoreImportSupported,
                     ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -104,6 +106,7 @@ fun AddLocalSourceDialog(
                     subtitle = localFileImportDescription(
                         localImageImportSupported = localImageImportSupported,
                         lilyPondImportSupported = lilyPondImportSupported,
+                        museScoreImportSupported = museScoreImportSupported,
                     ),
                     onSelect = { selectedType = LocalSourceType.FILES },
                 )
@@ -116,6 +119,7 @@ fun AddLocalSourceDialog(
                         folderImportSupported = folderImportSupported,
                         localImageImportSupported = localImageImportSupported,
                         lilyPondImportSupported = lilyPondImportSupported,
+                        museScoreImportSupported = museScoreImportSupported,
                     ),
                     onSelect = {
                         if (folderImportSupported) selectedType = LocalSourceType.FOLDER
@@ -141,46 +145,64 @@ fun AddLocalSourceDialog(
 private fun localImportDialogDescription(
     localImageImportSupported: Boolean,
     lilyPondImportSupported: Boolean,
-): String = when {
-    localImageImportSupported && lilyPondImportSupported ->
-        "Choose how to import local PDFs, LilyPond files, or image files into your library. Matching .json metadata sidecars are imported automatically."
-    lilyPondImportSupported ->
-        "Choose how to import local PDFs or LilyPond files into your library. Matching .json metadata sidecars are imported automatically."
-    localImageImportSupported ->
-        "Choose how to import local PDFs or image files into your library. Matching .json metadata sidecars are imported automatically."
-    else ->
-        "Choose how to import local PDFs into your library. Matching .json metadata sidecars are imported automatically."
+    museScoreImportSupported: Boolean,
+): String {
+    val supportedInputs = localImportInputGroups(
+        localImageImportSupported = localImageImportSupported,
+        lilyPondImportSupported = lilyPondImportSupported,
+        museScoreImportSupported = museScoreImportSupported,
+    )
+    return "Choose how to import local ${supportedInputs.toNaturalList()} into your library. Matching .json metadata sidecars are imported automatically."
 }
 
 private fun localFileImportDescription(
     localImageImportSupported: Boolean,
     lilyPondImportSupported: Boolean,
-): String = when {
-    localImageImportSupported && lilyPondImportSupported ->
-        "Pick PDFs, LY/ILY/LYI LilyPond files, PNGs, JPGs, or JPEGs. Matching .json sidecars are detected automatically."
-    lilyPondImportSupported ->
-        "Pick PDFs or LY/ILY/LYI LilyPond files. Matching .json sidecars are detected automatically."
-    localImageImportSupported ->
-        "Pick PDFs, PNGs, JPGs, or JPEGs. Matching .json sidecars are detected automatically."
-    else ->
-        "Pick one or more PDF files. Matching .json sidecars are detected automatically."
+    museScoreImportSupported: Boolean,
+): String {
+    val supportedExtensions = buildList {
+        add("PDFs")
+        if (lilyPondImportSupported) add("LY/ILY/LYI LilyPond files")
+        if (museScoreImportSupported) add("MSCZ/MSCX MuseScore files")
+        if (localImageImportSupported) add("PNG/JPG/JPEG images")
+    }
+    return "Pick ${supportedExtensions.toNaturalList()}. Matching .json sidecars are detected automatically."
 }
 
 private fun localFolderImportDescription(
     folderImportSupported: Boolean,
     localImageImportSupported: Boolean,
     lilyPondImportSupported: Boolean,
+    museScoreImportSupported: Boolean,
 ): String = when {
     !folderImportSupported ->
         "Folder import not supported on this platform"
-    localImageImportSupported && lilyPondImportSupported ->
-        "Scan a folder for PDFs, LilyPond files, image files, and matching .json metadata"
-    lilyPondImportSupported ->
-        "Scan a folder for PDFs, LilyPond files, and matching .json metadata"
-    localImageImportSupported ->
-        "Scan a folder for PDFs, image files, and matching .json metadata"
-    else ->
-        "Scan a folder for PDFs and matching .json metadata"
+    else -> {
+        val supportedInputs = localImportInputGroups(
+            localImageImportSupported = localImageImportSupported,
+            lilyPondImportSupported = lilyPondImportSupported,
+            museScoreImportSupported = museScoreImportSupported,
+        ) + "matching .json metadata"
+        "Scan a folder for ${supportedInputs.toNaturalList(finalSeparator = "and")}"
+    }
+}
+
+private fun localImportInputGroups(
+    localImageImportSupported: Boolean,
+    lilyPondImportSupported: Boolean,
+    museScoreImportSupported: Boolean,
+): List<String> = buildList {
+    add("PDFs")
+    if (lilyPondImportSupported) add("LilyPond files")
+    if (museScoreImportSupported) add("MuseScore files")
+    if (localImageImportSupported) add("image files")
+}
+
+private fun List<String>.toNaturalList(finalSeparator: String = "or"): String = when (size) {
+    0 -> ""
+    1 -> single()
+    2 -> joinToString(" $finalSeparator ")
+    else -> dropLast(1).joinToString(", ") + ", $finalSeparator " + last()
 }
 
 @Composable

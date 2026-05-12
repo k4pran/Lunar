@@ -44,6 +44,7 @@ data class PlatformCapabilities(
     val folderImportSupported: Boolean = false,
     val localImageImportSupported: Boolean = false,
     val lilyPondImportSupported: Boolean = false,
+    val museScoreImportSupported: Boolean = false,
     val permissionTrackingSupported: Boolean = false,
     val inAppViewingSupported: Boolean = true,
     val scoreDownloadSupported: Boolean = false,

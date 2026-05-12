@@ -234,6 +234,7 @@ class ScreenSmokeTest {
                     cachedPdfBytes = 2_048L,
                 ),
                 lilyPondImportSupported = true,
+                museScoreImportSupported = true,
             )
             val appState = createTestLunarAppState(
                 scope = backgroundScope(),
@@ -257,8 +258,8 @@ class ScreenSmokeTest {
             rule.onNodeWithText("Add local source").assertIsDisplayed()
             rule.onNodeWithText("Add cloud source").assertIsDisplayed()
             rule.onNodeWithText("Add local source").performClick()
-            rule.onNodeWithText("Choose how to import local PDFs, LilyPond files, or image files into your library. Matching .json metadata sidecars are imported automatically.").assertIsDisplayed()
-            rule.onNodeWithText("Pick PDFs, LY/ILY/LYI LilyPond files, PNGs, JPGs, or JPEGs. Matching .json sidecars are detected automatically.").assertIsDisplayed()
+            rule.onNodeWithText("Choose how to import local PDFs, LilyPond files, MuseScore files, or image files into your library. Matching .json metadata sidecars are imported automatically.").assertIsDisplayed()
+            rule.onNodeWithText("Pick PDFs, LY/ILY/LYI LilyPond files, MSCZ/MSCX MuseScore files, or PNG/JPG/JPEG images. Matching .json sidecars are detected automatically.").assertIsDisplayed()
             rule.onNodeWithText("Cancel").performClick()
             rule.waitUntil(timeoutMillis = 5_000) {
                 rule.onAllNodesWithText("On-device cache").fetchSemanticsNodes().isNotEmpty()

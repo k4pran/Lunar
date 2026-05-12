@@ -154,6 +154,41 @@ class DesktopScoreImportTest {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun importDesktopScoreFileConvertsMuseScoreIntoManagedPdf() {
+        val root = Files.createTempDirectory("lunar-desktop-import-musescore-test").toFile()
+        try {
+            val scoresDirectory = File(root, "scores").apply { mkdirs() }
+            val sourceFile = File(root, "blue_bossa.mscz").apply {
+                writeBytes(byteArrayOf(0x50, 0x4B, 0x03, 0x04))
+            }
+
+            val descriptor = importDesktopScoreFile(
+                file = sourceFile,
+                scoresDirectory = scoresDirectory,
+                museScoreConverter = DesktopMuseScoreConverter { _, destination ->
+                    writeTestPdf(destination)
+                },
+            )
+
+            assertNotNull(descriptor)
+            assertEquals("blue_bossa.mscz", descriptor.originalFileName)
+            assertEquals("blue_bossa", descriptor.suggestedTitle)
+            assertEquals(1, descriptor.pageCount)
+            assertEquals(sourceFile.sha256(), descriptor.contentFingerprint)
+            assertTrue(descriptor.storedPath.endsWith(".pdf"))
+
+            val generatedPdf = File(descriptor.storedPath)
+            assertTrue(generatedPdf.exists())
+
+            Loader.loadPDF(generatedPdf).use { document ->
+                assertEquals(1, document.numberOfPages)
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }
 
 private fun writeTestImage(

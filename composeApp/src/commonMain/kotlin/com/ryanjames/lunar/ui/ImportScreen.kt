@@ -501,6 +501,7 @@ fun ImportScreen(
             folderImportSupported = runtime.capabilities.folderImportSupported,
             localImageImportSupported = runtime.capabilities.localImageImportSupported,
             lilyPondImportSupported = runtime.capabilities.lilyPondImportSupported,
+            museScoreImportSupported = runtime.capabilities.museScoreImportSupported,
             onDismiss = { showLocalDialog = false },
             onConfirm = { type, label ->
                 showLocalDialog = false

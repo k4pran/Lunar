@@ -152,6 +152,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
                 folderImportSupported = true,
                 localImageImportSupported = true,
                 lilyPondImportSupported = true,
+                museScoreImportSupported = true,
                 permissionTrackingSupported = false,
                 inAppViewingSupported = true,
                 scoreDownloadSupported = true,
@@ -177,10 +178,11 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
 private class DesktopPdfImporter(
     private val scoresDirectory: File,
     private val lilyPondCompiler: DesktopLilyPondCompiler = SystemDesktopLilyPondCompiler,
+    private val museScoreConverter: DesktopMuseScoreConverter = SystemDesktopMuseScoreConverter,
 ) : PdfImporter {
     private val importerState = MutableStateFlow(
         ImporterState(
-            statusMessage = "Desktop imports use the local file system directly. PDFs, LilyPond files, and images are converted into managed PDFs for viewing, so no persisted SAF permissions are needed.",
+            statusMessage = "Desktop imports use the local file system directly. PDFs, LilyPond files, MuseScore files, and images are converted into managed PDFs for viewing, so no persisted SAF permissions are needed.",
         )
     )
 
@@ -197,13 +199,14 @@ private class DesktopPdfImporter(
                 files = files,
                 scoresDirectory = scoresDirectory,
                 lilyPondCompiler = lilyPondCompiler,
+                museScoreConverter = museScoreConverter,
             )
         }
 
         return ImportRequestResult(
             documents = documents,
             notice = if (documents.isEmpty()) {
-                "No readable PDF, LilyPond, or image files were imported from the selected files."
+                "No readable PDF, LilyPond, MuseScore, or image files were imported from the selected files."
             } else {
                 null
             },
@@ -221,13 +224,14 @@ private class DesktopPdfImporter(
                     .toList(),
                 scoresDirectory = scoresDirectory,
                 lilyPondCompiler = lilyPondCompiler,
+                museScoreConverter = museScoreConverter,
             )
         }
 
         return ImportRequestResult(
             documents = documents,
             notice = when {
-                documents.isEmpty() -> "No PDF, LilyPond, or image files were found in the selected folder."
+                documents.isEmpty() -> "No PDF, LilyPond, MuseScore, or image files were found in the selected folder."
                 else -> null
             },
         )
@@ -268,6 +272,7 @@ internal fun importDesktopScoreFile(
     scoresDirectory: File,
     scoreMetadata: ScoreMetadata? = null,
     lilyPondCompiler: DesktopLilyPondCompiler = SystemDesktopLilyPondCompiler,
+    museScoreConverter: DesktopMuseScoreConverter = SystemDesktopMuseScoreConverter,
 ): ImportedPdfDescriptor? {
     if (!isSupportedDesktopScoreFile(file)) {
         return null
@@ -297,6 +302,12 @@ internal fun importDesktopScoreFile(
                 ?: throw IllegalStateException("LilyPond rendered ${file.name}, but Lunar could not read the generated PDF.")
         }
 
+        normalizedExtension in DesktopSupportedMuseScoreExtensions -> {
+            museScoreConverter.renderToPdf(source = file, destination = destination)
+            loadPdfPageCount(destination)
+                ?: throw IllegalStateException("MuseScore converted ${file.name}, but Lunar could not read the generated PDF.")
+        }
+
         else -> return null
     }
 
@@ -306,6 +317,7 @@ internal fun importDesktopScoreFile(
             normalizedExtension == "pdf" -> file.name
             normalizedExtension in DesktopSupportedImageExtensions -> safeExportFileName(file.name)
             normalizedExtension in DesktopSupportedLilyPondExtensions -> file.name
+            normalizedExtension in DesktopSupportedMuseScoreExtensions -> file.name
             else -> safeExportFileName(file.name)
         },
         sourceUri = file.toURI().toString(),
@@ -320,6 +332,7 @@ internal fun importDesktopScoreFiles(
     files: List<File>,
     scoresDirectory: File,
     lilyPondCompiler: DesktopLilyPondCompiler = SystemDesktopLilyPondCompiler,
+    museScoreConverter: DesktopMuseScoreConverter = SystemDesktopMuseScoreConverter,
 ): List<ImportedPdfDescriptor> {
     val scoreFiles = files.filter(::isSupportedDesktopScoreFile)
     if (scoreFiles.isEmpty()) {
@@ -333,6 +346,7 @@ internal fun importDesktopScoreFiles(
             scoresDirectory = scoresDirectory,
             scoreMetadata = metadataByScoreFile[file],
             lilyPondCompiler = lilyPondCompiler,
+            museScoreConverter = museScoreConverter,
         )
     }
 }
@@ -393,6 +407,86 @@ internal object SystemDesktopLilyPondCompiler : DesktopLilyPondCompiler {
         }
     }
 }
+
+internal fun interface DesktopMuseScoreConverter {
+    fun renderToPdf(source: File, destination: File)
+}
+
+internal object SystemDesktopMuseScoreConverter : DesktopMuseScoreConverter {
+    override fun renderToPdf(source: File, destination: File) {
+        val temporaryDirectory = Files.createTempDirectory(
+            destination.parentFile.toPath(),
+            "musescore-render-",
+        ).toFile()
+
+        try {
+            val renderedPdf = File(temporaryDirectory, destination.name)
+            val results = museScoreCommandCandidates().map { command ->
+                runMuseScoreCommand(
+                    command = command,
+                    source = source,
+                    renderedPdf = renderedPdf,
+                )
+            }
+            if (results.none { it.succeeded && renderedPdf.exists() }) {
+                val detail = results
+                    .firstOrNull { it.detail.isNotBlank() }
+                    ?.detail
+                throw IllegalStateException(
+                    detail?.let { "MuseScore could not convert ${source.name}. $it" }
+                        ?: "MuseScore imports require the `musescore`, `mscore`, `MuseScore4`, or `MuseScore3` command to be installed and available on PATH.",
+                )
+            }
+
+            renderedPdf.copyTo(destination, overwrite = true)
+        } finally {
+            temporaryDirectory.deleteRecursively()
+        }
+    }
+
+    private fun runMuseScoreCommand(
+        command: String,
+        source: File,
+        renderedPdf: File,
+    ): MuseScoreCommandResult {
+        if (isAbsoluteMuseScorePath(command) && !File(command).exists()) {
+            return MuseScoreCommandResult(succeeded = false)
+        }
+
+        return try {
+            if (renderedPdf.exists()) {
+                renderedPdf.delete()
+            }
+            val process = ProcessBuilder(
+                listOf(
+                    command,
+                    "-o",
+                    renderedPdf.absolutePath,
+                    source.absolutePath,
+                )
+            )
+                .directory(source.parentFile ?: source.absoluteFile.parentFile ?: File("."))
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            val exitCode = process.waitFor()
+            MuseScoreCommandResult(
+                succeeded = exitCode == 0,
+                detail = summarizeMuseScoreOutput(output),
+            )
+        } catch (error: IOException) {
+            MuseScoreCommandResult(
+                succeeded = false,
+                detail = if (isAbsoluteMuseScorePath(command)) error.message.orEmpty() else "",
+            )
+        }
+    }
+}
+
+private data class MuseScoreCommandResult(
+    val succeeded: Boolean,
+    val detail: String = "",
+)
 
 private fun resolveDesktopMetadataSidecars(
     scoreFiles: List<File>,
@@ -814,6 +908,53 @@ private fun summarizeLilyPondOutput(output: String): String? {
     return lines.joinToString(" ").takeIf(String::isNotBlank)
 }
 
+private fun summarizeMuseScoreOutput(output: String): String =
+    output.lines()
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+        .takeLast(4)
+        .joinToString(" ")
+        .trim()
+
+private fun museScoreCommandCandidates(): List<String> = buildList {
+    sequenceOf(
+        "LUNAR_MUSESCORE_COMMAND",
+        "MUSESCORE_COMMAND",
+        "MUSESCORE_PATH",
+    )
+        .mapNotNull { name -> System.getenv(name)?.trim()?.trim('"')?.takeIf(String::isNotBlank) }
+        .forEach(::add)
+
+    add("musescore")
+    add("mscore")
+    add("MuseScore4")
+    add("MuseScore3")
+    add("MuseScore4.exe")
+    add("MuseScore3.exe")
+
+    commonMuseScoreInstallPaths().forEach(::add)
+}.distinct()
+
+private fun commonMuseScoreInstallPaths(): List<String> {
+    val programFiles = listOfNotNull(
+        System.getenv("ProgramFiles"),
+        System.getenv("ProgramFiles(x86)"),
+        System.getenv("LOCALAPPDATA")?.let { "$it\\Programs" },
+    ).distinct()
+
+    return programFiles.flatMap { root ->
+        listOf(
+            "$root\\MuseScore 4\\bin\\MuseScore4.exe",
+            "$root\\MuseScore 3\\bin\\MuseScore3.exe",
+            "$root\\MuseScore 4\\MuseScore4.exe",
+            "$root\\MuseScore 3\\MuseScore3.exe",
+        )
+    }
+}
+
+private fun isAbsoluteMuseScorePath(command: String): Boolean =
+    File(command).isAbsolute || Regex("^[A-Za-z]:[\\\\/].+").matches(command)
+
 private fun fingerprintFile(file: File): String {
     val digest = MessageDigest.getInstance("SHA-256")
     file.inputStream().use { input ->
@@ -929,10 +1070,11 @@ private fun safeExportFileName(fileName: String): String {
 private const val COPY_BUFFER_SIZE_BYTES = 8_192
 private val DesktopSupportedImageExtensions = setOf("png", "jpg", "jpeg")
 private val DesktopSupportedLilyPondExtensions = setOf("ly", "ily", "lyi")
+private val DesktopSupportedMuseScoreExtensions = setOf("mscz", "mscx")
 private val DesktopSupportedScoreExtensions =
-    setOf("pdf") + DesktopSupportedImageExtensions + DesktopSupportedLilyPondExtensions
+    setOf("pdf") + DesktopSupportedImageExtensions + DesktopSupportedLilyPondExtensions + DesktopSupportedMuseScoreExtensions
 private val DesktopChooserScoreExtensions =
-    listOf("pdf", "ly", "ily", "lyi", "png", "jpg", "jpeg")
+    listOf("pdf", "ly", "ily", "lyi", "mscz", "mscx", "png", "jpg", "jpeg")
 private val desktopScoreMetadataJson = Json { ignoreUnknownKeys = true }
 
 private fun ByteArray.toHexString(): String = joinToString(separator = "") { byte ->
