@@ -1057,6 +1057,12 @@ private fun normalizeTags(tags: List<String>): List<String> = tags
     .distinctBy(String::lowercase)
     .sortedWith(String.CASE_INSENSITIVE_ORDER)
 
+private fun sourceFileTypeFromName(fileName: String): String = fileName
+    .substringAfterLast('.', missingDelimiterValue = "pdf")
+    .trim()
+    .lowercase()
+    .ifEmpty { "pdf" }
+
 private fun defaultScoreMetadata(
     itemId: String,
     title: String,
@@ -1082,7 +1088,7 @@ private fun defaultScoreMetadata(
             tags = normalizeMetadataStringList(tags),
             source = ScoreMetadataSource(
                 filename = originalFileName,
-                fileType = "pdf",
+                fileType = sourceFileTypeFromName(originalFileName),
                 url = sourceUri.orEmpty(),
             ),
         ),

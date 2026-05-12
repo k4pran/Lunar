@@ -36,6 +36,8 @@ import org.apache.pdfbox.rendering.PDFRenderer
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
+import java.nio.file.Files
 import java.security.MessageDigest
 import javax.imageio.ImageIO
 import javax.swing.JFileChooser
@@ -149,6 +151,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
                 fileImportSupported = true,
                 folderImportSupported = true,
                 localImageImportSupported = true,
+                lilyPondImportSupported = true,
                 permissionTrackingSupported = false,
                 inAppViewingSupported = true,
                 scoreDownloadSupported = true,
@@ -173,10 +176,11 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
 
 private class DesktopPdfImporter(
     private val scoresDirectory: File,
+    private val lilyPondCompiler: DesktopLilyPondCompiler = SystemDesktopLilyPondCompiler,
 ) : PdfImporter {
     private val importerState = MutableStateFlow(
         ImporterState(
-            statusMessage = "Desktop imports use the local file system directly, so no persisted SAF permissions are needed.",
+            statusMessage = "Desktop imports use the local file system directly. PDFs, LilyPond files, and images are converted into managed PDFs for viewing, so no persisted SAF permissions are needed.",
         )
     )
 
@@ -189,13 +193,17 @@ private class DesktopPdfImporter(
         }
 
         val documents = withContext(Dispatchers.IO) {
-            importDesktopScoreFiles(files = files, scoresDirectory = scoresDirectory)
+            importDesktopScoreFiles(
+                files = files,
+                scoresDirectory = scoresDirectory,
+                lilyPondCompiler = lilyPondCompiler,
+            )
         }
 
         return ImportRequestResult(
             documents = documents,
             notice = if (documents.isEmpty()) {
-                "No readable PDF or image files were imported from the selected files."
+                "No readable PDF, LilyPond, or image files were imported from the selected files."
             } else {
                 null
             },
@@ -212,13 +220,14 @@ private class DesktopPdfImporter(
                     .filter(::isSupportedDesktopImportFile)
                     .toList(),
                 scoresDirectory = scoresDirectory,
+                lilyPondCompiler = lilyPondCompiler,
             )
         }
 
         return ImportRequestResult(
             documents = documents,
             notice = when {
-                documents.isEmpty() -> "No PDF or image files were found in the selected folder."
+                documents.isEmpty() -> "No PDF, LilyPond, or image files were found in the selected folder."
                 else -> null
             },
         )
@@ -229,7 +238,7 @@ private class DesktopPdfImporter(
             dialogTitle = "Import sheet music files"
             isMultiSelectionEnabled = true
             fileSelectionMode = JFileChooser.FILES_ONLY
-            fileFilter = FileNameExtensionFilter("Score files", "pdf", "png", "jpg", "jpeg")
+            fileFilter = FileNameExtensionFilter("Score files", *DesktopChooserScoreExtensions.toTypedArray())
         }
 
         return if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
@@ -258,6 +267,7 @@ internal fun importDesktopScoreFile(
     file: File,
     scoresDirectory: File,
     scoreMetadata: ScoreMetadata? = null,
+    lilyPondCompiler: DesktopLilyPondCompiler = SystemDesktopLilyPondCompiler,
 ): ImportedPdfDescriptor? {
     if (!isSupportedDesktopScoreFile(file)) {
         return null
@@ -268,21 +278,35 @@ internal fun importDesktopScoreFile(
         baseName = file.name,
     )
     val contentFingerprint = fingerprintFile(file)
+    val normalizedExtension = file.extension.lowercase()
 
-    val pageCount = if (file.extension.equals("pdf", ignoreCase = true)) {
-        copyFileToManagedPdf(source = file, destination = destination)
-        loadPdfPageCount(destination)
-    } else {
-        writeImageFileToManagedPdf(source = file, destination = destination) ?: return null
-        1
+    val pageCount = when {
+        normalizedExtension == "pdf" -> {
+            copyFileToManagedPdf(source = file, destination = destination)
+            loadPdfPageCount(destination)
+        }
+
+        normalizedExtension in DesktopSupportedImageExtensions -> {
+            writeImageFileToManagedPdf(source = file, destination = destination) ?: return null
+            1
+        }
+
+        normalizedExtension in DesktopSupportedLilyPondExtensions -> {
+            lilyPondCompiler.renderToPdf(source = file, destination = destination)
+            loadPdfPageCount(destination)
+                ?: throw IllegalStateException("LilyPond rendered ${file.name}, but Lunar could not read the generated PDF.")
+        }
+
+        else -> return null
     }
 
     return ImportedPdfDescriptor(
         storedPath = destination.absolutePath,
-        originalFileName = if (file.extension.equals("pdf", ignoreCase = true)) {
-            file.name
-        } else {
-            safeExportFileName(file.name)
+        originalFileName = when {
+            normalizedExtension == "pdf" -> file.name
+            normalizedExtension in DesktopSupportedImageExtensions -> safeExportFileName(file.name)
+            normalizedExtension in DesktopSupportedLilyPondExtensions -> file.name
+            else -> safeExportFileName(file.name)
         },
         sourceUri = file.toURI().toString(),
         contentFingerprint = contentFingerprint,
@@ -295,6 +319,7 @@ internal fun importDesktopScoreFile(
 internal fun importDesktopScoreFiles(
     files: List<File>,
     scoresDirectory: File,
+    lilyPondCompiler: DesktopLilyPondCompiler = SystemDesktopLilyPondCompiler,
 ): List<ImportedPdfDescriptor> {
     val scoreFiles = files.filter(::isSupportedDesktopScoreFile)
     if (scoreFiles.isEmpty()) {
@@ -307,7 +332,65 @@ internal fun importDesktopScoreFiles(
             file = file,
             scoresDirectory = scoresDirectory,
             scoreMetadata = metadataByScoreFile[file],
+            lilyPondCompiler = lilyPondCompiler,
         )
+    }
+}
+
+internal fun interface DesktopLilyPondCompiler {
+    fun renderToPdf(source: File, destination: File)
+}
+
+internal object SystemDesktopLilyPondCompiler : DesktopLilyPondCompiler {
+    override fun renderToPdf(source: File, destination: File) {
+        val workingDirectory = source.parentFile ?: source.absoluteFile.parentFile ?: File(".")
+        val temporaryDirectory = Files.createTempDirectory(
+            destination.parentFile.toPath(),
+            "lilypond-render-",
+        ).toFile()
+
+        try {
+            val outputBase = File(temporaryDirectory, destination.nameWithoutExtension)
+            val process = try {
+                ProcessBuilder(
+                    listOf(
+                        "lilypond",
+                        "--pdf",
+                        "-dno-point-and-click",
+                        "--output",
+                        outputBase.absolutePath,
+                        source.name,
+                    )
+                )
+                    .directory(workingDirectory)
+                    .redirectErrorStream(true)
+                    .start()
+            } catch (error: IOException) {
+                throw IllegalStateException(
+                    "LilyPond imports require the `lilypond` command to be installed and available on PATH.",
+                    error,
+                )
+            }
+
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            val exitCode = process.waitFor()
+            val renderedPdf = File("${outputBase.absolutePath}.pdf")
+            if (exitCode != 0 || !renderedPdf.exists()) {
+                val detail = summarizeLilyPondOutput(output)
+                val baseMessage = if (exitCode != 0) {
+                    "LilyPond could not render ${source.name}."
+                } else {
+                    "LilyPond did not produce a PDF for ${source.name}."
+                }
+                throw IllegalStateException(
+                    detail?.let { "$baseMessage $it" } ?: baseMessage
+                )
+            }
+
+            renderedPdf.copyTo(destination, overwrite = true)
+        } finally {
+            temporaryDirectory.deleteRecursively()
+        }
     }
 }
 
@@ -723,6 +806,14 @@ private fun writeImageFileToManagedPdf(
     }
 }
 
+private fun summarizeLilyPondOutput(output: String): String? {
+    val lines = output.lines()
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+        .takeLast(4)
+    return lines.joinToString(" ").takeIf(String::isNotBlank)
+}
+
 private fun fingerprintFile(file: File): String {
     val digest = MessageDigest.getInstance("SHA-256")
     file.inputStream().use { input ->
@@ -836,7 +927,12 @@ private fun safeExportFileName(fileName: String): String {
 }
 
 private const val COPY_BUFFER_SIZE_BYTES = 8_192
-private val DesktopSupportedScoreExtensions = setOf("pdf", "png", "jpg", "jpeg")
+private val DesktopSupportedImageExtensions = setOf("png", "jpg", "jpeg")
+private val DesktopSupportedLilyPondExtensions = setOf("ly", "ily", "lyi")
+private val DesktopSupportedScoreExtensions =
+    setOf("pdf") + DesktopSupportedImageExtensions + DesktopSupportedLilyPondExtensions
+private val DesktopChooserScoreExtensions =
+    listOf("pdf", "ly", "ily", "lyi", "png", "jpg", "jpeg")
 private val desktopScoreMetadataJson = Json { ignoreUnknownKeys = true }
 
 private fun ByteArray.toHexString(): String = joinToString(separator = "") { byte ->

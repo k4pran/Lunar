@@ -108,6 +108,27 @@ class SharedCommonTest {
     }
 
     @Test
+    fun repositoryInfersSourceFileTypeFromImportedFileName() = runBlocking {
+        val repository = DefaultSheetMusicRepository(
+            storage = InMemoryLibraryStorage(),
+            scoreMetadataStorage = InMemoryScoreMetadataStorage(),
+        )
+
+        repository.initialize()
+        val importedItem = repository.importDocuments(
+            listOf(
+                ImportedPdfDescriptor(
+                    storedPath = "/scores/moon_river.pdf",
+                    originalFileName = "Moon River.ly",
+                    pageCount = 1,
+                )
+            )
+        ).importedItems.single()
+
+        assertEquals("ly", repository.getScoreMetadata(importedItem.id)?.source?.fileType)
+    }
+
+    @Test
     fun libraryQueryFiltersAndSortsAcrossMetadata() {
         val items = listOf(
             testItem(

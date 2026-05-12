@@ -42,6 +42,7 @@ internal suspend fun createTestPlatformRuntime(
     pdfExporter: PdfDocumentExporter = UnsupportedPdfDocumentExporter,
     scoreDownloadSupported: Boolean = false,
     localImageImportSupported: Boolean = false,
+    lilyPondImportSupported: Boolean = false,
     songbookBuilder: SongbookPdfBuilder = UnsupportedSongbookPdfBuilder,
     coverImagePicker: CoverImagePicker = UnsupportedCoverImagePicker,
     songbookCreationSupported: Boolean = false,
@@ -67,6 +68,7 @@ internal suspend fun createTestPlatformRuntime(
         capabilities = PlatformCapabilities(
             scoreDownloadSupported = scoreDownloadSupported,
             localImageImportSupported = localImageImportSupported,
+            lilyPondImportSupported = lilyPondImportSupported,
             songbookCreationSupported = songbookCreationSupported,
             songbookCoverImageSupported = songbookCoverImageSupported,
         ),

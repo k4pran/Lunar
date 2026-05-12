@@ -1,6 +1,8 @@
 package com.ryanjames.lunar.platform
 
 import org.apache.pdfbox.Loader
+import org.apache.pdfbox.pdmodel.PDDocument
+import org.apache.pdfbox.pdmodel.PDPage
 import org.junit.Test
 import java.awt.Color
 import java.awt.image.BufferedImage
@@ -112,6 +114,46 @@ class DesktopScoreImportTest {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun importDesktopScoreFileRendersLilyPondIntoManagedPdf() {
+        val root = Files.createTempDirectory("lunar-desktop-import-lilypond-test").toFile()
+        try {
+            val scoresDirectory = File(root, "scores").apply { mkdirs() }
+            val sourceFile = File(root, "moon_river.ly").apply {
+                writeText(
+                    """
+                    \version "2.24.0"
+                    { c'4 d' e' f' }
+                    """.trimIndent()
+                )
+            }
+
+            val descriptor = importDesktopScoreFile(
+                file = sourceFile,
+                scoresDirectory = scoresDirectory,
+                lilyPondCompiler = DesktopLilyPondCompiler { _, destination ->
+                    writeTestPdf(destination)
+                },
+            )
+
+            assertNotNull(descriptor)
+            assertEquals("moon_river.ly", descriptor.originalFileName)
+            assertEquals("moon_river", descriptor.suggestedTitle)
+            assertEquals(1, descriptor.pageCount)
+            assertEquals(sourceFile.sha256(), descriptor.contentFingerprint)
+            assertTrue(descriptor.storedPath.endsWith(".pdf"))
+
+            val generatedPdf = File(descriptor.storedPath)
+            assertTrue(generatedPdf.exists())
+
+            Loader.loadPDF(generatedPdf).use { document ->
+                assertEquals(1, document.numberOfPages)
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }
 
 private fun writeTestImage(
@@ -132,6 +174,13 @@ private fun writeTestImage(
         graphics.dispose()
     }
     ImageIO.write(image, "png", destination)
+}
+
+private fun writeTestPdf(destination: File) {
+    PDDocument().use { document ->
+        document.addPage(PDPage())
+        document.save(destination)
+    }
 }
 
 private fun File.sha256(): String = MessageDigest
