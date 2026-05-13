@@ -4,12 +4,17 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
+import com.ryanjames.lunar.library.model.PdfDocumentReference
+import com.ryanjames.lunar.platform.LilyPondLiveRenderResult
+import com.ryanjames.lunar.platform.LilyPondLiveRenderer
+import com.ryanjames.lunar.platform.LilyPondSourceSnapshot
 import com.ryanjames.lunar.platform.PdfDocumentInfo
 import com.ryanjames.lunar.platform.PdfPageRenderer
 import com.ryanjames.lunar.platform.RenderedPdfPage
@@ -22,6 +27,7 @@ import org.junit.Rule
 import org.junit.Test
 import kotlinx.coroutines.runBlocking
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
 class ViewerShortcutTest {
@@ -142,6 +148,49 @@ class ViewerShortcutTest {
         rule.onNodeWithText("★").assertIsDisplayed()
         rule.onNodeWithContentDescription("Remove Moon River from favorites").assertIsDisplayed()
     }
+
+    @Test
+    fun viewerScreenUsesLiveLilyPondPreviewForLilyPondDocuments() {
+        val pdfRenderer = RecordingShortcutPdfPageRenderer()
+        val lilyPondRenderer = ShortcutTestLilyPondLiveRenderer()
+        val runtime = runBlocking {
+            createTestPlatformRuntime(
+                renderer = pdfRenderer,
+                lilyPondLiveRenderer = lilyPondRenderer,
+                lilyPondLiveViewingSupported = true,
+            )
+        }
+        val documentState = ViewerDocumentState(
+            id = "moon_river",
+            title = "Moon River",
+            document = testSheetMusicItem(id = "moon_river", title = "Moon River").document.copy(
+                originalFileName = "moon_river.ly",
+                sourceUri = "file:///scores/moon_river.ly",
+            ),
+            pageCount = 6,
+        )
+
+        rule.setContent {
+            LunarTheme(theme = AppColorTheme.OCEAN) {
+                ViewerScreen(
+                    runtime = runtime,
+                    documentState = documentState,
+                    onBack = {},
+                    onPageChanged = { _ -> },
+                    onPageCountResolved = { _ -> },
+                )
+            }
+        }
+
+        rule.waitUntil(timeoutMillis = 5_000) {
+            rule.onAllNodesWithText("Live LilyPond").fetchSemanticsNodes().isNotEmpty()
+        }
+        rule.onNodeWithText("Live LilyPond").assertIsDisplayed()
+        rule.runOnIdle {
+            assertTrue(lilyPondRenderer.renderedRevisions.contains("moon-river-v1"))
+            assertTrue(pdfRenderer.inspectedPaths.contains("/live/moon_river.pdf"))
+        }
+    }
 }
 
 private fun createShortcutTestRuntime() = runBlocking {
@@ -158,4 +207,39 @@ private class ShortcutTestPdfPageRenderer : PdfPageRenderer {
         pageIndex: Int,
         targetWidth: Int,
     ): RenderedPdfPage? = null
+}
+
+private class RecordingShortcutPdfPageRenderer : PdfPageRenderer {
+    val inspectedPaths = mutableListOf<String>()
+
+    override suspend fun inspect(documentPath: String): PdfDocumentInfo {
+        inspectedPaths += documentPath
+        return PdfDocumentInfo(pageCount = 6)
+    }
+
+    override suspend fun renderPage(
+        documentPath: String,
+        pageIndex: Int,
+        targetWidth: Int,
+    ): RenderedPdfPage? = null
+}
+
+private class ShortcutTestLilyPondLiveRenderer : LilyPondLiveRenderer {
+    val renderedRevisions = mutableListOf<String>()
+
+    override suspend fun loadSource(document: PdfDocumentReference): LilyPondSourceSnapshot =
+        LilyPondSourceSnapshot(
+            sourceText = "\\version \"2.24.0\"\n{ c'4 d' e' f' }",
+            revision = "moon-river-v1",
+            displayName = "moon_river.ly",
+            sourcePath = "/scores/moon_river.ly",
+        )
+
+    override suspend fun renderSource(source: LilyPondSourceSnapshot): LilyPondLiveRenderResult {
+        renderedRevisions += source.revision
+        return LilyPondLiveRenderResult(
+            documentPath = "/live/moon_river.pdf",
+            pageCount = 6,
+        )
+    }
 }

@@ -3,6 +3,7 @@ package com.ryanjames.lunar.platform
 import org.apache.pdfbox.Loader
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
+import com.ryanjames.lunar.library.model.PdfDocumentReference
 import org.junit.Test
 import java.awt.Color
 import java.awt.image.BufferedImage
@@ -10,6 +11,7 @@ import java.io.File
 import java.nio.file.Files
 import java.security.MessageDigest
 import javax.imageio.ImageIO
+import kotlinx.coroutines.runBlocking
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -32,6 +34,7 @@ class DesktopScoreImportTest {
             assertNotNull(descriptor)
             assertEquals("moon_river.pdf", descriptor.originalFileName)
             assertEquals("moon_river", descriptor.suggestedTitle)
+            assertEquals(sourceFile.toURI().toString(), descriptor.sourceUri)
             assertEquals(1, descriptor.pageCount)
             assertEquals(sourceFile.sha256(), descriptor.contentFingerprint)
             assertTrue(descriptor.storedPath.endsWith(".pdf"))
@@ -224,6 +227,57 @@ class DesktopScoreImportTest {
             Loader.loadPDF(generatedPdf).use { document ->
                 assertEquals(1, document.numberOfPages)
             }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun liveLilyPondRendererLoadsSourceAndRendersPreviewPdf() = runBlocking {
+        val root = Files.createTempDirectory("lunar-live-lilypond-test").toFile()
+        try {
+            val previewDirectory = File(root, "preview").apply { mkdirs() }
+            val sourceFile = File(root, "moon_river.ly").apply {
+                writeText(
+                    """
+                    \version "2.24.0"
+                    { c'4 d' e' f' }
+                    """.trimIndent()
+                )
+            }
+            val renderedSources = mutableListOf<File>()
+            val liveRenderer = DesktopLilyPondLiveRenderer(
+                previewDirectory = previewDirectory,
+                lilyPondCompiler = DesktopLilyPondCompiler { source, destination ->
+                    renderedSources += source
+                    writeTestPdf(destination)
+                },
+            )
+            val document = PdfDocumentReference(
+                storedPath = File(root, "managed.pdf").absolutePath,
+                originalFileName = sourceFile.name,
+                sourceUri = sourceFile.toURI().toString(),
+            )
+
+            val source = liveRenderer.loadSource(document)
+            assertNotNull(source)
+
+            val result = liveRenderer.renderSource(source)
+
+            assertEquals(sourceFile.canonicalFile, renderedSources.single().canonicalFile)
+            assertEquals(1, result.pageCount)
+            assertTrue(File(result.documentPath).exists())
+
+            val firstRevision = source.revision
+            sourceFile.writeText(
+                """
+                \version "2.24.0"
+                { g'4 a' b' c'' }
+                """.trimIndent()
+            )
+            val updatedSource = liveRenderer.loadSource(document)
+            assertNotNull(updatedSource)
+            assertTrue(updatedSource.revision != firstRevision)
         } finally {
             root.deleteRecursively()
         }

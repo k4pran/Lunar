@@ -12,6 +12,7 @@ import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.platform.CoverImagePicker
 import com.ryanjames.lunar.platform.LibraryCacheInspector
 import com.ryanjames.lunar.platform.LibraryCacheSnapshot
+import com.ryanjames.lunar.platform.LilyPondLiveRenderer
 import com.ryanjames.lunar.platform.PlatformCapabilities
 import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.PdfDocumentExporter
@@ -21,6 +22,7 @@ import com.ryanjames.lunar.platform.SongbookBuildResult
 import com.ryanjames.lunar.platform.SongbookPdfBuilder
 import com.ryanjames.lunar.platform.UnavailablePdfPageRenderer
 import com.ryanjames.lunar.platform.UnsupportedCoverImagePicker
+import com.ryanjames.lunar.platform.UnsupportedLilyPondLiveRenderer
 import com.ryanjames.lunar.platform.UnsupportedPdfDocumentExporter
 import com.ryanjames.lunar.platform.UnsupportedPdfImporter
 import com.ryanjames.lunar.platform.UnsupportedSongbookPdfBuilder
@@ -39,10 +41,12 @@ internal suspend fun createTestPlatformRuntime(
     initialSettings: AppSettings = AppSettings(),
     cacheSnapshot: LibraryCacheSnapshot = LibraryCacheSnapshot(storageLabel = "Test cache"),
     renderer: PdfPageRenderer = UnavailablePdfPageRenderer,
+    lilyPondLiveRenderer: LilyPondLiveRenderer = UnsupportedLilyPondLiveRenderer,
     pdfExporter: PdfDocumentExporter = UnsupportedPdfDocumentExporter,
     scoreDownloadSupported: Boolean = false,
     localImageImportSupported: Boolean = false,
     lilyPondImportSupported: Boolean = false,
+    lilyPondLiveViewingSupported: Boolean = false,
     museScoreImportSupported: Boolean = false,
     songbookBuilder: SongbookPdfBuilder = UnsupportedSongbookPdfBuilder,
     coverImagePicker: CoverImagePicker = UnsupportedCoverImagePicker,
@@ -70,6 +74,7 @@ internal suspend fun createTestPlatformRuntime(
             scoreDownloadSupported = scoreDownloadSupported,
             localImageImportSupported = localImageImportSupported,
             lilyPondImportSupported = lilyPondImportSupported,
+            lilyPondLiveViewingSupported = lilyPondLiveViewingSupported,
             museScoreImportSupported = museScoreImportSupported,
             songbookCreationSupported = songbookCreationSupported,
             songbookCoverImageSupported = songbookCoverImageSupported,
@@ -77,6 +82,7 @@ internal suspend fun createTestPlatformRuntime(
         repository = repository,
         importer = UnsupportedPdfImporter("Import unavailable in tests."),
         renderer = renderer,
+        lilyPondLiveRenderer = lilyPondLiveRenderer,
         pdfExporter = pdfExporter,
         songbookBuilder = songbookBuilder,
         coverImagePicker = coverImagePicker,

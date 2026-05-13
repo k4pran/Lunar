@@ -59,15 +59,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.library.model.SheetMusicItem
+import com.ryanjames.lunar.platform.LilyPondLiveRenderResult
+import com.ryanjames.lunar.platform.LilyPondSourceSnapshot
 import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.RenderedPdfPage
 import com.ryanjames.lunar.settings.ViewerKeybindings
+import kotlinx.coroutines.delay
 
 private const val MinZoom = 0.2f
 private const val MaxZoom = 4.0f
 private const val ZoomStep = 0.2f
 private const val FitZoom = 1f
 private const val PageGap = 20
+private const val LilyPondLiveRefreshIntervalMillis = 1_000L
+private val LilyPondSourceExtensions = setOf("ly", "ily", "lyi")
 
 data class ViewerDocumentState(
     val id: String,
@@ -90,6 +95,118 @@ fun SheetMusicItem.toViewerDocumentState(): ViewerDocumentState = ViewerDocument
     isFavorite = isFavorite,
     isHidden = isHidden,
 )
+
+private data class ActiveViewerDocument(
+    val documentPath: String?,
+    val statusLabel: String?,
+    val liveErrorMessage: String?,
+    val isPreparing: Boolean,
+)
+
+@Composable
+private fun rememberActiveViewerDocument(
+    runtime: PlatformRuntime,
+    documentState: ViewerDocumentState,
+): ActiveViewerDocument {
+    val liveLilyPondEnabled = runtime.capabilities.lilyPondLiveViewingSupported &&
+        documentState.isLilyPondSourceDocument()
+    var sourceSnapshot by remember(documentState.id) { mutableStateOf<LilyPondSourceSnapshot?>(null) }
+    var sourceUnavailableMessage by remember(documentState.id) { mutableStateOf<String?>(null) }
+    var renderResult by remember(documentState.id) { mutableStateOf<LilyPondLiveRenderResult?>(null) }
+    var renderErrorMessage by remember(documentState.id) { mutableStateOf<String?>(null) }
+    var isRendering by remember(documentState.id) { mutableStateOf(false) }
+
+    LaunchedEffect(documentState.id, liveLilyPondEnabled) {
+        if (!liveLilyPondEnabled) {
+            sourceSnapshot = null
+            sourceUnavailableMessage = null
+            renderResult = null
+            renderErrorMessage = null
+            isRendering = false
+            return@LaunchedEffect
+        }
+
+        var lastRevision: String? = null
+        var sourceWasAvailable = false
+        while (true) {
+            runCatching {
+                runtime.lilyPondLiveRenderer.loadSource(documentState.document)
+            }.onSuccess { nextSource ->
+                if (nextSource == null) {
+                    sourceWasAvailable = false
+                    sourceSnapshot = null
+                    renderResult = null
+                    renderErrorMessage = null
+                    sourceUnavailableMessage = "The LilyPond source file is unavailable; showing the imported PDF."
+                } else {
+                    sourceUnavailableMessage = null
+                    if (!sourceWasAvailable || nextSource.revision != lastRevision) {
+                        sourceWasAvailable = true
+                        lastRevision = nextSource.revision
+                        sourceSnapshot = nextSource
+                    }
+                }
+            }.onFailure { error ->
+                sourceWasAvailable = false
+                sourceSnapshot = null
+                renderResult = null
+                renderErrorMessage = null
+                sourceUnavailableMessage = error.message
+                    ?.takeIf(String::isNotBlank)
+                    ?: "The LilyPond source file is unavailable; showing the imported PDF."
+            }
+            delay(LilyPondLiveRefreshIntervalMillis)
+        }
+    }
+
+    LaunchedEffect(documentState.id, liveLilyPondEnabled, sourceSnapshot?.revision) {
+        if (!liveLilyPondEnabled) {
+            return@LaunchedEffect
+        }
+        val source = sourceSnapshot ?: return@LaunchedEffect
+
+        isRendering = true
+        renderErrorMessage = null
+        runCatching {
+            runtime.lilyPondLiveRenderer.renderSource(source)
+        }.onSuccess { result ->
+            renderResult = result
+            renderErrorMessage = null
+        }.onFailure { error ->
+            renderResult = null
+            renderErrorMessage = error.message
+                ?.takeIf(String::isNotBlank)
+                ?: "LilyPond could not render this source."
+        }
+        isRendering = false
+    }
+
+    val documentPath = when {
+        !liveLilyPondEnabled -> documentState.document.storedPath
+        renderResult != null -> renderResult?.documentPath
+        sourceUnavailableMessage != null -> documentState.document.storedPath
+        else -> null
+    }
+    val statusLabel = when {
+        !liveLilyPondEnabled -> null
+        renderErrorMessage != null -> "LilyPond error"
+        isRendering -> "Rendering LilyPond"
+        renderResult != null -> "Live LilyPond"
+        sourceUnavailableMessage != null -> "Imported PDF"
+        else -> "Loading LilyPond"
+    }
+    val isPreparing = liveLilyPondEnabled &&
+        renderErrorMessage == null &&
+        sourceUnavailableMessage == null &&
+        (renderResult == null || isRendering)
+
+    return ActiveViewerDocument(
+        documentPath = documentPath,
+        statusLabel = statusLabel,
+        liveErrorMessage = renderErrorMessage,
+        isPreparing = isPreparing,
+    )
+}
 
 @Composable
 fun ViewerScreen(
@@ -120,17 +237,27 @@ fun ViewerScreen(
     var showMetronomeDialog by remember { mutableStateOf(false) }
     val themePalette = lunarThemePalette()
     val focusRequester = remember { FocusRequester() }
+    val activeDocument = rememberActiveViewerDocument(
+        runtime = runtime,
+        documentState = documentState,
+    )
 
     LaunchedEffect(documentState.id) {
         focusRequester.requestFocus()
     }
 
-    LaunchedEffect(documentState.id, currentPage, twoPageMode) {
+    LaunchedEffect(documentState.id, activeDocument.documentPath, currentPage, twoPageMode) {
         isLoading = true
         errorMessage = null
         onPageChanged(currentPage)
+        val documentPath = activeDocument.documentPath
+        if (documentPath == null) {
+            renderedPages = emptyList()
+            isLoading = false
+            return@LaunchedEffect
+        }
 
-        val info = runtime.renderer.inspect(documentState.document.storedPath)
+        val info = runtime.renderer.inspect(documentPath)
         if (info != null) {
             onPageCountResolved(info.pageCount)
             if (currentPage > info.pageCount - 1) {
@@ -141,13 +268,13 @@ fun ViewerScreen(
 
         renderedPages = buildList {
             runtime.renderer.renderPage(
-                documentPath = documentState.document.storedPath,
+                documentPath = documentPath,
                 pageIndex = currentPage,
             )?.let(::add)
 
             if (twoPageMode) {
                 runtime.renderer.renderPage(
-                    documentPath = documentState.document.storedPath,
+                    documentPath = documentPath,
                     pageIndex = currentPage + 1,
                 )?.let(::add)
             }
@@ -246,6 +373,19 @@ fun ViewerScreen(
                     style = MaterialTheme.typography.labelMedium,
                     color = themePalette.headerForeground.copy(alpha = 0.9f),
                 )
+                activeDocument.statusLabel?.let { status ->
+                    Text(
+                        text = status,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = themePalette.headerForeground.copy(alpha = 0.78f),
+                        modifier = Modifier
+                            .background(
+                                themePalette.headerForeground.copy(alpha = 0.12f),
+                                MaterialTheme.shapes.small,
+                            )
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
                 CompactNavButton(">", canGoNext, tooltip = "Next page") {
                     currentPage = nextPageIndex(currentPage, resolvedPageCount, pageStep)
                 }
@@ -286,11 +426,17 @@ fun ViewerScreen(
             contentAlignment = Alignment.Center,
         ) {
             when {
-                isLoading -> CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                activeDocument.isPreparing || isLoading -> CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 renderedPages.isNotEmpty() -> PdfPageCanvas(pages = renderedPages, zoom = zoom)
                 else -> ViewerMessage(
-                    title = "Viewer unavailable",
-                    body = errorMessage ?: "The viewer could not load this PDF page.",
+                    title = if (activeDocument.liveErrorMessage != null) {
+                        "LilyPond render failed"
+                    } else {
+                        "Viewer unavailable"
+                    },
+                    body = activeDocument.liveErrorMessage
+                        ?: errorMessage
+                        ?: "The viewer could not load this PDF page.",
                 )
             }
         }
@@ -329,17 +475,27 @@ fun FullscreenViewerScreen(
     var showMetronomeDialog by remember { mutableStateOf(false) }
     val themePalette = lunarThemePalette()
     val focusRequester = remember { FocusRequester() }
+    val activeDocument = rememberActiveViewerDocument(
+        runtime = runtime,
+        documentState = documentState,
+    )
 
     LaunchedEffect(documentState.id) {
         focusRequester.requestFocus()
     }
 
-    LaunchedEffect(documentState.id, currentPage, twoPageMode) {
+    LaunchedEffect(documentState.id, activeDocument.documentPath, currentPage, twoPageMode) {
         isLoading = true
         errorMessage = null
         onPageChanged(currentPage)
+        val documentPath = activeDocument.documentPath
+        if (documentPath == null) {
+            renderedPages = emptyList()
+            isLoading = false
+            return@LaunchedEffect
+        }
 
-        val info = runtime.renderer.inspect(documentState.document.storedPath)
+        val info = runtime.renderer.inspect(documentPath)
         if (info != null) {
             onPageCountResolved(info.pageCount)
             if (currentPage > info.pageCount - 1) {
@@ -350,13 +506,13 @@ fun FullscreenViewerScreen(
 
         renderedPages = buildList {
             runtime.renderer.renderPage(
-                documentPath = documentState.document.storedPath,
+                documentPath = documentPath,
                 pageIndex = currentPage,
             )?.let(::add)
 
             if (twoPageMode) {
                 runtime.renderer.renderPage(
-                    documentPath = documentState.document.storedPath,
+                    documentPath = documentPath,
                     pageIndex = currentPage + 1,
                 )?.let(::add)
             }
@@ -419,14 +575,20 @@ fun FullscreenViewerScreen(
         contentAlignment = Alignment.Center,
     ) {
         when {
-            isLoading -> CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            activeDocument.isPreparing || isLoading -> CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
             renderedPages.isNotEmpty() -> PdfPageCanvas(
                 pages = renderedPages,
                 zoom = zoom,
             )
             else -> ViewerMessage(
-                title = "Viewer unavailable",
-                body = errorMessage ?: "The viewer could not load this PDF page.",
+                title = if (activeDocument.liveErrorMessage != null) {
+                    "LilyPond render failed"
+                } else {
+                    "Viewer unavailable"
+                },
+                body = activeDocument.liveErrorMessage
+                    ?: errorMessage
+                    ?: "The viewer could not load this PDF page.",
             )
         }
 
@@ -477,6 +639,15 @@ fun FullscreenViewerScreen(
                                         text = subtitle,
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = themePalette.viewerForeground.copy(alpha = 0.78f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                activeDocument.statusLabel?.let { status ->
+                                    Text(
+                                        text = status,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = themePalette.viewerForeground.copy(alpha = 0.72f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
@@ -904,3 +1075,6 @@ private fun nextPageIndex(
 } else {
     (currentPage + pageStep).coerceAtMost((pageCount - 1).coerceAtLeast(0))
 }
+
+private fun ViewerDocumentState.isLilyPondSourceDocument(): Boolean =
+    document.originalFileName.substringAfterLast('.', "").lowercase() in LilyPondSourceExtensions

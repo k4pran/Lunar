@@ -171,6 +171,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             repository = repository,
             importer = importer,
             renderer = renderer,
+            lilyPondLiveRenderer = UnsupportedLilyPondLiveRenderer,
             pdfExporter = UnsupportedPdfDocumentExporter,
             songbookBuilder = UnsupportedSongbookPdfBuilder,
             coverImagePicker = UnsupportedCoverImagePicker,

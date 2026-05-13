@@ -30,6 +30,7 @@ data class PlatformRuntime(
     val repository: SheetMusicRepository,
     val importer: PdfImporter,
     val renderer: PdfPageRenderer,
+    val lilyPondLiveRenderer: LilyPondLiveRenderer,
     val pdfExporter: PdfDocumentExporter,
     val songbookBuilder: SongbookPdfBuilder,
     val coverImagePicker: CoverImagePicker,
@@ -45,6 +46,7 @@ data class PlatformCapabilities(
     val folderImportSupported: Boolean = false,
     val localImageImportSupported: Boolean = false,
     val lilyPondImportSupported: Boolean = false,
+    val lilyPondLiveViewingSupported: Boolean = false,
     val museScoreImportSupported: Boolean = false,
     val permissionTrackingSupported: Boolean = false,
     val inAppViewingSupported: Boolean = true,
@@ -118,6 +120,18 @@ data class RenderedPdfPage(
     val image: ImageBitmap,
 )
 
+data class LilyPondSourceSnapshot(
+    val sourceText: String,
+    val revision: String,
+    val displayName: String,
+    val sourcePath: String? = null,
+)
+
+data class LilyPondLiveRenderResult(
+    val documentPath: String,
+    val pageCount: Int? = null,
+)
+
 data class SelectedCoverImage(
     val displayName: String,
     val bytes: ByteArray,
@@ -149,6 +163,12 @@ interface PdfPageRenderer {
         pageIndex: Int,
         targetWidth: Int = 1400,
     ): RenderedPdfPage?
+}
+
+interface LilyPondLiveRenderer {
+    suspend fun loadSource(document: PdfDocumentReference): LilyPondSourceSnapshot?
+
+    suspend fun renderSource(source: LilyPondSourceSnapshot): LilyPondLiveRenderResult
 }
 
 interface PdfDocumentExporter {
@@ -199,6 +219,13 @@ object UnavailablePdfPageRenderer : PdfPageRenderer {
         pageIndex: Int,
         targetWidth: Int,
     ): RenderedPdfPage? = null
+}
+
+object UnsupportedLilyPondLiveRenderer : LilyPondLiveRenderer {
+    override suspend fun loadSource(document: PdfDocumentReference): LilyPondSourceSnapshot? = null
+
+    override suspend fun renderSource(source: LilyPondSourceSnapshot): LilyPondLiveRenderResult =
+        throw UnsupportedOperationException("Live LilyPond viewing is unavailable on this target.")
 }
 
 object UnsupportedPdfDocumentExporter : PdfDocumentExporter {
@@ -260,6 +287,7 @@ fun rememberUnsupportedPlatformRuntime(
             repository = repository,
             importer = UnsupportedPdfImporter(importMessage),
             renderer = UnavailablePdfPageRenderer,
+            lilyPondLiveRenderer = UnsupportedLilyPondLiveRenderer,
             pdfExporter = UnsupportedPdfDocumentExporter,
             songbookBuilder = UnsupportedSongbookPdfBuilder,
             coverImagePicker = UnsupportedCoverImagePicker,

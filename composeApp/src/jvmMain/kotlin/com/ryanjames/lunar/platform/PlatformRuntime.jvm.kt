@@ -87,6 +87,11 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
         )
     }
     val renderer = remember { DesktopPdfPageRenderer() }
+    val lilyPondLiveRenderer = remember(appRoot) {
+        DesktopLilyPondLiveRenderer(
+            previewDirectory = File(appRoot, "lilypond-live").apply { mkdirs() },
+        )
+    }
     val pdfExporter = remember { DesktopPdfDocumentExporter() }
     val songbookBuilder = remember(scoresDirectory) {
         DesktopSongbookPdfBuilder(scoresDirectory = scoresDirectory)
@@ -143,6 +148,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
         repository,
         importer,
         renderer,
+        lilyPondLiveRenderer,
         pdfExporter,
         songbookBuilder,
         coverImagePicker,
@@ -160,6 +166,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
                 folderImportSupported = true,
                 localImageImportSupported = true,
                 lilyPondImportSupported = true,
+                lilyPondLiveViewingSupported = true,
                 museScoreImportSupported = true,
                 permissionTrackingSupported = false,
                 inAppViewingSupported = true,
@@ -171,6 +178,7 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             repository = repository,
             importer = importer,
             renderer = renderer,
+            lilyPondLiveRenderer = lilyPondLiveRenderer,
             pdfExporter = pdfExporter,
             songbookBuilder = songbookBuilder,
             coverImagePicker = coverImagePicker,
@@ -662,6 +670,78 @@ private class DesktopPdfPageRenderer : PdfPageRenderer {
     }
 }
 
+internal class DesktopLilyPondLiveRenderer(
+    private val previewDirectory: File,
+    private val lilyPondCompiler: DesktopLilyPondCompiler = SystemDesktopLilyPondCompiler,
+) : LilyPondLiveRenderer {
+    override suspend fun loadSource(document: PdfDocumentReference): LilyPondSourceSnapshot? =
+        withContext(Dispatchers.IO) {
+            val sourceFile = lilyPondSourceFile(document) ?: return@withContext null
+            val sourceText = sourceFile.readText()
+            LilyPondSourceSnapshot(
+                sourceText = sourceText,
+                revision = lilyPondSourceRevision(sourceFile, sourceText),
+                displayName = sourceFile.name,
+                sourcePath = sourceFile.absolutePath,
+            )
+        }
+
+    override suspend fun renderSource(source: LilyPondSourceSnapshot): LilyPondLiveRenderResult =
+        withContext(Dispatchers.IO) {
+            if (source.sourceText.isBlank()) {
+                throw IllegalStateException("The LilyPond source is empty.")
+            }
+
+            previewDirectory.mkdirs()
+            val sourceKey = listOf(
+                source.displayName,
+                source.sourcePath.orEmpty(),
+                source.revision,
+                source.sourceText,
+            ).joinToString(separator = "\n").encodeToByteArray().sha256()
+            val previewStem = "live_${safeFileStem(source.displayName)}_${sourceKey.take(12)}"
+            val destination = File(previewDirectory, "$previewStem.pdf")
+            loadPdfPageCount(destination)?.let { pageCount ->
+                return@withContext LilyPondLiveRenderResult(
+                    documentPath = destination.absolutePath,
+                    pageCount = pageCount,
+                )
+            }
+
+            val sourceFile = liveRenderSourceFile(
+                source = source,
+                previewStem = previewStem,
+            )
+            lilyPondCompiler.renderToPdf(source = sourceFile, destination = destination)
+            val pageCount = loadPdfPageCount(destination)
+                ?: throw IllegalStateException(
+                    "LilyPond rendered ${source.displayName}, but Lunar could not read the live preview PDF."
+                )
+
+            LilyPondLiveRenderResult(
+                documentPath = destination.absolutePath,
+                pageCount = pageCount,
+            )
+        }
+
+    private fun liveRenderSourceFile(
+        source: LilyPondSourceSnapshot,
+        previewStem: String,
+    ): File {
+        val fileBackedSource = source.sourcePath
+            ?.let(::File)
+            ?.takeIf { file -> file.exists() && isDesktopLilyPondFileName(file.name) }
+            ?.takeIf { file -> runCatching { file.readText() == source.sourceText }.getOrDefault(false) }
+        if (fileBackedSource != null) {
+            return fileBackedSource
+        }
+
+        return File(previewDirectory, "$previewStem.ly").also { file ->
+            file.writeText(source.sourceText)
+        }
+    }
+}
+
 private class DesktopPdfDocumentExporter : PdfDocumentExporter {
     override suspend fun export(
         documentPath: String,
@@ -958,6 +1038,28 @@ private fun desktopFileFromPathOrUri(pathOrUri: String): File? {
         }
     }.getOrNull()
         ?.takeIf { it.exists() }
+}
+
+private fun lilyPondSourceFile(document: PdfDocumentReference): File? {
+    if (!isDesktopLilyPondFileName(document.originalFileName)) {
+        return null
+    }
+
+    return document.sourceUri
+        ?.let(::desktopFileFromPathOrUri)
+        ?.takeIf { file -> file.isFile && isDesktopLilyPondFileName(file.name) }
+}
+
+private fun isDesktopLilyPondFileName(fileName: String): Boolean =
+    fileName.substringAfterLast('.', "").lowercase() in DesktopSupportedLilyPondExtensions
+
+private fun lilyPondSourceRevision(
+    sourceFile: File,
+    sourceText: String,
+): String {
+    val path = runCatching { sourceFile.canonicalPath }.getOrDefault(sourceFile.absolutePath)
+    val contentHash = sourceText.encodeToByteArray().sha256()
+    return "$path:${sourceFile.lastModified()}:${sourceFile.length()}:$contentHash"
 }
 
 private fun File.stableImportKey(): String =
