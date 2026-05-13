@@ -128,15 +128,19 @@ fun AddLocalSourceDialog(
             }
         },
         confirmButton = {
-            Button(
-                onClick = { onConfirm(selectedType, label) },
-            ) {
-                Text("Choose files")
+            LunarTooltip("Choose files or a folder for this local source") {
+                Button(
+                    onClick = { onConfirm(selectedType, label) },
+                ) {
+                    Text("Choose files")
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+            LunarTooltip("Close without adding a source") {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
             }
         },
     )
@@ -340,13 +344,15 @@ fun AddCloudSourceDialog(
                     )
                 } else {
                     Box {
-                        OutlinedButton(
-                            onClick = { providerMenuExpanded = true },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(
-                                providers.firstOrNull { it.id == selectedProviderId }?.displayName ?: "Choose a provider",
-                            )
+                        LunarTooltip("Choose the cloud provider") {
+                            OutlinedButton(
+                                onClick = { providerMenuExpanded = true },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(
+                                    providers.firstOrNull { it.id == selectedProviderId }?.displayName ?: "Choose a provider",
+                                )
+                            }
                         }
                         DropdownMenu(
                             expanded = providerMenuExpanded,
@@ -416,9 +422,10 @@ fun AddCloudSourceDialog(
             }
         },
         confirmButton = {
-            Button(
-                onClick = {
-                    val source = if (isSupabaseSelected) {
+            LunarTooltip(if (isEditing) "Save cloud source changes" else "Connect this cloud source") {
+                Button(
+                    onClick = {
+                        val source = if (isSupabaseSelected) {
                         CloudSupabaseSource(
                             id = existingSource?.id ?: generateSourceId(),
                             label = label.ifBlank { "Supabase: $bucketName" },
@@ -453,16 +460,19 @@ fun AddCloudSourceDialog(
                             ),
                         )
                     }
-                    onConfirm(source)
-                },
-                enabled = isValid,
-            ) {
-                Text(if (isEditing) "Save" else "Connect")
+                        onConfirm(source)
+                    },
+                    enabled = isValid,
+                ) {
+                    Text(if (isEditing) "Save" else "Connect")
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+            LunarTooltip("Close without saving this cloud source") {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
             }
         },
     )
@@ -618,11 +628,13 @@ private fun GoogleDriveFields(
             )
         }
 
-        OutlinedButton(
-            onClick = { roots += EditableGoogleDriveRoot(id = generateSourceId()) },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Add Google Drive root")
+        LunarTooltip("Add another Google Drive folder to scan") {
+            OutlinedButton(
+                onClick = { roots += EditableGoogleDriveRoot(id = generateSourceId()) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Add Google Drive root")
+            }
         }
     }
 }
@@ -663,11 +675,13 @@ private fun GoogleDriveRootEditor(
             onStrategySelected = { onRootChange(root.copy(folderStrategy = it)) },
         )
 
-        TextButton(
-            onClick = onRemove,
-            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
-        ) {
-            Text("Remove root")
+        LunarTooltip("Remove this Google Drive root") {
+            TextButton(
+                onClick = onRemove,
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            ) {
+                Text("Remove root")
+            }
         }
     }
 }
@@ -681,11 +695,13 @@ private fun StrategyPicker(
     var menuExpanded by remember { mutableStateOf(false) }
 
     Box {
-        OutlinedButton(
-            onClick = { menuExpanded = true },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("$label: ${strategy.displayLabel()}")
+        LunarTooltip("Choose how Lunar reads folders for this source") {
+            OutlinedButton(
+                onClick = { menuExpanded = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("$label: ${strategy.displayLabel()}")
+            }
         }
         DropdownMenu(
             expanded = menuExpanded,

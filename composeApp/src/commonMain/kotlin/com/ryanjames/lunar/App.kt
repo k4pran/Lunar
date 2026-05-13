@@ -40,6 +40,7 @@ import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.FullscreenViewerScreen
 import com.ryanjames.lunar.ui.ImportScreen
 import com.ryanjames.lunar.ui.LibraryScreen
+import com.ryanjames.lunar.ui.LunarTooltip
 import com.ryanjames.lunar.ui.LunarTheme
 import com.ryanjames.lunar.ui.SettingsScreen
 import com.ryanjames.lunar.ui.ViewerDocumentState
@@ -236,28 +237,32 @@ fun App() {
                                             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
                                             verticalAlignment = Alignment.CenterVertically,
                                         ) {
-                                            androidx.compose.material3.OutlinedButton(
-                                                onClick = appState::closePreview,
-                                            ) {
-                                                Text("Close")
+                                            LunarTooltip("Close viewer preview") {
+                                                androidx.compose.material3.OutlinedButton(
+                                                    onClick = appState::closePreview,
+                                                ) {
+                                                    Text("Close")
+                                                }
                                             }
-                                            androidx.compose.material3.Button(
-                                                onClick = {
-                                                    when (val target = appState.previewTarget) {
-                                                        is ViewerTarget.Score ->
-                                                            appState.openFullscreen(target.itemId)
+                                            LunarTooltip("Open fullscreen viewer") {
+                                                androidx.compose.material3.Button(
+                                                    onClick = {
+                                                        when (val target = appState.previewTarget) {
+                                                            is ViewerTarget.Score ->
+                                                                appState.openFullscreen(target.itemId)
 
-                                                        is ViewerTarget.Songbook ->
-                                                            appState.openSongbookFullscreen(target.songbookId)
+                                                            is ViewerTarget.Songbook ->
+                                                                appState.openSongbookFullscreen(target.songbookId)
 
-                                                        null -> Unit
-                                                    }
-                                                },
-                                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                                                    containerColor = MaterialTheme.colorScheme.primary,
-                                                ),
-                                            ) {
-                                                Text("View Fullscreen", color = MaterialTheme.colorScheme.onPrimary)
+                                                            null -> Unit
+                                                        }
+                                                    },
+                                                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                                        containerColor = MaterialTheme.colorScheme.primary,
+                                                    ),
+                                                ) {
+                                                    Text("View Fullscreen", color = MaterialTheme.colorScheme.onPrimary)
+                                                }
                                             }
                                         }
                                     }
@@ -370,29 +375,31 @@ private fun RowScope.BottomNavItem(
         MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
     }
 
-    Surface(
-        modifier = Modifier
-            .weight(1f)
-            .clickable(onClick = onClick),
-        color = containerColor,
-        shape = MaterialTheme.shapes.large,
-    ) {
-        Column(
+    LunarTooltip("Open $title", modifier = Modifier.weight(1f)) {
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 12.dp),
-            verticalArrangement = Arrangement.Center,
+                .clickable(onClick = onClick),
+            color = containerColor,
+            shape = MaterialTheme.shapes.large,
         ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.padding(horizontal = 12.dp),
-                color = if (selected) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
         }
     }
 }

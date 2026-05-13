@@ -2,16 +2,25 @@ package com.ryanjames.lunar
 
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isPopup
+import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNode
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.pressKey
 import com.ryanjames.lunar.library.data.CloudGoogleDriveSource
 import com.ryanjames.lunar.library.data.CloudPathStrategy
@@ -27,6 +36,7 @@ import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.ImportScreen
 import com.ryanjames.lunar.ui.LibraryScreen
+import com.ryanjames.lunar.ui.LunarTooltip
 import com.ryanjames.lunar.ui.LunarTheme
 import com.ryanjames.lunar.ui.SettingsScreen
 import kotlinx.coroutines.CoroutineScope
@@ -42,6 +52,24 @@ class ScreenSmokeTest {
 
     @get:Rule
     val rule = createComposeRule()
+
+    @Test
+    fun lunarTooltipShowsFromLongClickSemantics() {
+        rule.setContent {
+            LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTooltip("Open this score") {
+                    Button(onClick = {}) {
+                        Text("Open")
+                    }
+                }
+            }
+        }
+
+        rule.onNodeWithText("Open").performSemanticsAction(SemanticsActions.OnLongClick)
+        rule.waitUntil(timeoutMillis = 5_000) {
+            rule.onAllNodesWithText("Open this score").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
 
     @Test
     @OptIn(ExperimentalTestApi::class)
@@ -137,7 +165,7 @@ class ScreenSmokeTest {
             rule.onNodeWithText("Show filters").performClick()
             rule.onNodeWithText("All collections").assertIsDisplayed()
 
-            rule.onNodeWithText("Random setlist").performClick()
+            rule.onDisplayedNodeWithText("Random setlist").performClick()
             rule.onNodeWithText("Create a random setlist").assertIsDisplayed()
             rule.onNodeWithText("Cancel").performClick()
 
@@ -249,9 +277,9 @@ class ScreenSmokeTest {
             }
 
             rule.onNodeWithText("Sources").assertIsDisplayed()
-            rule.onNodeWithText("Add local source").assertIsDisplayed()
-            rule.onNodeWithText("Add cloud source").assertIsDisplayed()
-            rule.onNodeWithText("Add local source").performClick()
+            rule.onDisplayedNodeWithText("Add local source").assertIsDisplayed()
+            rule.onDisplayedNodeWithText("Add cloud source").assertIsDisplayed()
+            rule.onDisplayedNodeWithText("Add local source").performClick()
             rule.onNodeWithText("Choose how to import local PDFs, LilyPond files, MuseScore files, or image files into your library. Matching .json metadata sidecars are imported automatically.").assertIsDisplayed()
             rule.onNodeWithText("Pick PDFs, LY/ILY/LYI LilyPond files, MSCZ/MSCX MuseScore files, or PNG/JPG/JPEG images. Matching .json sidecars are detected automatically.").assertIsDisplayed()
             rule.onNodeWithText("Cancel").performClick()
@@ -349,9 +377,9 @@ class ScreenSmokeTest {
                 }
             }
 
-            rule.onNodeWithText("Main Drive library").assertIsDisplayed()
-            rule.onNodeWithText("Edit").assertIsDisplayed()
-            rule.onNodeWithText("Edit").performClick()
+            rule.onDisplayedNodeWithText("Main Drive library").assertIsDisplayed()
+            rule.onDisplayedNodeWithText("Edit").assertIsDisplayed()
+            rule.onDisplayedNodeWithText("Edit").performClick()
             rule.onNodeWithText("Edit cloud source").assertIsDisplayed()
             rule.onNodeWithText("Refresh token").assertIsDisplayed()
             rule.onNodeWithText("Save").assertIsDisplayed()
@@ -369,9 +397,9 @@ class ScreenSmokeTest {
             }
         }
 
-        rule.onNodeWithText("Sources").assertIsDisplayed()
-        rule.onNodeWithText("Library").assertIsDisplayed()
-        rule.onNodeWithText("Settings").assertIsDisplayed()
+        rule.onDisplayedNodeWithText("Sources").assertIsDisplayed()
+        rule.onDisplayedNodeWithText("Library").assertIsDisplayed()
+        rule.onDisplayedNodeWithText("Settings").assertIsDisplayed()
         rule.runOnIdle {
             assertTrue(rule.onAllNodesWithText("Compose").fetchSemanticsNodes().isEmpty())
         }
@@ -379,3 +407,6 @@ class ScreenSmokeTest {
 }
 
 private fun backgroundScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+private fun ComposeContentTestRule.onDisplayedNodeWithText(text: String) =
+    onNode(hasText(text) and !hasAnyAncestor(isPopup()))

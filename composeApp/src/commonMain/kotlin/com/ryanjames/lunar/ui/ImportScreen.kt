@@ -145,22 +145,26 @@ fun ImportScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Button(
-                onClick = { showLocalDialog = true },
-                modifier = Modifier.weight(1f),
-                enabled = runtime.capabilities.fileImportSupported && !appState.importInProgress,
-            ) {
-                Text("Add local source")
+            LunarTooltip("Add PDFs or folders from this device", modifier = Modifier.weight(1f)) {
+                Button(
+                    onClick = { showLocalDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = runtime.capabilities.fileImportSupported && !appState.importInProgress,
+                ) {
+                    Text("Add local source")
+                }
             }
-            Button(
-                onClick = { showCloudDialog = true },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.secondary,
-                    contentColor = MaterialTheme.colorScheme.onSecondary,
-                ),
-            ) {
-                Text("Add cloud source")
+            LunarTooltip("Add a Google Drive or Supabase source", modifier = Modifier.weight(1f)) {
+                Button(
+                    onClick = { showCloudDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary,
+                        contentColor = MaterialTheme.colorScheme.onSecondary,
+                    ),
+                ) {
+                    Text("Add cloud source")
+                }
             }
         }
 
@@ -231,14 +235,16 @@ fun ImportScreen(
                             )
                         }
                     }
-                    TextButton(
-                        onClick = {
-                            clipboardManager.setText(
-                                AnnotatedString(buildCacheDetails(snapshot, settings))
-                            )
-                        },
-                    ) {
-                        Text("Copy cache details")
+                    LunarTooltip("Copy cache diagnostics to the clipboard") {
+                        TextButton(
+                            onClick = {
+                                clipboardManager.setText(
+                                    AnnotatedString(buildCacheDetails(snapshot, settings))
+                                )
+                            },
+                        ) {
+                            Text("Copy cache details")
+                        }
                     }
                 }
             }
@@ -394,24 +400,28 @@ fun ImportScreen(
                         }
                     }
                     if (hasErrors || syncState.activityLog.isNotEmpty()) {
-                        TextButton(
-                            onClick = {
-                                clipboardManager.setText(
-                                    AnnotatedString(buildSyncDetails(syncState))
-                                )
-                            },
-                        ) {
-                            Text(if (hasErrors) "Copy sync details" else "Copy activity log")
+                        LunarTooltip("Copy cloud sync diagnostics to the clipboard") {
+                            TextButton(
+                                onClick = {
+                                    clipboardManager.setText(
+                                        AnnotatedString(buildSyncDetails(syncState))
+                                    )
+                                },
+                            ) {
+                                Text(if (hasErrors) "Copy sync details" else "Copy activity log")
+                            }
                         }
                     }
                 }
             }
 
-            Button(
-                onClick = appState::refreshAllCloudSources,
-                enabled = !syncState.isRefreshing,
-            ) {
-                Text(if (syncState.isRefreshing) "Refreshing..." else "Refresh all cloud sources")
+            LunarTooltip("Refresh every configured cloud source") {
+                Button(
+                    onClick = appState::refreshAllCloudSources,
+                    enabled = !syncState.isRefreshing,
+                ) {
+                    Text(if (syncState.isRefreshing) "Refreshing..." else "Refresh all cloud sources")
+                }
             }
         }
 
@@ -472,14 +482,16 @@ fun ImportScreen(
                             }
                         }
                     }
-                    TextButton(
-                        onClick = {
-                            clipboardManager.setText(
-                                AnnotatedString(buildImportDetails(appState))
-                            )
-                        },
-                    ) {
-                        Text("Copy import activity")
+                    LunarTooltip("Copy local import diagnostics to the clipboard") {
+                        TextButton(
+                            onClick = {
+                                clipboardManager.setText(
+                                    AnnotatedString(buildImportDetails(appState))
+                                )
+                            },
+                        ) {
+                            Text("Copy import activity")
+                        }
                     }
                 }
             }
@@ -487,11 +499,13 @@ fun ImportScreen(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        OutlinedButton(
-            onClick = { appState.selectSection(AppSection.LIBRARY) },
-            modifier = Modifier.widthIn(max = 240.dp),
-        ) {
-            Text("Go to library")
+        LunarTooltip("Switch to the library") {
+            OutlinedButton(
+                onClick = { appState.selectSection(AppSection.LIBRARY) },
+                modifier = Modifier.widthIn(max = 240.dp),
+            ) {
+                Text("Go to library")
+            }
         }
     }
 
@@ -633,28 +647,34 @@ private fun SourceCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (onEdit != null) {
-                    OutlinedButton(
-                        onClick = onEdit,
-                        enabled = !isSyncing,
-                    ) {
-                        Text("Edit")
+                    LunarTooltip("Edit ${source.label}") {
+                        OutlinedButton(
+                            onClick = onEdit,
+                            enabled = !isSyncing,
+                        ) {
+                            Text("Edit")
+                        }
                     }
                 }
                 if (onRefresh != null) {
-                    OutlinedButton(
-                        onClick = onRefresh,
-                        enabled = !isSyncing,
-                    ) {
-                        Text(if (isSyncing) "Syncing..." else "Refresh")
+                    LunarTooltip("Refresh ${source.label}") {
+                        OutlinedButton(
+                            onClick = onRefresh,
+                            enabled = !isSyncing,
+                        ) {
+                            Text(if (isSyncing) "Syncing..." else "Refresh")
+                        }
                     }
                 }
-                TextButton(
-                    onClick = onRemove,
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error,
-                    ),
-                ) {
-                    Text("Remove")
+                LunarTooltip("Remove ${source.label}") {
+                    TextButton(
+                        onClick = onRemove,
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error,
+                        ),
+                    ) {
+                        Text("Remove")
+                    }
                 }
             }
         }

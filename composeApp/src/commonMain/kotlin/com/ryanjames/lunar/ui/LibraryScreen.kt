@@ -725,19 +725,23 @@ private fun RandomLibraryActionsRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        OutlinedButton(
-            modifier = Modifier.weight(1f),
-            enabled = hasScores,
-            onClick = onOpenRandomSheet,
-        ) {
-            Text("Open random sheet")
+        LunarTooltip("Open a random score from the current library view", modifier = Modifier.weight(1f)) {
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = hasScores,
+                onClick = onOpenRandomSheet,
+            ) {
+                Text("Open random sheet")
+            }
         }
-        Button(
-            modifier = Modifier.weight(1f),
-            enabled = hasScores,
-            onClick = onCreateRandomSetlist,
-        ) {
-            Text("Random setlist")
+        LunarTooltip("Create a temporary random setlist from the current library view", modifier = Modifier.weight(1f)) {
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = hasScores,
+                onClick = onCreateRandomSetlist,
+            ) {
+                Text("Random setlist")
+            }
         }
     }
 }
@@ -1406,11 +1410,13 @@ private fun SearchAndSortControlsRow(
             selected = appState.layoutMode,
             onSelect = appState::updateLayoutMode,
         )
-        FilterChip(
-            selected = appState.query.favoritesOnly,
-            onClick = appState::toggleFavoriteFilter,
-            label = { Text("★") },
-        )
+        LunarTooltip("Show favorites only") {
+            FilterChip(
+                selected = appState.query.favoritesOnly,
+                onClick = appState::toggleFavoriteFilter,
+                label = { Text("★") },
+            )
+        }
     }
 }
 
@@ -1423,21 +1429,23 @@ private fun SortMenuButton(
     var expanded by remember { mutableStateOf(false) }
 
     Box(modifier = modifier) {
-        OutlinedButton(
-            onClick = { expanded = true },
-            modifier = Modifier
-                .fillMaxWidth()
-                .semantics {
-                    contentDescription = "Sort by ${current.label()}"
-                },
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+        LunarTooltip("Sort by ${current.label()}") {
+            OutlinedButton(
+                onClick = { expanded = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics {
+                        contentDescription = "Sort by ${current.label()}"
+                    },
             ) {
-                Text(current.label())
-                ChevronDownGlyph(color = MaterialTheme.colorScheme.onSurface)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(current.label())
+                    ChevronDownGlyph(color = MaterialTheme.colorScheme.onSurface)
+                }
             }
         }
         DropdownMenu(
@@ -1686,26 +1694,28 @@ private fun CompactControlButton(
 ) {
     val shape = MaterialTheme.shapes.medium
 
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        shape = shape,
-        modifier = modifier
-            .size(44.dp)
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                shape = shape,
-            )
-            .semantics {
-                this.contentDescription = contentDescription
-            }
-            .clickable(onClick = onClick),
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
+    LunarTooltip(contentDescription, modifier = modifier) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = shape,
+            modifier = Modifier
+                .size(44.dp)
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    shape = shape,
+                )
+                .semantics {
+                    this.contentDescription = contentDescription
+                }
+                .clickable(onClick = onClick),
         ) {
-            content(MaterialTheme.colorScheme.onSurfaceVariant)
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                content(MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
@@ -1719,26 +1729,28 @@ private fun LibraryActionIconButton(
 ) {
     val shape = MaterialTheme.shapes.small
 
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
-        shape = shape,
-        modifier = modifier
-            .size(36.dp)
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.24f),
-                shape = shape,
-            )
-            .semantics {
-                this.contentDescription = contentDescription
-            }
-            .clickable(onClick = onClick),
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
+    LunarTooltip(contentDescription, modifier = modifier) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
+            shape = shape,
+            modifier = Modifier
+                .size(36.dp)
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.24f),
+                    shape = shape,
+                )
+                .semantics {
+                    this.contentDescription = contentDescription
+                }
+                .clickable(onClick = onClick),
         ) {
-            content(MaterialTheme.colorScheme.onSurfaceVariant)
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                content(MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
@@ -2263,8 +2275,10 @@ private fun LibraryCard(
                                 includeDownload = appState.canDownloadScores,
                                 mode = mode,
                             )
-                            androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
-                                Text("Open")
+                            LunarTooltip("Open ${item.title}") {
+                                androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
+                                    Text("Open")
+                                }
                             }
                         }
                     }
@@ -2304,8 +2318,10 @@ private fun GridLibraryCardFooter(
                     .weight(1f)
                     .horizontalScroll(rememberScrollState()),
             )
-            androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
-                Text("Open")
+            LunarTooltip("Open ${item.title}") {
+                androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
+                    Text("Open")
+                }
             }
         }
     }
