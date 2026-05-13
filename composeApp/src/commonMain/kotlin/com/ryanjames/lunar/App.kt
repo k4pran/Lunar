@@ -375,30 +375,32 @@ private fun RowScope.BottomNavItem(
         MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
     }
 
-    LunarTooltip("Open $title", modifier = Modifier.weight(1f)) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick),
-            color = containerColor,
-            shape = MaterialTheme.shapes.large,
-        ) {
-            Column(
+    Box(modifier = Modifier.weight(1f)) {
+        LunarTooltip("Open $title") {
+            Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 12.dp),
-                verticalArrangement = Arrangement.Center,
+                    .clickable(onClick = onClick),
+                color = containerColor,
+                shape = MaterialTheme.shapes.large,
             ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                    color = if (selected) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp),
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        color = if (selected) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
             }
         }
     }

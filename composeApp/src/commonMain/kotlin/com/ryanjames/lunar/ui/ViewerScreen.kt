@@ -525,31 +525,37 @@ fun FullscreenViewerScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            LunarTooltip("Zoom out", modifier = Modifier.weight(1f)) {
-                                FilledTonalButton(
-                                    onClick = { zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom) },
-                                    enabled = zoom > MinZoom,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text("Zoom -")
+                            Box(modifier = Modifier.weight(1f)) {
+                                LunarTooltip("Zoom out") {
+                                    FilledTonalButton(
+                                        onClick = { zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom) },
+                                        enabled = zoom > MinZoom,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text("Zoom -")
+                                    }
                                 }
                             }
-                            LunarTooltip("Fit page to viewer", modifier = Modifier.weight(1f)) {
-                                FilledTonalButton(
-                                    onClick = { zoom = FitZoom },
-                                    enabled = zoom != FitZoom,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text("Best Fit")
+                            Box(modifier = Modifier.weight(1f)) {
+                                LunarTooltip("Fit page to viewer") {
+                                    FilledTonalButton(
+                                        onClick = { zoom = FitZoom },
+                                        enabled = zoom != FitZoom,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text("Best Fit")
+                                    }
                                 }
                             }
-                            LunarTooltip("Zoom in", modifier = Modifier.weight(1f)) {
-                                FilledTonalButton(
-                                    onClick = { zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom) },
-                                    enabled = zoom < MaxZoom,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text("Zoom +")
+                            Box(modifier = Modifier.weight(1f)) {
+                                LunarTooltip("Zoom in") {
+                                    FilledTonalButton(
+                                        onClick = { zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom) },
+                                        enabled = zoom < MaxZoom,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text("Zoom +")
+                                    }
                                 }
                             }
                         }
@@ -558,26 +564,29 @@ fun FullscreenViewerScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            LunarTooltip(
-                                text = if (twoPageMode) "Switch to single-page view" else "Switch to two-page view",
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                FilledTonalButton(
-                                    onClick = {
-                                        twoPageMode = !twoPageMode
-                                        zoom = FitZoom
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
+                            Box(modifier = Modifier.weight(1f)) {
+                                LunarTooltip(
+                                    text = if (twoPageMode) "Switch to single-page view" else "Switch to two-page view",
                                 ) {
-                                    Text(if (twoPageMode) "Single Page" else "Two Pages")
+                                    FilledTonalButton(
+                                        onClick = {
+                                            twoPageMode = !twoPageMode
+                                            zoom = FitZoom
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(if (twoPageMode) "Single Page" else "Two Pages")
+                                    }
                                 }
                             }
-                            LunarTooltip("Open metronome", modifier = Modifier.weight(1f)) {
-                                FilledTonalButton(
-                                    onClick = { showMetronomeDialog = true },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text("\u2669 Metronome")
+                            Box(modifier = Modifier.weight(1f)) {
+                                LunarTooltip("Open metronome") {
+                                    FilledTonalButton(
+                                        onClick = { showMetronomeDialog = true },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text("\u2669 Metronome")
+                                    }
                                 }
                             }
                         }
@@ -587,38 +596,43 @@ fun FullscreenViewerScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             if (documentState.isFavorite != null && onToggleFavorite != null) {
-                                LunarTooltip(
-                                    text = if (documentState.isFavorite) {
-                                        "Remove ${documentState.title} from favorites"
-                                    } else {
-                                        "Mark ${documentState.title} as favorite"
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    OutlinedButton(
-                                        onClick = onToggleFavorite,
-                                        modifier = Modifier.fillMaxWidth(),
+                                Box(modifier = Modifier.weight(1f)) {
+                                    LunarTooltip(
+                                        text = if (documentState.isFavorite) {
+                                            "Remove ${documentState.title} from favorites"
+                                        } else {
+                                            "Mark ${documentState.title} as favorite"
+                                        },
                                     ) {
-                                        Text(if (documentState.isFavorite) "Unfavorite" else "Favorite")
+                                        OutlinedButton(
+                                            onClick = onToggleFavorite,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        ) {
+                                            Text(if (documentState.isFavorite) "Unfavorite" else "Favorite")
+                                        }
                                     }
                                 }
                             }
                             if (!documentState.isHidden && onHideScore != null) {
-                                LunarTooltip("Hide this score", modifier = Modifier.weight(1f)) {
-                                    OutlinedButton(
-                                        onClick = onHideScore,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        Text("Hide score")
+                                Box(modifier = Modifier.weight(1f)) {
+                                    LunarTooltip("Hide this score") {
+                                        OutlinedButton(
+                                            onClick = onHideScore,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        ) {
+                                            Text("Hide score")
+                                        }
                                     }
                                 }
                             }
-                            LunarTooltip("Exit fullscreen viewer", modifier = Modifier.weight(1f)) {
-                                Button(
-                                    onClick = onBack,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text("Exit Fullscreen")
+                            Box(modifier = Modifier.weight(1f)) {
+                                LunarTooltip("Exit fullscreen viewer") {
+                                    Button(
+                                        onClick = onBack,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text("Exit Fullscreen")
+                                    }
                                 }
                             }
                         }

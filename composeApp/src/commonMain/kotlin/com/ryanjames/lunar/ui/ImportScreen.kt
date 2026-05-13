@@ -2,6 +2,7 @@ package com.ryanjames.lunar.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -145,25 +146,29 @@ fun ImportScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            LunarTooltip("Add PDFs or folders from this device", modifier = Modifier.weight(1f)) {
-                Button(
-                    onClick = { showLocalDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = runtime.capabilities.fileImportSupported && !appState.importInProgress,
-                ) {
-                    Text("Add local source")
+            Box(modifier = Modifier.weight(1f)) {
+                LunarTooltip("Add PDFs or folders from this device") {
+                    Button(
+                        onClick = { showLocalDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = runtime.capabilities.fileImportSupported && !appState.importInProgress,
+                    ) {
+                        Text("Add local source")
+                    }
                 }
             }
-            LunarTooltip("Add a Google Drive or Supabase source", modifier = Modifier.weight(1f)) {
-                Button(
-                    onClick = { showCloudDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondary,
-                        contentColor = MaterialTheme.colorScheme.onSecondary,
-                    ),
-                ) {
-                    Text("Add cloud source")
+            Box(modifier = Modifier.weight(1f)) {
+                LunarTooltip("Add a Google Drive or Supabase source") {
+                    Button(
+                        onClick = { showCloudDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary,
+                            contentColor = MaterialTheme.colorScheme.onSecondary,
+                        ),
+                    ) {
+                        Text("Add cloud source")
+                    }
                 }
             }
         }

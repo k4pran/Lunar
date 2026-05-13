@@ -725,22 +725,26 @@ private fun RandomLibraryActionsRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        LunarTooltip("Open a random score from the current library view", modifier = Modifier.weight(1f)) {
-            OutlinedButton(
-                modifier = Modifier.fillMaxWidth(),
-                enabled = hasScores,
-                onClick = onOpenRandomSheet,
-            ) {
-                Text("Open random sheet")
+        Box(modifier = Modifier.weight(1f)) {
+            LunarTooltip("Open a random score from the current library view") {
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = hasScores,
+                    onClick = onOpenRandomSheet,
+                ) {
+                    Text("Open random sheet")
+                }
             }
         }
-        LunarTooltip("Create a temporary random setlist from the current library view", modifier = Modifier.weight(1f)) {
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                enabled = hasScores,
-                onClick = onCreateRandomSetlist,
-            ) {
-                Text("Random setlist")
+        Box(modifier = Modifier.weight(1f)) {
+            LunarTooltip("Create a temporary random setlist from the current library view") {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = hasScores,
+                    onClick = onCreateRandomSetlist,
+                ) {
+                    Text("Random setlist")
+                }
             }
         }
     }
