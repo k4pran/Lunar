@@ -211,6 +211,7 @@ class ScreenSmokeTest {
             }
 
             rule.onNodeWithContentDescription("Prelude opens with LilyPond Viewer").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Moon River opens with PDF Viewer").assertIsDisplayed()
             rule.onNodeWithText("Show filters").assertIsDisplayed()
             rule.onNodeWithText("Show filters").performClick()
             rule.onNodeWithText("Viewer support").assertIsDisplayed()

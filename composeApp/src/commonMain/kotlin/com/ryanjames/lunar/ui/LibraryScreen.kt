@@ -69,6 +69,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ryanjames.lunar.composeapp.generated.resources.Res
 import com.ryanjames.lunar.composeapp.generated.resources.lilypond_logo
+import com.ryanjames.lunar.composeapp.generated.resources.pdf_logo
 import com.ryanjames.lunar.library.data.LibrarySnapshot
 import com.ryanjames.lunar.library.data.SyncStatus
 import com.ryanjames.lunar.library.model.HiddenScoreFilter
@@ -2824,14 +2825,22 @@ private fun DeleteSongbookDialog(
 
 @Composable
 private fun ViewerSupportBadge(item: SheetMusicItem) {
-    if (item.viewerSupport != ScoreViewerSupport.LILYPOND) {
-        return
+    val description = when (item.viewerSupport) {
+        ScoreViewerSupport.PDF -> "${item.title} opens with PDF Viewer"
+        ScoreViewerSupport.LILYPOND -> "${item.title} opens with LilyPond Viewer"
+    }
+    val containerColor = when (item.viewerSupport) {
+        ScoreViewerSupport.PDF -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.76f)
+        ScoreViewerSupport.LILYPOND -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.76f)
+    }
+    val logo = when (item.viewerSupport) {
+        ScoreViewerSupport.PDF -> Res.drawable.pdf_logo
+        ScoreViewerSupport.LILYPOND -> Res.drawable.lilypond_logo
     }
 
-    val description = "${item.title} opens with LilyPond Viewer"
     LunarTooltip(description) {
         Surface(
-            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.76f),
+            color = containerColor,
             shape = MaterialTheme.shapes.small,
             modifier = Modifier
                 .size(32.dp)
@@ -2846,7 +2855,7 @@ private fun ViewerSupportBadge(item: SheetMusicItem) {
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
-                    painter = painterResource(Res.drawable.lilypond_logo),
+                    painter = painterResource(logo),
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit,
