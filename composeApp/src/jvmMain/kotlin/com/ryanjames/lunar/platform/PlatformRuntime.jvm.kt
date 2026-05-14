@@ -10,6 +10,7 @@ import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.DragData
 import androidx.compose.ui.draganddrop.dragData
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import com.ryanjames.lunar.composition.JsonCompositionDraftStore
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.JsonLibraryStorage
 import com.ryanjames.lunar.library.data.JsonScoreMetadataStorage
@@ -19,6 +20,8 @@ import com.ryanjames.lunar.library.data.StoredDocumentFingerprinter
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.library.model.ScoreMetadata
+import com.ryanjames.lunar.library.model.ScoreMetadataComposer
+import com.ryanjames.lunar.library.model.ScoreMetadataSource
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.JsonAppSettingsStore
 import com.ryanjames.lunar.sync.LibrarySyncManager
@@ -68,6 +71,9 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
     }
     val settingsPath = remember(appRoot) {
         File(appRoot, "settings/app_settings.json").absolutePath.toPath()
+    }
+    val compositionDraftsPath = remember(appRoot) {
+        File(appRoot, "compositions/drafts.json").absolutePath.toPath()
     }
     val scoresDirectory = remember(appRoot) {
         File(appRoot, "scores").apply { mkdirs() }
@@ -120,6 +126,15 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             sourcesPath = sourcesPath,
         )
     }
+    val compositionStore = remember(compositionDraftsPath) {
+        JsonCompositionDraftStore(
+            fileSystem = FileSystem.SYSTEM,
+            draftsPath = compositionDraftsPath,
+        )
+    }
+    val compositionPdfImporter = remember(scoresDirectory) {
+        DesktopCompositionPdfImporter(scoresDirectory = scoresDirectory)
+    }
     val syncManager = remember(repository, renderer, pdfStore, syncHttpClient, sourceRegistry, googleDriveOAuth) {
         LibrarySyncManager(
             repository = repository,
@@ -154,6 +169,8 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
         coverImagePicker,
         syncManager,
         sourceRegistry,
+        compositionStore,
+        compositionPdfImporter,
         settingsStore,
         googleDriveOAuth,
         appRoot,
@@ -184,6 +201,8 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             coverImagePicker = coverImagePicker,
             syncManager = syncManager,
             sourceRegistry = sourceRegistry,
+            compositionStore = compositionStore,
+            compositionPdfImporter = compositionPdfImporter,
             settingsStore = settingsStore,
             googleDriveOAuth = googleDriveOAuth,
             cacheInspector = cacheInspector,
@@ -1215,6 +1234,44 @@ private class DesktopManagedPdfStore(
 
     override suspend fun exists(storedPath: String): Boolean = withContext(Dispatchers.IO) {
         File(storedPath).exists()
+    }
+}
+
+private class DesktopCompositionPdfImporter(
+    private val scoresDirectory: File,
+) : CompositionPdfImporter {
+    override suspend fun importRenderedComposition(
+        request: CompositionPdfImportRequest,
+    ): ImportedPdfDescriptor = withContext(Dispatchers.IO) {
+        val source = File(request.documentPath)
+        if (!source.exists()) {
+            throw IOException("Rendered composition PDF was not found.")
+        }
+
+        val originalFileName = safeExportFileName("${request.title}.pdf")
+        val destination = nextManagedPdfFile(scoresDirectory, originalFileName)
+        destination.parentFile?.mkdirs()
+        source.copyTo(destination, overwrite = false)
+        val pageCount = request.pageCount ?: loadPdfPageCount(destination)
+
+        ImportedPdfDescriptor(
+            storedPath = destination.absolutePath,
+            originalFileName = originalFileName,
+            sourceUri = "lunar-compose:${request.draftId}",
+            contentFingerprint = fingerprintFile(destination),
+            pageCount = pageCount,
+            suggestedTitle = request.title,
+            scoreMetadata = ScoreMetadata(
+                title = request.title,
+                composer = ScoreMetadataComposer(name = request.composer),
+                pageCount = pageCount,
+                source = ScoreMetadataSource(
+                    filename = originalFileName,
+                    fileType = "pdf",
+                    url = "lunar-compose:${request.draftId}",
+                ),
+            ),
+        )
     }
 }
 

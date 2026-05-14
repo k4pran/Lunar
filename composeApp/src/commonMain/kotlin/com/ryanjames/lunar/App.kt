@@ -91,13 +91,20 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
     val defaultTwoPageMode = appSettings.defaultViewerPageMode == ViewerPageModePreference.TWO_PAGE
     val libraryScopeItems = currentLibraryScopeItems(snapshot = snapshot, appState = appState)
 
-    LaunchedEffect(runtime.repository, runtime.syncManager, runtime.sourceRegistry, runtime.settingsStore) {
+    LaunchedEffect(
+        runtime.repository,
+        runtime.syncManager,
+        runtime.sourceRegistry,
+        runtime.compositionStore,
+        runtime.settingsStore,
+    ) {
         appReady = false
         startupError = null
         runCatching {
             runtime.settingsStore.initialize()
             runtime.repository.initialize()
             runtime.sourceRegistry.initialize()
+            runtime.compositionStore.initialize()
             runtime.syncManager.initialize()
         }.onSuccess {
             appReady = true

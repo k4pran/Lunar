@@ -1,5 +1,7 @@
 package com.ryanjames.lunar
 
+import com.ryanjames.lunar.composition.CompositionDraftStore
+import com.ryanjames.lunar.composition.InMemoryCompositionDraftStore
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
 import com.ryanjames.lunar.library.data.InMemorySourceRegistry
@@ -10,6 +12,7 @@ import com.ryanjames.lunar.library.model.LibrarySetlist
 import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.platform.CoverImagePicker
+import com.ryanjames.lunar.platform.CompositionPdfImporter
 import com.ryanjames.lunar.platform.LibraryCacheInspector
 import com.ryanjames.lunar.platform.LibraryCacheSnapshot
 import com.ryanjames.lunar.platform.LilyPondLiveRenderer
@@ -23,6 +26,7 @@ import com.ryanjames.lunar.platform.SongbookPdfBuilder
 import com.ryanjames.lunar.platform.UnavailablePdfPageRenderer
 import com.ryanjames.lunar.platform.UnsupportedCoverImagePicker
 import com.ryanjames.lunar.platform.UnsupportedLilyPondLiveRenderer
+import com.ryanjames.lunar.platform.UnsupportedCompositionPdfImporter
 import com.ryanjames.lunar.platform.UnsupportedPdfDocumentExporter
 import com.ryanjames.lunar.platform.UnsupportedPdfImporter
 import com.ryanjames.lunar.platform.UnsupportedSongbookPdfBuilder
@@ -52,6 +56,8 @@ internal suspend fun createTestPlatformRuntime(
     coverImagePicker: CoverImagePicker = UnsupportedCoverImagePicker,
     songbookCreationSupported: Boolean = false,
     songbookCoverImageSupported: Boolean = false,
+    compositionStore: CompositionDraftStore = InMemoryCompositionDraftStore(),
+    compositionPdfImporter: CompositionPdfImporter = UnsupportedCompositionPdfImporter,
 ): PlatformRuntime {
     val repository = DefaultSheetMusicRepository(
         storage = InMemoryLibraryStorage(
@@ -67,6 +73,8 @@ internal suspend fun createTestPlatformRuntime(
 
     val sourceRegistry = InMemorySourceRegistry(initialSources)
     sourceRegistry.initialize()
+
+    compositionStore.initialize()
 
     return PlatformRuntime(
         platformName = "Test",
@@ -91,6 +99,8 @@ internal suspend fun createTestPlatformRuntime(
             renderer = renderer,
         ),
         sourceRegistry = sourceRegistry,
+        compositionStore = compositionStore,
+        compositionPdfImporter = compositionPdfImporter,
         settingsStore = settingsStore,
         googleDriveOAuth = UnsupportedGoogleDriveOAuthCoordinator,
         cacheInspector = StaticLibraryCacheInspector(cacheSnapshot),

@@ -4,6 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import com.ryanjames.lunar.composition.CompositionDraftStore
+import com.ryanjames.lunar.composition.InMemoryCompositionDraftStore
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
 import com.ryanjames.lunar.library.data.InMemorySourceRegistry
@@ -36,6 +38,8 @@ data class PlatformRuntime(
     val coverImagePicker: CoverImagePicker,
     val syncManager: LibrarySyncManager,
     val sourceRegistry: SourceRegistry,
+    val compositionStore: CompositionDraftStore,
+    val compositionPdfImporter: CompositionPdfImporter,
     val settingsStore: AppSettingsStore,
     val googleDriveOAuth: GoogleDriveOAuthCoordinator,
     val cacheInspector: LibraryCacheInspector,
@@ -142,6 +146,14 @@ data class SongbookBuildResult(
     val pageCount: Int? = null,
 )
 
+data class CompositionPdfImportRequest(
+    val documentPath: String,
+    val draftId: String,
+    val title: String,
+    val composer: String,
+    val pageCount: Int? = null,
+)
+
 interface PdfImporter {
     val state: StateFlow<ImporterState>
 
@@ -189,6 +201,10 @@ interface SongbookPdfBuilder {
 
 interface CoverImagePicker {
     suspend fun pickCoverImage(): SelectedCoverImage?
+}
+
+interface CompositionPdfImporter {
+    suspend fun importRenderedComposition(request: CompositionPdfImportRequest): ImportedPdfDescriptor
 }
 
 class UnsupportedPdfImporter(
@@ -251,6 +267,11 @@ object UnsupportedCoverImagePicker : CoverImagePicker {
         throw UnsupportedOperationException("Cover image selection is unavailable on this target.")
 }
 
+object UnsupportedCompositionPdfImporter : CompositionPdfImporter {
+    override suspend fun importRenderedComposition(request: CompositionPdfImportRequest): ImportedPdfDescriptor =
+        throw UnsupportedOperationException("Composition saving is unavailable on this target.")
+}
+
 @Composable
 fun rememberUnsupportedPlatformRuntime(
     platformName: String,
@@ -293,6 +314,8 @@ fun rememberUnsupportedPlatformRuntime(
             coverImagePicker = UnsupportedCoverImagePicker,
             syncManager = syncManager,
             sourceRegistry = InMemorySourceRegistry(),
+            compositionStore = InMemoryCompositionDraftStore(),
+            compositionPdfImporter = UnsupportedCompositionPdfImporter,
             settingsStore = InMemoryAppSettingsStore(),
             googleDriveOAuth = UnsupportedGoogleDriveOAuthCoordinator,
             cacheInspector = UnsupportedLibraryCacheInspector(statusLine),

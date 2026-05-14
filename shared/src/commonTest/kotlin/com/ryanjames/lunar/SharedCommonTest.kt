@@ -1,5 +1,9 @@
 package com.ryanjames.lunar
 
+import com.ryanjames.lunar.composition.CompositionNotation
+import com.ryanjames.lunar.composition.InMemoryCompositionDraftStore
+import com.ryanjames.lunar.composition.createCompositionDraft
+import com.ryanjames.lunar.composition.withUpdatedContents
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.InMemoryLibraryStorage
 import com.ryanjames.lunar.library.data.InMemoryScoreMetadataStorage
@@ -25,6 +29,34 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SharedCommonTest {
+    @Test
+    fun compositionDraftStoreUpsertsAndDeletesDrafts() = runBlocking {
+        val store = InMemoryCompositionDraftStore()
+        val draft = createCompositionDraft(
+            title = "Sketch",
+            composer = "Composer",
+            sourceText = "\\version \"2.24.0\"",
+            notation = CompositionNotation.LILYPOND,
+        )
+
+        store.initialize()
+        store.upsertDraft(draft)
+        assertEquals(listOf(draft), store.drafts.value)
+        assertEquals(draft, store.getDraft(draft.id))
+
+        val updated = draft.withUpdatedContents(
+            title = "Finished Sketch",
+            composer = "Composer",
+            sourceText = "{ c'4 d' }",
+        )
+        store.upsertDraft(updated)
+        assertEquals(listOf(updated), store.drafts.value)
+
+        store.deleteDraft(draft.id)
+        assertTrue(store.drafts.value.isEmpty())
+        assertNull(store.getDraft(draft.id))
+    }
+
     @Test
     fun repositoryImportsAndUpdatesMetadata() = runBlocking {
         val metadataStorage = InMemoryScoreMetadataStorage()

@@ -23,12 +23,19 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
+import com.ryanjames.lunar.composition.InMemoryCompositionDraftStore
 import com.ryanjames.lunar.library.data.CloudGoogleDriveSource
 import com.ryanjames.lunar.library.data.CloudPathStrategy
 import com.ryanjames.lunar.library.data.GoogleDriveImportRoot
 import com.ryanjames.lunar.library.data.GoogleDriveStorageSettings
 import com.ryanjames.lunar.library.data.LibrarySnapshot
 import com.ryanjames.lunar.library.data.SheetMusicRepository
+import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
+import com.ryanjames.lunar.library.model.ScoreMetadata
+import com.ryanjames.lunar.library.model.ScoreMetadataComposer
+import com.ryanjames.lunar.library.model.ScoreMetadataSource
+import com.ryanjames.lunar.platform.CompositionPdfImporter
+import com.ryanjames.lunar.platform.CompositionPdfImportRequest
 import com.ryanjames.lunar.platform.ImporterState
 import com.ryanjames.lunar.platform.LibraryCacheSnapshot
 import com.ryanjames.lunar.platform.LilyPondLiveRenderer
@@ -518,6 +525,8 @@ class ScreenSmokeTest {
 
             rule.onNodeWithText("Compose").assertIsDisplayed()
             rule.onNodeWithText("LilyPond").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Clear LilyPond source").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Load LilyPond template").assertIsDisplayed()
             rule.onNodeWithContentDescription("Freeform LilyPond editor").assertIsDisplayed()
             rule.waitUntil(timeoutMillis = 5_000) {
                 lilyPondRenderer.renderedSources.isNotEmpty()
@@ -528,6 +537,61 @@ class ScreenSmokeTest {
             rule.waitUntil(timeoutMillis = 5_000) {
                 lilyPondRenderer.renderedSources.any { source -> source.sourceText == editedSource }
             }
+        }
+    }
+
+    @Test
+    fun composeScreenPersistsDraftsAndImportsSavedComposition() {
+        runBlocking {
+            val lilyPondRenderer = RecordingComposeLilyPondRenderer()
+            val compositionStore = InMemoryCompositionDraftStore()
+            val compositionImporter = RecordingCompositionPdfImporter()
+            val runtime = createTestPlatformRuntime(
+                renderer = ComposeTestPdfPageRenderer(),
+                lilyPondLiveRenderer = lilyPondRenderer,
+                lilyPondLiveViewingSupported = true,
+                compositionStore = compositionStore,
+                compositionPdfImporter = compositionImporter,
+            )
+            val editedSource = "\\version \"2.24.0\"\n{ e'4 fis' gis' a' }"
+
+            rule.setContent {
+                LunarTheme(theme = AppColorTheme.OCEAN) {
+                    ComposeScreen(runtime = runtime)
+                }
+            }
+
+            rule.onNodeWithContentDescription("Collapse composition list").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Collapse composition list").performClick()
+            rule.onNodeWithContentDescription("Expand composition list").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Expand composition list").performClick()
+            rule.onNodeWithContentDescription("Composition title")
+                .performTextReplacement("Morning Study")
+            rule.onNodeWithContentDescription("Composition composer")
+                .performTextReplacement("R. Composer")
+            rule.onNodeWithContentDescription("Freeform LilyPond editor")
+                .performTextReplacement(editedSource)
+            rule.onNodeWithContentDescription("Save composition").performClick()
+
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.library.value.items.any { item -> item.title == "Morning Study" }
+            }
+            val importedItem = runtime.repository.library.value.items.first { item ->
+                item.title == "Morning Study"
+            }
+            assertEquals("R. Composer", importedItem.composer)
+            assertTrue(compositionImporter.requests.any { request ->
+                request.title == "Morning Study" && request.composer == "R. Composer"
+            })
+
+            rule.onNodeWithContentDescription("New composition").performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                compositionStore.drafts.value.size >= 2
+            }
+            assertTrue(compositionStore.drafts.value.any { draft ->
+                draft.title == "Morning Study" && draft.sourceText == editedSource
+            })
+            rule.onNodeWithContentDescription("Open composition Morning Study").assertIsDisplayed()
         }
     }
 
@@ -582,6 +646,35 @@ private class ComposeTestPdfPageRenderer : PdfPageRenderer {
         aspectRatio = 0.72f,
         image = ImageBitmap(width = 120, height = 160),
     )
+}
+
+private class RecordingCompositionPdfImporter : CompositionPdfImporter {
+    val requests = mutableListOf<CompositionPdfImportRequest>()
+
+    override suspend fun importRenderedComposition(
+        request: CompositionPdfImportRequest,
+    ): ImportedPdfDescriptor {
+        requests += request
+        val originalFileName = "${request.title}.pdf"
+        return ImportedPdfDescriptor(
+            storedPath = "/compose-library/${request.draftId}-${requests.size}.pdf",
+            originalFileName = originalFileName,
+            sourceUri = "lunar-compose:${request.draftId}",
+            contentFingerprint = "composition-${request.draftId}-${requests.size}",
+            pageCount = request.pageCount ?: 1,
+            suggestedTitle = request.title,
+            scoreMetadata = ScoreMetadata(
+                title = request.title,
+                composer = ScoreMetadataComposer(name = request.composer),
+                pageCount = request.pageCount ?: 1,
+                source = ScoreMetadataSource(
+                    filename = originalFileName,
+                    fileType = "pdf",
+                    url = "lunar-compose:${request.draftId}",
+                ),
+            ),
+        )
+    }
 }
 
 private class DelayedSheetMusicRepository(

@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.documentfile.provider.DocumentFile
+import com.ryanjames.lunar.composition.JsonCompositionDraftStore
 import com.ryanjames.lunar.library.data.DefaultSheetMusicRepository
 import com.ryanjames.lunar.library.data.JsonLibraryStorage
 import com.ryanjames.lunar.library.data.JsonScoreMetadataStorage
@@ -28,6 +29,8 @@ import com.ryanjames.lunar.library.data.JsonSourceRegistry
 import com.ryanjames.lunar.library.data.StoredDocumentFingerprinter
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.library.model.ScoreMetadata
+import com.ryanjames.lunar.library.model.ScoreMetadataComposer
+import com.ryanjames.lunar.library.model.ScoreMetadataSource
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.JsonAppSettingsStore
 import com.ryanjames.lunar.sync.LibrarySyncManager
@@ -81,6 +84,12 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
     val settingsPath = remember(settingsFile) {
         settingsFile.absolutePath.toPath()
     }
+    val compositionDraftsFile = remember(context) {
+        File(appRoot, "compositions/drafts.json")
+    }
+    val compositionDraftsPath = remember(compositionDraftsFile) {
+        compositionDraftsFile.absolutePath.toPath()
+    }
     val repository = remember(context) {
         DefaultSheetMusicRepository(
             storage = JsonLibraryStorage(
@@ -115,6 +124,15 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             fileSystem = FileSystem.SYSTEM,
             sourcesPath = sourcesPath,
         )
+    }
+    val compositionStore = remember(compositionDraftsPath) {
+        JsonCompositionDraftStore(
+            fileSystem = FileSystem.SYSTEM,
+            draftsPath = compositionDraftsPath,
+        )
+    }
+    val compositionPdfImporter = remember(scoresDirectory) {
+        AndroidCompositionPdfImporter(scoresDirectory = scoresDirectory)
     }
     val syncManager = remember(repository, renderer, pdfStore, syncHttpClient, sourceRegistry) {
         LibrarySyncManager(
@@ -155,7 +173,17 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
         )
     }
 
-    return remember(repository, importer, renderer, syncManager, sourceRegistry, settingsStore, cacheInspector) {
+    return remember(
+        repository,
+        importer,
+        renderer,
+        syncManager,
+        sourceRegistry,
+        compositionStore,
+        compositionPdfImporter,
+        settingsStore,
+        cacheInspector,
+    ) {
         PlatformRuntime(
             platformName = "Android",
             capabilities = PlatformCapabilities(
@@ -177,6 +205,8 @@ actual fun rememberPlatformRuntime(): PlatformRuntime {
             coverImagePicker = UnsupportedCoverImagePicker,
             syncManager = syncManager,
             sourceRegistry = sourceRegistry,
+            compositionStore = compositionStore,
+            compositionPdfImporter = compositionPdfImporter,
             settingsStore = settingsStore,
             googleDriveOAuth = UnsupportedGoogleDriveOAuthCoordinator,
             cacheInspector = cacheInspector,
@@ -697,6 +727,47 @@ private class AndroidManagedPdfStore(
     }
 }
 
+private class AndroidCompositionPdfImporter(
+    private val scoresDirectory: File,
+) : CompositionPdfImporter {
+    override suspend fun importRenderedComposition(
+        request: CompositionPdfImportRequest,
+    ): ImportedPdfDescriptor = withContext(Dispatchers.IO) {
+        val source = File(request.documentPath)
+        if (!source.exists()) {
+            throw java.io.IOException("Rendered composition PDF was not found.")
+        }
+
+        val originalFileName = safePdfFileName("${request.title}.pdf")
+        val destination = File(
+            scoresDirectory,
+            "${System.currentTimeMillis()}_${Random.nextInt(1000, 9999)}_${safeFileStem(originalFileName)}.pdf",
+        )
+        destination.parentFile?.mkdirs()
+        val fingerprint = copyFileWithFingerprint(source = source, destination = destination)
+        val pageCount = request.pageCount ?: readAndroidPdfPageCount(destination)
+
+        ImportedPdfDescriptor(
+            storedPath = destination.absolutePath,
+            originalFileName = originalFileName,
+            sourceUri = "lunar-compose:${request.draftId}",
+            contentFingerprint = fingerprint,
+            pageCount = pageCount,
+            suggestedTitle = request.title,
+            scoreMetadata = ScoreMetadata(
+                title = request.title,
+                composer = ScoreMetadataComposer(name = request.composer),
+                pageCount = pageCount,
+                source = ScoreMetadataSource(
+                    filename = originalFileName,
+                    fileType = "pdf",
+                    url = "lunar-compose:${request.draftId}",
+                ),
+            ),
+        )
+    }
+}
+
 private data class AndroidImportEntry(
     val uri: Uri,
     val name: String,
@@ -707,6 +778,43 @@ private fun safeFileStem(fileName: String): String = fileName
     .replace(Regex("[^A-Za-z0-9_-]+"), "_")
     .trim('_')
     .ifEmpty { "score" }
+
+private fun safePdfFileName(fileName: String): String {
+    val originalStem = fileName
+        .substringBeforeLast('.')
+        .trim()
+        .ifEmpty { "score" }
+    val sanitizedStem = originalStem
+        .replace(Regex("[\\\\/:*?\"<>|]+"), "_")
+        .trim()
+        .ifEmpty { "score" }
+    return "$sanitizedStem.pdf"
+}
+
+private fun copyFileWithFingerprint(
+    source: File,
+    destination: File,
+): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    source.inputStream().use { input ->
+        destination.outputStream().use { output ->
+            val buffer = ByteArray(COPY_BUFFER_SIZE_BYTES)
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                digest.update(buffer, 0, read)
+                output.write(buffer, 0, read)
+            }
+        }
+    }
+    return digest.digest().toHexString()
+}
+
+private fun readAndroidPdfPageCount(file: File): Int? = runCatching {
+    ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+        PdfRenderer(descriptor).use { renderer -> renderer.pageCount }
+    }
+}.getOrNull()
 
 private fun isAndroidScoreFileName(name: String): Boolean =
     name.endsWith(".pdf", ignoreCase = true)
