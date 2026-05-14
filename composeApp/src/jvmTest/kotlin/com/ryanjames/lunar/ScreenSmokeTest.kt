@@ -4,6 +4,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
@@ -20,27 +21,42 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
 import com.ryanjames.lunar.library.data.CloudGoogleDriveSource
 import com.ryanjames.lunar.library.data.CloudPathStrategy
 import com.ryanjames.lunar.library.data.GoogleDriveImportRoot
 import com.ryanjames.lunar.library.data.GoogleDriveStorageSettings
+import com.ryanjames.lunar.library.data.LibrarySnapshot
+import com.ryanjames.lunar.library.data.SheetMusicRepository
 import com.ryanjames.lunar.platform.ImporterState
 import com.ryanjames.lunar.platform.LibraryCacheSnapshot
+import com.ryanjames.lunar.platform.LilyPondLiveRenderer
+import com.ryanjames.lunar.platform.LilyPondLiveRenderResult
+import com.ryanjames.lunar.platform.LilyPondSourceSnapshot
+import com.ryanjames.lunar.platform.PdfDocumentInfo
+import com.ryanjames.lunar.platform.PdfPageRenderer
+import com.ryanjames.lunar.platform.RenderedPdfPage
 import com.ryanjames.lunar.settings.AppColorTheme
 import com.ryanjames.lunar.settings.AppSettings
+import com.ryanjames.lunar.settings.AppSettingsStore
 import com.ryanjames.lunar.settings.ViewerKeybindings
 import com.ryanjames.lunar.sync.CloudSyncState
 import com.ryanjames.lunar.ui.AppSection
+import com.ryanjames.lunar.ui.ComposeScreen
 import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.ImportScreen
 import com.ryanjames.lunar.ui.LibraryScreen
 import com.ryanjames.lunar.ui.LunarTooltip
 import com.ryanjames.lunar.ui.LunarTheme
 import com.ryanjames.lunar.ui.SettingsScreen
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
@@ -51,6 +67,50 @@ class ScreenSmokeTest {
 
     @get:Rule
     val rule = createComposeRule()
+
+    @Test
+    fun appShowsStartupLoadingUntilLocalRuntimeIsReady() {
+        runBlocking {
+            val settingsGate = CompletableDeferred<Unit>()
+            val repositoryGate = CompletableDeferred<Unit>()
+            val loadedSettings = AppSettings(
+                theme = AppColorTheme.DARCULA,
+                refreshOnLaunch = false,
+            )
+            val baseRuntime = createTestPlatformRuntime(
+                initialItems = listOf(testSheetMusicItem(id = "moon_river", title = "Moon River")),
+            )
+            val runtime = baseRuntime.copy(
+                repository = DelayedSheetMusicRepository(
+                    delegate = baseRuntime.repository,
+                    initializeGate = repositoryGate,
+                ),
+                settingsStore = DelayedAppSettingsStore(
+                    loadedSettings = loadedSettings,
+                    initializeGate = settingsGate,
+                ),
+            )
+
+            rule.setContent {
+                LunarApp(runtime)
+            }
+
+            rule.onNodeWithContentDescription("Lunar is starting").assertIsDisplayed()
+            assertTrue(rule.onAllNodesWithText("Moon River").fetchSemanticsNodes().isEmpty())
+
+            settingsGate.complete(Unit)
+            rule.waitForIdle()
+            rule.onNodeWithContentDescription("Lunar is starting").assertIsDisplayed()
+            assertTrue(rule.onAllNodesWithText("Moon River").fetchSemanticsNodes().isEmpty())
+
+            repositoryGate.complete(Unit)
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithText("Moon River").fetchSemanticsNodes().isNotEmpty()
+            }
+            assertTrue(rule.onAllNodesWithText("Loading Lunar").fetchSemanticsNodes().isEmpty())
+            rule.onNodeWithText("Moon River").assertIsDisplayed()
+        }
+    }
 
     @Test
     fun lunarTooltipShowsFromLongClickSemantics() {
@@ -440,7 +500,39 @@ class ScreenSmokeTest {
     }
 
     @Test
-    fun bottomNavigationOmitsComposeSection() {
+    fun composeScreenRendersFreeformLilyPondSource() {
+        runBlocking {
+            val lilyPondRenderer = RecordingComposeLilyPondRenderer()
+            val runtime = createTestPlatformRuntime(
+                renderer = ComposeTestPdfPageRenderer(),
+                lilyPondLiveRenderer = lilyPondRenderer,
+                lilyPondLiveViewingSupported = true,
+            )
+            val editedSource = "\\version \"2.24.0\"\n{ g'4 a' b' c'' }"
+
+            rule.setContent {
+                LunarTheme(theme = AppColorTheme.OCEAN) {
+                    ComposeScreen(runtime = runtime)
+                }
+            }
+
+            rule.onNodeWithText("Compose").assertIsDisplayed()
+            rule.onNodeWithText("LilyPond").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Freeform LilyPond editor").assertIsDisplayed()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                lilyPondRenderer.renderedSources.isNotEmpty()
+            }
+
+            rule.onNodeWithContentDescription("Freeform LilyPond editor")
+                .performTextReplacement(editedSource)
+            rule.waitUntil(timeoutMillis = 5_000) {
+                lilyPondRenderer.renderedSources.any { source -> source.sourceText == editedSource }
+            }
+        }
+    }
+
+    @Test
+    fun bottomNavigationShowsComposeSection() {
         rule.setContent {
             LunarTheme(theme = AppColorTheme.OCEAN) {
                 BottomNavigationPanel(
@@ -452,10 +544,8 @@ class ScreenSmokeTest {
 
         rule.onDisplayedNodeWithText("Sources").assertIsDisplayed()
         rule.onDisplayedNodeWithText("Library").assertIsDisplayed()
+        rule.onDisplayedNodeWithText("Compose").assertIsDisplayed()
         rule.onDisplayedNodeWithText("Settings").assertIsDisplayed()
-        rule.runOnIdle {
-            assertTrue(rule.onAllNodesWithText("Compose").fetchSemanticsNodes().isEmpty())
-        }
     }
 }
 
@@ -463,3 +553,70 @@ private fun backgroundScope(): CoroutineScope = CoroutineScope(SupervisorJob() +
 
 private fun ComposeContentTestRule.onDisplayedNodeWithText(text: String) =
     onNode(hasText(text) and !hasAnyAncestor(isPopup()))
+
+private class RecordingComposeLilyPondRenderer : LilyPondLiveRenderer {
+    val renderedSources = mutableListOf<LilyPondSourceSnapshot>()
+
+    override suspend fun loadSource(document: com.ryanjames.lunar.library.model.PdfDocumentReference): LilyPondSourceSnapshot? =
+        null
+
+    override suspend fun renderSource(source: LilyPondSourceSnapshot): LilyPondLiveRenderResult {
+        renderedSources += source
+        return LilyPondLiveRenderResult(
+            documentPath = "/compose/${source.revision.hashCode()}.pdf",
+            pageCount = 1,
+        )
+    }
+}
+
+private class ComposeTestPdfPageRenderer : PdfPageRenderer {
+    override suspend fun inspect(documentPath: String): PdfDocumentInfo = PdfDocumentInfo(pageCount = 1)
+
+    override suspend fun renderPage(
+        documentPath: String,
+        pageIndex: Int,
+        targetWidth: Int,
+    ): RenderedPdfPage? = RenderedPdfPage(
+        pageIndex = pageIndex,
+        pageCount = 1,
+        aspectRatio = 0.72f,
+        image = ImageBitmap(width = 120, height = 160),
+    )
+}
+
+private class DelayedSheetMusicRepository(
+    private val delegate: SheetMusicRepository,
+    private val initializeGate: CompletableDeferred<Unit>,
+) : SheetMusicRepository by delegate {
+    private val state = MutableStateFlow(LibrarySnapshot())
+
+    override val library: StateFlow<LibrarySnapshot> = state.asStateFlow()
+
+    override suspend fun initialize() {
+        initializeGate.await()
+        delegate.initialize()
+        state.value = delegate.library.value
+    }
+}
+
+private class DelayedAppSettingsStore(
+    private val loadedSettings: AppSettings,
+    private val initializeGate: CompletableDeferred<Unit>,
+) : AppSettingsStore {
+    private val state = MutableStateFlow(AppSettings())
+
+    override val settings: StateFlow<AppSettings> = state.asStateFlow()
+
+    override suspend fun initialize() {
+        initializeGate.await()
+        state.value = loadedSettings
+    }
+
+    override suspend fun updateSettings(transform: (AppSettings) -> AppSettings) {
+        state.value = transform(state.value)
+    }
+
+    override suspend fun reset() {
+        state.value = AppSettings()
+    }
+}

@@ -1,5 +1,11 @@
 package com.ryanjames.lunar
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -24,11 +31,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -37,6 +52,7 @@ import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.platform.externalScoreDropTarget
 import com.ryanjames.lunar.platform.rememberPlatformRuntime
 import com.ryanjames.lunar.ui.AppSection
+import com.ryanjames.lunar.ui.ComposeScreen
 import com.ryanjames.lunar.ui.FullscreenViewerScreen
 import com.ryanjames.lunar.ui.ImportScreen
 import com.ryanjames.lunar.ui.LibraryScreen
@@ -57,35 +73,59 @@ import kotlinx.coroutines.delay
 @Composable
 fun App() {
     val runtime = rememberPlatformRuntime()
+    LunarApp(runtime)
+}
+
+@Composable
+internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
     val appState = rememberLunarAppState(runtime)
     val snapshot by runtime.repository.library.collectAsState()
     val importerState by runtime.importer.state.collectAsState()
     val syncState by runtime.syncManager.state.collectAsState()
     val appSettings by runtime.settingsStore.settings.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    var appReady by remember(runtime) { mutableStateOf(false) }
+    var startupError by remember(runtime) { mutableStateOf<String?>(null) }
     val previewDocument = snapshot.resolveViewerDocument(appState.previewTarget)
     val fullscreenDocument = snapshot.resolveViewerDocument(appState.fullscreenTarget)
     val defaultTwoPageMode = appSettings.defaultViewerPageMode == ViewerPageModePreference.TWO_PAGE
     val libraryScopeItems = currentLibraryScopeItems(snapshot = snapshot, appState = appState)
 
     LaunchedEffect(runtime.repository, runtime.syncManager, runtime.sourceRegistry, runtime.settingsStore) {
-        runtime.repository.initialize()
-        runtime.sourceRegistry.initialize()
-        runtime.settingsStore.initialize()
-        runtime.syncManager.initialize()
-        if (runtime.settingsStore.settings.value.refreshOnLaunch) {
-            runtime.syncManager.refreshAllSources(
-                sources = runtime.sourceRegistry.sources.value,
-                force = false,
-            )
+        appReady = false
+        startupError = null
+        runCatching {
+            runtime.settingsStore.initialize()
+            runtime.repository.initialize()
+            runtime.sourceRegistry.initialize()
+            runtime.syncManager.initialize()
+        }.onSuccess {
+            appReady = true
+            if (runtime.settingsStore.settings.value.refreshOnLaunch) {
+                runtime.syncManager.refreshAllSources(
+                    sources = runtime.sourceRegistry.sources.value,
+                    force = false,
+                )
+            }
+        }.onFailure { error ->
+            startupError = error.message
+                ?.takeIf(String::isNotBlank)
+                ?: "Lunar could not load its local library."
         }
     }
 
-    LaunchedEffect(appSettings.defaultLibraryLayout) {
+    if (!appReady) {
+        StartupLoadingScreen(errorMessage = startupError)
+        return
+    }
+
+    LaunchedEffect(appReady, appSettings.defaultLibraryLayout) {
+        if (!appReady) return@LaunchedEffect
         appState.applySettings(appSettings)
     }
 
-    LaunchedEffect(appSettings.autoRefreshSchedule, runtime.syncManager, runtime.sourceRegistry) {
+    LaunchedEffect(appReady, appSettings.autoRefreshSchedule, runtime.syncManager, runtime.sourceRegistry) {
+        if (!appReady) return@LaunchedEffect
         val intervalMillis = appSettings.autoRefreshSchedule.intervalMillis ?: return@LaunchedEffect
         while (true) {
             delay(intervalMillis)
@@ -161,6 +201,11 @@ fun App() {
                             snapshot = snapshot,
                             appState = appState,
                             viewerKeybindings = appSettings.viewerKeybindings,
+                            modifier = Modifier.padding(innerPadding),
+                        )
+
+                        AppSection.COMPOSE -> ComposeScreen(
+                            runtime = runtime,
                             modifier = Modifier.padding(innerPadding),
                         )
 
@@ -276,6 +321,79 @@ fun App() {
     }
 }
 
+@Composable
+private fun StartupLoadingScreen(
+    errorMessage: String?,
+    modifier: Modifier = Modifier,
+) {
+    val transition = rememberInfiniteTransition(label = "startup-loading")
+    val rotation by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = LinearEasing),
+        ),
+        label = "startup-spinner",
+    )
+    val description = if (errorMessage == null) {
+        "Lunar is starting"
+    } else {
+        "Lunar startup failed"
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xFF111820))
+            .semantics {
+                contentDescription = description
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            StartupSpinner(rotation = rotation)
+            Text(
+                text = errorMessage ?: "Loading Lunar",
+                color = Color(0xFFE8F2F8),
+            )
+        }
+    }
+}
+
+@Composable
+private fun StartupSpinner(rotation: Float) {
+    Canvas(modifier = Modifier.size(44.dp)) {
+        val strokeWidth = 4.dp.toPx()
+        val inset = strokeWidth / 2f
+        val arcSize = Size(
+            width = size.width - strokeWidth,
+            height = size.height - strokeWidth,
+        )
+        val topLeft = Offset(inset, inset)
+        drawArc(
+            color = Color(0xFF8DD7FF).copy(alpha = 0.24f),
+            startAngle = 0f,
+            sweepAngle = 360f,
+            useCenter = false,
+            topLeft = topLeft,
+            size = arcSize,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+        )
+        drawArc(
+            color = Color(0xFF8DD7FF),
+            startAngle = rotation,
+            sweepAngle = 88f,
+            useCenter = false,
+            topLeft = topLeft,
+            size = arcSize,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+        )
+    }
+}
+
 private fun LibrarySnapshot.resolveViewerDocument(target: ViewerTarget?): ViewerDocumentState? = when (target) {
     is ViewerTarget.Score -> items
         .firstOrNull { it.id == target.itemId }
@@ -353,6 +471,11 @@ internal fun BottomNavigationPanel(
                 title = "Library",
                 selected = selectedSection == AppSection.LIBRARY,
                 onClick = { onSelectSection(AppSection.LIBRARY) },
+            )
+            BottomNavItem(
+                title = "Compose",
+                selected = selectedSection == AppSection.COMPOSE,
+                onClick = { onSelectSection(AppSection.COMPOSE) },
             )
             BottomNavItem(
                 title = "Settings",
