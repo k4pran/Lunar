@@ -268,6 +268,22 @@ class DesktopScoreImportTest {
             assertEquals(1, result.pageCount)
             assertTrue(File(result.documentPath).exists())
 
+            val editedSourceText = """
+                \version "2.24.0"
+                { g'4 a' b' c'' }
+            """.trimIndent()
+            val editedResult = liveRenderer.renderSource(
+                source.copy(
+                    sourceText = editedSourceText,
+                    revision = "${source.revision}:editor",
+                )
+            )
+            val editedScratchSource = renderedSources.last()
+            assertEquals(sourceFile.parentFile.canonicalFile, editedScratchSource.parentFile.canonicalFile)
+            assertTrue(!editedScratchSource.exists())
+            assertEquals(1, editedResult.pageCount)
+            assertTrue(editedResult.documentPath != result.documentPath)
+
             val firstRevision = source.revision
             sourceFile.writeText(
                 """

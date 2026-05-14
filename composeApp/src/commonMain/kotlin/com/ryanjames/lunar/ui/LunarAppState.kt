@@ -20,6 +20,7 @@ import com.ryanjames.lunar.library.model.LibrarySortOption
 import com.ryanjames.lunar.library.model.ScoreMetadata
 import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.library.model.SortDirection
+import com.ryanjames.lunar.library.model.ViewerSupportFilter
 import com.ryanjames.lunar.platform.ImportRequestResult
 import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.SelectedCoverImage
@@ -214,11 +215,16 @@ class LunarAppState(
         }
     }
 
+    fun updateViewerSupportFilter(filter: ViewerSupportFilter) {
+        updateQuery { copy(viewerSupport = filter) }
+    }
+
     fun clearRefinements() {
         updateQuery {
             copy(
                 selectedTags = emptySet(),
                 selectedCollection = null,
+                viewerSupport = ViewerSupportFilter.ALL,
                 favoritesOnly = false,
             )
         }
@@ -254,6 +260,7 @@ class LunarAppState(
                 searchText = "",
                 selectedTags = emptySet(),
                 selectedCollection = null,
+                viewerSupport = ViewerSupportFilter.ALL,
                 favoritesOnly = false,
             )
         }

@@ -176,6 +176,59 @@ class ScreenSmokeTest {
     }
 
     @Test
+    fun libraryScreenShowsLilyPondBadgeAndViewerSupportFilter() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(
+                    id = "moon_river",
+                    title = "Moon River",
+                    pageCount = 2,
+                    originalFileName = "Moon River.pdf",
+                ),
+                testSheetMusicItem(
+                    id = "prelude",
+                    title = "Prelude",
+                    composer = "Bach",
+                    pageCount = 1,
+                    originalFileName = "Prelude.ly",
+                ),
+            )
+            val runtime = createTestPlatformRuntime(initialItems = items)
+            val appState = createTestLunarAppState(
+                scope = backgroundScope(),
+                runtime = runtime,
+            )
+            val snapshot = runtime.repository.library.value
+
+            rule.setContent {
+                LunarTheme(theme = AppColorTheme.OCEAN) {
+                    LibraryScreen(
+                        runtime = runtime,
+                        snapshot = snapshot,
+                        appState = appState,
+                    )
+                }
+            }
+
+            rule.onNodeWithContentDescription("Prelude opens with LilyPond Viewer").assertIsDisplayed()
+            rule.onNodeWithText("Show filters").assertIsDisplayed()
+            rule.onNodeWithText("Show filters").performClick()
+            rule.onNodeWithText("Viewer support").assertIsDisplayed()
+            rule.onNodeWithText("PDF Viewer").assertIsDisplayed()
+            rule.onNodeWithText("LilyPond Viewer").assertIsDisplayed()
+            rule.onNodeWithText("LilyPond Viewer").performClick()
+            rule.runOnIdle {
+                assertEquals(
+                    com.ryanjames.lunar.library.model.ViewerSupportFilter.LILYPOND,
+                    appState.query.viewerSupport,
+                )
+            }
+            assertTrue(rule.onAllNodesWithText("Moon River").fetchSemanticsNodes().isEmpty())
+            rule.onNodeWithText("Prelude").assertIsDisplayed()
+        }
+    }
+
+    @Test
     fun libraryScreenShowsSongbookActionsAndSongbookOverview() {
         runBlocking {
             val items = listOf(

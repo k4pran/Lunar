@@ -2,6 +2,7 @@ package com.ryanjames.lunar.ui
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -60,11 +61,14 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.ryanjames.lunar.composeapp.generated.resources.Res
+import com.ryanjames.lunar.composeapp.generated.resources.lilypond_logo
 import com.ryanjames.lunar.library.data.LibrarySnapshot
 import com.ryanjames.lunar.library.data.SyncStatus
 import com.ryanjames.lunar.library.model.HiddenScoreFilter
@@ -72,12 +76,15 @@ import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.library.model.LibrarySetlist
 import com.ryanjames.lunar.library.model.LibrarySortOption
 import com.ryanjames.lunar.library.model.ScoreMetadata
+import com.ryanjames.lunar.library.model.ScoreViewerSupport
 import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.library.model.SortDirection
+import com.ryanjames.lunar.library.model.ViewerSupportFilter
 import com.ryanjames.lunar.library.model.applyLibraryQuery
 import com.ryanjames.lunar.library.model.availableCollections
 import com.ryanjames.lunar.library.model.availableComposers
 import com.ryanjames.lunar.library.model.availableTags
+import com.ryanjames.lunar.library.model.viewerSupport
 import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.SelectedCoverImage
 import com.ryanjames.lunar.settings.ViewerKeybindings
@@ -85,6 +92,7 @@ import com.ryanjames.lunar.settings.ViewerShortcutAction
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.painterResource
 import kotlin.time.Instant
 
 @Composable
@@ -1477,9 +1485,11 @@ private fun RefineLibraryPanel(
     totalCount: Int,
     appState: LunarAppState,
 ) {
-    val hasAvailableFilters = availableCollections.isNotEmpty() || availableTags.isNotEmpty()
+    val hasViewerFilters = totalCount > 0
+    val hasAvailableFilters = availableCollections.isNotEmpty() || availableTags.isNotEmpty() || hasViewerFilters
     val hasActiveRefinements = appState.query.selectedCollection != null ||
         appState.query.selectedTags.isNotEmpty() ||
+        appState.query.viewerSupport != ViewerSupportFilter.ALL ||
         appState.query.favoritesOnly
 
     if (!hasAvailableFilters && !hasActiveRefinements) {
@@ -1492,6 +1502,7 @@ private fun RefineLibraryPanel(
     val selectedTags = appState.query.selectedTags
     val activeRefinementCount = selectedTags.size +
         (if (appState.query.selectedCollection != null) 1 else 0) +
+        (if (appState.query.viewerSupport != ViewerSupportFilter.ALL) 1 else 0) +
         (if (appState.query.favoritesOnly) 1 else 0)
     val orderedCollections = availableCollections.sortedWith(String.CASE_INSENSITIVE_ORDER)
     val orderedTags = availableTags.sortedWith(
@@ -1576,6 +1587,21 @@ private fun RefineLibraryPanel(
                             selected = appState.query.selectedCollection.equals(collection, ignoreCase = true),
                             onClick = { appState.selectCollection(collection) },
                             label = { Text(collection) },
+                        )
+                    }
+                }
+            }
+
+            if (isExpanded && hasViewerFilters) {
+                FilterChipSection(
+                    title = "Viewer support",
+                    supportingText = "Choose which viewer a score opens with.",
+                ) {
+                    ViewerSupportFilter.entries.forEach { filter ->
+                        FilterChip(
+                            selected = appState.query.viewerSupport == filter,
+                            onClick = { appState.updateViewerSupportFilter(filter) },
+                            label = { Text(filter.label()) },
                         )
                     }
                 }
@@ -2208,7 +2234,10 @@ private fun LibraryCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Checkbox(
                             checked = isSelected,
                             onCheckedChange = { appState.toggleScoreSelection(item.id) },
@@ -2216,6 +2245,7 @@ private fun LibraryCard(
                                 contentDescription = "Select ${item.title}"
                             },
                         )
+                        ViewerSupportBadge(item = item)
                         FavoriteMarker(isFavorite = item.isFavorite)
                     }
                 }
@@ -2790,6 +2820,40 @@ private fun DeleteSongbookDialog(
             }
         },
     )
+}
+
+@Composable
+private fun ViewerSupportBadge(item: SheetMusicItem) {
+    if (item.viewerSupport != ScoreViewerSupport.LILYPOND) {
+        return
+    }
+
+    val description = "${item.title} opens with LilyPond Viewer"
+    LunarTooltip(description) {
+        Surface(
+            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.76f),
+            shape = MaterialTheme.shapes.small,
+            modifier = Modifier
+                .size(32.dp)
+                .semantics {
+                    contentDescription = description
+                },
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = painterResource(Res.drawable.lilypond_logo),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -3645,6 +3709,12 @@ private fun LibrarySortOption.label(): String = when (this) {
     LibrarySortOption.COMPOSER -> "Composer"
     LibrarySortOption.DATE_ADDED -> "Date added"
     LibrarySortOption.LAST_OPENED -> "Last opened"
+}
+
+private fun ViewerSupportFilter.label(): String = when (this) {
+    ViewerSupportFilter.ALL -> "All viewers"
+    ViewerSupportFilter.PDF -> "PDF Viewer"
+    ViewerSupportFilter.LILYPOND -> "LilyPond Viewer"
 }
 
 private fun LibraryLayoutMode.label(): String = when (this) {

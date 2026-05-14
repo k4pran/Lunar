@@ -14,6 +14,7 @@ import com.ryanjames.lunar.library.model.LibrarySortOption
 import com.ryanjames.lunar.library.model.ScoreMetadata
 import com.ryanjames.lunar.library.model.ScoreMetadataComposer
 import com.ryanjames.lunar.library.model.SortDirection
+import com.ryanjames.lunar.library.model.ViewerSupportFilter
 import com.ryanjames.lunar.library.model.applyLibraryQuery
 import com.ryanjames.lunar.library.model.collectionDuplicateKey
 import com.ryanjames.lunar.library.model.composerDuplicateKey
@@ -211,6 +212,49 @@ class SharedCommonTest {
         )
 
         assertEquals(listOf("Take Five"), result.map { it.title })
+    }
+
+    @Test
+    fun libraryQueryFiltersByViewerSupport() {
+        val items = listOf(
+            testItem(
+                id = "pdf",
+                title = "Moon River",
+                composer = "Mancini",
+                tags = emptyList(),
+                dateAddedEpochMillis = 10L,
+                originalFileName = "Moon River.pdf",
+            ),
+            testItem(
+                id = "lilypond",
+                title = "Prelude",
+                composer = "Bach",
+                tags = emptyList(),
+                dateAddedEpochMillis = 20L,
+                originalFileName = "Prelude.ly",
+            ),
+        )
+
+        assertEquals(
+            listOf("Moon River"),
+            items.applyLibraryQuery(
+                LibraryQuery(
+                    viewerSupport = ViewerSupportFilter.PDF,
+                    sortOption = LibrarySortOption.TITLE,
+                    sortDirection = SortDirection.ASCENDING,
+                )
+            ).map { it.title },
+        )
+        assertEquals(
+            listOf("Prelude"),
+            items.applyLibraryQuery(
+                LibraryQuery(
+                    viewerSupport = ViewerSupportFilter.LILYPOND,
+                    sortOption = LibrarySortOption.TITLE,
+                    sortDirection = SortDirection.ASCENDING,
+                )
+            ).map { it.title },
+        )
     }
 
     @Test
@@ -799,6 +843,7 @@ private fun testItem(
     isHidden: Boolean = false,
     dateAddedEpochMillis: Long,
     lastOpenedEpochMillis: Long? = null,
+    originalFileName: String = "$title.pdf",
 ) = com.ryanjames.lunar.library.model.SheetMusicItem(
     id = id,
     title = title,
@@ -809,7 +854,7 @@ private fun testItem(
     isHidden = isHidden,
     document = com.ryanjames.lunar.library.model.PdfDocumentReference(
         storedPath = "/scores/$id.pdf",
-        originalFileName = "$title.pdf",
+        originalFileName = originalFileName,
     ),
     dateAddedEpochMillis = dateAddedEpochMillis,
     lastOpenedEpochMillis = lastOpenedEpochMillis,

@@ -118,6 +118,7 @@ internal fun testSheetMusicItem(
     isHidden: Boolean = false,
     dateAddedEpochMillis: Long = 1L,
     pageCount: Int? = null,
+    originalFileName: String = "$title.pdf",
 ): SheetMusicItem = SheetMusicItem(
     id = id,
     title = title,
@@ -127,7 +128,7 @@ internal fun testSheetMusicItem(
     isHidden = isHidden,
     document = PdfDocumentReference(
         storedPath = "/scores/$id.pdf",
-        originalFileName = "$title.pdf",
+        originalFileName = originalFileName,
     ),
     dateAddedEpochMillis = dateAddedEpochMillis,
     pageCount = pageCount,

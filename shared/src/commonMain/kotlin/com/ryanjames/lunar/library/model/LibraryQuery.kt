@@ -4,6 +4,7 @@ data class LibraryQuery(
     val searchText: String = "",
     val selectedTags: Set<String> = emptySet(),
     val selectedCollection: String? = null,
+    val viewerSupport: ViewerSupportFilter = ViewerSupportFilter.ALL,
     val favoritesOnly: Boolean = false,
     val hiddenFilter: HiddenScoreFilter = HiddenScoreFilter.VISIBLE,
     val sortOption: LibrarySortOption = LibrarySortOption.DATE_ADDED,
@@ -14,6 +15,27 @@ enum class HiddenScoreFilter {
     VISIBLE,
     HIDDEN,
 }
+
+enum class ViewerSupportFilter {
+    ALL,
+    PDF,
+    LILYPOND,
+}
+
+enum class ScoreViewerSupport {
+    PDF,
+    LILYPOND,
+}
+
+val SheetMusicItem.viewerSupport: ScoreViewerSupport
+    get() = document.viewerSupport
+
+val PdfDocumentReference.viewerSupport: ScoreViewerSupport
+    get() = if (originalFileName.isLilyPondSourceFileName()) {
+        ScoreViewerSupport.LILYPOND
+    } else {
+        ScoreViewerSupport.PDF
+    }
 
 fun List<SheetMusicItem>.applyLibraryQuery(query: LibraryQuery): List<SheetMusicItem> {
     val normalizedSearch = query.searchText.trim().lowercase()
@@ -33,6 +55,16 @@ fun List<SheetMusicItem>.applyLibraryQuery(query: LibraryQuery): List<SheetMusic
 
         if (query.favoritesOnly && !item.isFavorite) {
             return@filter false
+        }
+
+        when (query.viewerSupport) {
+            ViewerSupportFilter.ALL -> Unit
+            ViewerSupportFilter.PDF -> if (item.viewerSupport != ScoreViewerSupport.PDF) {
+                return@filter false
+            }
+            ViewerSupportFilter.LILYPOND -> if (item.viewerSupport != ScoreViewerSupport.LILYPOND) {
+                return@filter false
+            }
         }
 
         if (normalizedCollection.isNotEmpty() &&
@@ -77,6 +109,9 @@ fun List<SheetMusicItem>.availableComposers(): Set<String> =
     mapNotNull { it.composer?.trim()?.takeIf(String::isNotEmpty) }
         .distinctSortedCaseInsensitive()
 
+private fun String.isLilyPondSourceFileName(): Boolean =
+    substringAfterLast('.', "").lowercase() in LilyPondSourceFileExtensions
+
 private fun buildSearchFields(item: SheetMusicItem): List<String> = buildList {
     add(item.title)
     item.composer?.let(::add)
@@ -93,6 +128,8 @@ private fun sortByTitle(
 
     return items.sortedWith(comparatorFor(direction, comparator))
 }
+
+private val LilyPondSourceFileExtensions = setOf("ly", "ily", "lyi")
 
 private fun sortByComposer(
     items: List<SheetMusicItem>,

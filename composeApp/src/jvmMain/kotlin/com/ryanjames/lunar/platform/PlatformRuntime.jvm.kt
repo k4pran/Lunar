@@ -712,7 +712,13 @@ internal class DesktopLilyPondLiveRenderer(
                 source = source,
                 previewStem = previewStem,
             )
-            lilyPondCompiler.renderToPdf(source = sourceFile, destination = destination)
+            try {
+                lilyPondCompiler.renderToPdf(source = sourceFile.file, destination = destination)
+            } finally {
+                if (sourceFile.temporary) {
+                    sourceFile.file.delete()
+                }
+            }
             val pageCount = loadPdfPageCount(destination)
                 ?: throw IllegalStateException(
                     "LilyPond rendered ${source.displayName}, but Lunar could not read the live preview PDF."
@@ -727,20 +733,30 @@ internal class DesktopLilyPondLiveRenderer(
     private fun liveRenderSourceFile(
         source: LilyPondSourceSnapshot,
         previewStem: String,
-    ): File {
+    ): LiveLilyPondSourceFile {
         val fileBackedSource = source.sourcePath
             ?.let(::File)
             ?.takeIf { file -> file.exists() && isDesktopLilyPondFileName(file.name) }
             ?.takeIf { file -> runCatching { file.readText() == source.sourceText }.getOrDefault(false) }
         if (fileBackedSource != null) {
-            return fileBackedSource
+            return LiveLilyPondSourceFile(file = fileBackedSource, temporary = false)
         }
 
-        return File(previewDirectory, "$previewStem.ly").also { file ->
+        val scratchDirectory = source.sourcePath
+            ?.let(::File)
+            ?.parentFile
+            ?.takeIf { directory -> directory.isDirectory && directory.canWrite() }
+            ?: previewDirectory
+        return File(scratchDirectory, ".$previewStem.ly").also { file ->
             file.writeText(source.sourceText)
-        }
+        }.let { file -> LiveLilyPondSourceFile(file = file, temporary = true) }
     }
 }
+
+private data class LiveLilyPondSourceFile(
+    val file: File,
+    val temporary: Boolean,
+)
 
 private class DesktopPdfDocumentExporter : PdfDocumentExporter {
     override suspend fun export(

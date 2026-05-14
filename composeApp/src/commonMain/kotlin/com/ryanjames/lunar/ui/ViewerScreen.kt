@@ -28,8 +28,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,7 +61,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ryanjames.lunar.library.model.PdfDocumentReference
+import com.ryanjames.lunar.library.model.ScoreViewerSupport
 import com.ryanjames.lunar.library.model.SheetMusicItem
+import com.ryanjames.lunar.library.model.viewerSupport
 import com.ryanjames.lunar.platform.LilyPondLiveRenderResult
 import com.ryanjames.lunar.platform.LilyPondSourceSnapshot
 import com.ryanjames.lunar.platform.PlatformRuntime
@@ -72,7 +77,7 @@ private const val ZoomStep = 0.2f
 private const val FitZoom = 1f
 private const val PageGap = 20
 private const val LilyPondLiveRefreshIntervalMillis = 1_000L
-private val LilyPondSourceExtensions = setOf("ly", "ily", "lyi")
+private const val LilyPondEditorRenderDebounceMillis = 650L
 
 data class ViewerDocumentState(
     val id: String,
@@ -101,15 +106,20 @@ private data class ActiveViewerDocument(
     val statusLabel: String?,
     val liveErrorMessage: String?,
     val isPreparing: Boolean,
+    val sourceSnapshot: LilyPondSourceSnapshot? = null,
 )
 
 @Composable
 private fun rememberActiveViewerDocument(
     runtime: PlatformRuntime,
     documentState: ViewerDocumentState,
+    editedSourceText: String? = null,
+    editedSourceRenderNonce: Int = 0,
+    editorAutoRefreshEnabled: Boolean = true,
+    editorRefreshPending: Boolean = false,
 ): ActiveViewerDocument {
     val liveLilyPondEnabled = runtime.capabilities.lilyPondLiveViewingSupported &&
-        documentState.isLilyPondSourceDocument()
+        documentState.document.viewerSupport == ScoreViewerSupport.LILYPOND
     var sourceSnapshot by remember(documentState.id) { mutableStateOf<LilyPondSourceSnapshot?>(null) }
     var sourceUnavailableMessage by remember(documentState.id) { mutableStateOf<String?>(null) }
     var renderResult by remember(documentState.id) { mutableStateOf<LilyPondLiveRenderResult?>(null) }
@@ -159,14 +169,38 @@ private fun rememberActiveViewerDocument(
         }
     }
 
-    LaunchedEffect(documentState.id, liveLilyPondEnabled, sourceSnapshot?.revision) {
+    val baseSourceSnapshot = sourceSnapshot
+    var isUsingEditedSource = false
+    val renderSource = if (
+        baseSourceSnapshot != null &&
+        editedSourceText != null &&
+        editedSourceText != baseSourceSnapshot.sourceText
+    ) {
+        isUsingEditedSource = true
+        baseSourceSnapshot.copy(
+            sourceText = editedSourceText,
+            revision = "${baseSourceSnapshot.revision}:editor:${editedSourceText.hashCode()}",
+        )
+    } else {
+        baseSourceSnapshot
+    }
+    val renderRequestKey = when {
+        renderSource == null -> null
+        isUsingEditedSource -> "${renderSource.revision}:request:$editedSourceRenderNonce"
+        else -> renderSource.revision
+    }
+
+    LaunchedEffect(documentState.id, liveLilyPondEnabled, renderRequestKey) {
         if (!liveLilyPondEnabled) {
             return@LaunchedEffect
         }
-        val source = sourceSnapshot ?: return@LaunchedEffect
+        val source = renderSource ?: return@LaunchedEffect
 
         isRendering = true
         renderErrorMessage = null
+        if (isUsingEditedSource && editorAutoRefreshEnabled) {
+            delay(LilyPondEditorRenderDebounceMillis)
+        }
         runCatching {
             runtime.lilyPondLiveRenderer.renderSource(source)
         }.onSuccess { result ->
@@ -188,12 +222,16 @@ private fun rememberActiveViewerDocument(
         else -> null
     }
     val statusLabel = when {
-        !liveLilyPondEnabled -> null
-        renderErrorMessage != null -> "LilyPond error"
-        isRendering -> "Rendering LilyPond"
-        renderResult != null -> "Live LilyPond"
-        sourceUnavailableMessage != null -> "Imported PDF"
-        else -> "Loading LilyPond"
+        !liveLilyPondEnabled -> "PDF Viewer"
+        editorRefreshPending -> "LilyPond edits pending"
+        renderErrorMessage != null && isUsingEditedSource -> "LilyPond editor error"
+        renderErrorMessage != null -> "LilyPond Viewer error"
+        isRendering && isUsingEditedSource -> "Rendering LilyPond editor"
+        isRendering -> "Rendering LilyPond Viewer"
+        renderResult != null && isUsingEditedSource -> "LilyPond Editor"
+        renderResult != null -> "LilyPond Viewer"
+        sourceUnavailableMessage != null -> "PDF Viewer"
+        else -> "Loading LilyPond Viewer"
     }
     val isPreparing = liveLilyPondEnabled &&
         renderErrorMessage == null &&
@@ -205,6 +243,7 @@ private fun rememberActiveViewerDocument(
         statusLabel = statusLabel,
         liveErrorMessage = renderErrorMessage,
         isPreparing = isPreparing,
+        sourceSnapshot = sourceSnapshot,
     )
 }
 
@@ -235,15 +274,58 @@ fun ViewerScreen(
     var errorMessage by remember(documentState.id, currentPage) { mutableStateOf<String?>(null) }
     var isLoading by remember(documentState.id, currentPage) { mutableStateOf(true) }
     var showMetronomeDialog by remember { mutableStateOf(false) }
+    var sourceEditorVisible by remember(documentState.id) { mutableStateOf(false) }
+    var sourceEditorText by remember(documentState.id) { mutableStateOf("") }
+    var sourceEditorTextReady by remember(documentState.id) { mutableStateOf(false) }
+    var sourceEditorDirty by remember(documentState.id) { mutableStateOf(false) }
+    var sourceEditorAutoRefresh by remember(documentState.id) { mutableStateOf(true) }
+    var sourceEditorManualRefreshText by remember(documentState.id) { mutableStateOf<String?>(null) }
+    var sourceEditorManualRefreshRequest by remember(documentState.id) { mutableIntStateOf(0) }
     val themePalette = lunarThemePalette()
     val focusRequester = remember { FocusRequester() }
+    val sourceEditorPreviewText = when {
+        !sourceEditorVisible || !sourceEditorTextReady -> null
+        sourceEditorAutoRefresh -> sourceEditorText
+        else -> sourceEditorManualRefreshText
+    }
+    val sourceEditorRefreshPending = sourceEditorVisible &&
+        sourceEditorTextReady &&
+        sourceEditorDirty &&
+        !sourceEditorAutoRefresh &&
+        sourceEditorText != sourceEditorManualRefreshText
     val activeDocument = rememberActiveViewerDocument(
         runtime = runtime,
         documentState = documentState,
+        editedSourceText = sourceEditorPreviewText,
+        editedSourceRenderNonce = sourceEditorManualRefreshRequest,
+        editorAutoRefreshEnabled = sourceEditorAutoRefresh,
+        editorRefreshPending = sourceEditorRefreshPending,
     )
 
     LaunchedEffect(documentState.id) {
         focusRequester.requestFocus()
+    }
+
+    LaunchedEffect(activeDocument.sourceSnapshot?.revision) {
+        val source = activeDocument.sourceSnapshot ?: return@LaunchedEffect
+        if (!sourceEditorDirty || !sourceEditorTextReady) {
+            sourceEditorText = source.sourceText
+            sourceEditorTextReady = true
+            sourceEditorDirty = false
+            sourceEditorManualRefreshText = null
+            sourceEditorManualRefreshRequest = 0
+        }
+    }
+
+    LaunchedEffect(activeDocument.sourceSnapshot) {
+        if (activeDocument.sourceSnapshot == null) {
+            sourceEditorVisible = false
+            sourceEditorText = ""
+            sourceEditorTextReady = false
+            sourceEditorDirty = false
+            sourceEditorManualRefreshText = null
+            sourceEditorManualRefreshRequest = 0
+        }
     }
 
     LaunchedEffect(documentState.id, activeDocument.documentPath, currentPage, twoPageMode) {
@@ -302,6 +384,7 @@ fun ViewerScreen(
             .focusRequester(focusRequester)
             .focusable()
             .viewerShortcutHandler(
+                enabled = !sourceEditorVisible,
                 keybindings = viewerKeybindings,
                 onToggleFullscreen = onEnterFullscreen,
                 onNextPage = {
@@ -400,6 +483,28 @@ fun ViewerScreen(
                     twoPageMode = !twoPageMode
                     zoom = FitZoom
                 }
+                if (activeDocument.sourceSnapshot != null) {
+                    CompactNavButton(
+                        label = if (sourceEditorVisible) "View" else "Edit",
+                        enabled = true,
+                        tooltip = if (sourceEditorVisible) {
+                            "Hide LilyPond source editor"
+                        } else {
+                            "Show LilyPond source editor side by side"
+                        },
+                    ) {
+                        if (!sourceEditorVisible && !sourceEditorTextReady) {
+                            activeDocument.sourceSnapshot.let { source ->
+                                sourceEditorText = source.sourceText
+                                sourceEditorTextReady = true
+                                sourceEditorDirty = false
+                                sourceEditorManualRefreshText = null
+                                sourceEditorManualRefreshRequest = 0
+                            }
+                        }
+                        sourceEditorVisible = !sourceEditorVisible
+                    }
+                }
                 if (documentState.isFavorite != null && onToggleFavorite != null) {
                     ViewerFavoriteButton(
                         title = documentState.title,
@@ -418,28 +523,49 @@ fun ViewerScreen(
             }
         }
 
-        Box(
+        ViewerContentArea(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .background(themePalette.viewerBackdrop),
-            contentAlignment = Alignment.Center,
-        ) {
-            when {
-                activeDocument.isPreparing || isLoading -> CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                renderedPages.isNotEmpty() -> PdfPageCanvas(pages = renderedPages, zoom = zoom)
-                else -> ViewerMessage(
-                    title = if (activeDocument.liveErrorMessage != null) {
-                        "LilyPond render failed"
-                    } else {
-                        "Viewer unavailable"
-                    },
-                    body = activeDocument.liveErrorMessage
-                        ?: errorMessage
-                        ?: "The viewer could not load this PDF page.",
-                )
-            }
-        }
+            activeDocument = activeDocument,
+            renderedPages = renderedPages,
+            zoom = zoom,
+            isLoading = isLoading,
+            errorMessage = errorMessage,
+            sourceEditorVisible = sourceEditorVisible,
+            sourceEditorText = sourceEditorText.takeIf { sourceEditorTextReady },
+            sourceEditorDirty = sourceEditorDirty,
+            sourceEditorAutoRefresh = sourceEditorAutoRefresh,
+            sourceEditorRefreshPending = sourceEditorRefreshPending,
+            onSourceEditorTextChange = { text ->
+                sourceEditorText = text
+                sourceEditorTextReady = true
+                sourceEditorDirty = text != activeDocument.sourceSnapshot?.sourceText
+            },
+            onSourceEditorAutoRefreshChange = { enabled ->
+                sourceEditorAutoRefresh = enabled
+                sourceEditorManualRefreshText = if (!enabled && sourceEditorTextReady) {
+                    sourceEditorText
+                } else {
+                    null
+                }
+                sourceEditorManualRefreshRequest = 0
+            },
+            onRefreshSourcePreview = {
+                sourceEditorManualRefreshText = sourceEditorText
+                sourceEditorManualRefreshRequest += 1
+            },
+            onResetSourceEditorText = {
+                activeDocument.sourceSnapshot?.let { source ->
+                    sourceEditorText = source.sourceText
+                    sourceEditorTextReady = true
+                    sourceEditorDirty = false
+                    sourceEditorManualRefreshText = null
+                    sourceEditorManualRefreshRequest = 0
+                }
+            },
+        )
     }
 
     if (showMetronomeDialog) {
@@ -473,15 +599,58 @@ fun FullscreenViewerScreen(
     var isLoading by remember(documentState.id, currentPage) { mutableStateOf(true) }
     var overlayVisible by remember { mutableStateOf(false) }
     var showMetronomeDialog by remember { mutableStateOf(false) }
+    var sourceEditorVisible by remember(documentState.id) { mutableStateOf(false) }
+    var sourceEditorText by remember(documentState.id) { mutableStateOf("") }
+    var sourceEditorTextReady by remember(documentState.id) { mutableStateOf(false) }
+    var sourceEditorDirty by remember(documentState.id) { mutableStateOf(false) }
+    var sourceEditorAutoRefresh by remember(documentState.id) { mutableStateOf(true) }
+    var sourceEditorManualRefreshText by remember(documentState.id) { mutableStateOf<String?>(null) }
+    var sourceEditorManualRefreshRequest by remember(documentState.id) { mutableIntStateOf(0) }
     val themePalette = lunarThemePalette()
     val focusRequester = remember { FocusRequester() }
+    val sourceEditorPreviewText = when {
+        !sourceEditorVisible || !sourceEditorTextReady -> null
+        sourceEditorAutoRefresh -> sourceEditorText
+        else -> sourceEditorManualRefreshText
+    }
+    val sourceEditorRefreshPending = sourceEditorVisible &&
+        sourceEditorTextReady &&
+        sourceEditorDirty &&
+        !sourceEditorAutoRefresh &&
+        sourceEditorText != sourceEditorManualRefreshText
     val activeDocument = rememberActiveViewerDocument(
         runtime = runtime,
         documentState = documentState,
+        editedSourceText = sourceEditorPreviewText,
+        editedSourceRenderNonce = sourceEditorManualRefreshRequest,
+        editorAutoRefreshEnabled = sourceEditorAutoRefresh,
+        editorRefreshPending = sourceEditorRefreshPending,
     )
 
     LaunchedEffect(documentState.id) {
         focusRequester.requestFocus()
+    }
+
+    LaunchedEffect(activeDocument.sourceSnapshot?.revision) {
+        val source = activeDocument.sourceSnapshot ?: return@LaunchedEffect
+        if (!sourceEditorDirty || !sourceEditorTextReady) {
+            sourceEditorText = source.sourceText
+            sourceEditorTextReady = true
+            sourceEditorDirty = false
+            sourceEditorManualRefreshText = null
+            sourceEditorManualRefreshRequest = 0
+        }
+    }
+
+    LaunchedEffect(activeDocument.sourceSnapshot) {
+        if (activeDocument.sourceSnapshot == null) {
+            sourceEditorVisible = false
+            sourceEditorText = ""
+            sourceEditorTextReady = false
+            sourceEditorDirty = false
+            sourceEditorManualRefreshText = null
+            sourceEditorManualRefreshRequest = 0
+        }
     }
 
     LaunchedEffect(documentState.id, activeDocument.documentPath, currentPage, twoPageMode) {
@@ -541,6 +710,7 @@ fun FullscreenViewerScreen(
             .focusRequester(focusRequester)
             .focusable()
             .viewerShortcutHandler(
+                enabled = !sourceEditorVisible,
                 keybindings = viewerKeybindings,
                 onToggleFullscreen = onBack,
                 onNextPage = {
@@ -574,23 +744,46 @@ fun FullscreenViewerScreen(
             },
         contentAlignment = Alignment.Center,
     ) {
-        when {
-            activeDocument.isPreparing || isLoading -> CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-            renderedPages.isNotEmpty() -> PdfPageCanvas(
-                pages = renderedPages,
-                zoom = zoom,
-            )
-            else -> ViewerMessage(
-                title = if (activeDocument.liveErrorMessage != null) {
-                    "LilyPond render failed"
+        ViewerContentArea(
+            activeDocument = activeDocument,
+            renderedPages = renderedPages,
+            zoom = zoom,
+            isLoading = isLoading,
+            errorMessage = errorMessage,
+            sourceEditorVisible = sourceEditorVisible,
+            sourceEditorText = sourceEditorText.takeIf { sourceEditorTextReady },
+            sourceEditorDirty = sourceEditorDirty,
+            sourceEditorAutoRefresh = sourceEditorAutoRefresh,
+            sourceEditorRefreshPending = sourceEditorRefreshPending,
+            onSourceEditorTextChange = { text ->
+                sourceEditorText = text
+                sourceEditorTextReady = true
+                sourceEditorDirty = text != activeDocument.sourceSnapshot?.sourceText
+            },
+            onSourceEditorAutoRefreshChange = { enabled ->
+                sourceEditorAutoRefresh = enabled
+                sourceEditorManualRefreshText = if (!enabled && sourceEditorTextReady) {
+                    sourceEditorText
                 } else {
-                    "Viewer unavailable"
-                },
-                body = activeDocument.liveErrorMessage
-                    ?: errorMessage
-                    ?: "The viewer could not load this PDF page.",
-            )
-        }
+                    null
+                }
+                sourceEditorManualRefreshRequest = 0
+            },
+            onRefreshSourcePreview = {
+                sourceEditorManualRefreshText = sourceEditorText
+                sourceEditorManualRefreshRequest += 1
+            },
+            onResetSourceEditorText = {
+                activeDocument.sourceSnapshot?.let { source ->
+                    sourceEditorText = source.sourceText
+                    sourceEditorTextReady = true
+                    sourceEditorDirty = false
+                    sourceEditorManualRefreshText = null
+                    sourceEditorManualRefreshRequest = 0
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
 
         AnimatedVisibility(
             visible = overlayVisible,
@@ -747,6 +940,35 @@ fun FullscreenViewerScreen(
                                         modifier = Modifier.fillMaxWidth(),
                                     ) {
                                         Text(if (twoPageMode) "Single Page" else "Two Pages")
+                                    }
+                                }
+                            }
+                            if (activeDocument.sourceSnapshot != null) {
+                                Box(modifier = Modifier.weight(1f)) {
+                                    LunarTooltip(
+                                        text = if (sourceEditorVisible) {
+                                            "Hide LilyPond source editor"
+                                        } else {
+                                            "Show LilyPond source editor side by side"
+                                        },
+                                    ) {
+                                        FilledTonalButton(
+                                            onClick = {
+                                                if (!sourceEditorVisible && !sourceEditorTextReady) {
+                                                    activeDocument.sourceSnapshot.let { source ->
+                                                        sourceEditorText = source.sourceText
+                                                        sourceEditorTextReady = true
+                                                        sourceEditorDirty = false
+                                                        sourceEditorManualRefreshText = null
+                                                        sourceEditorManualRefreshRequest = 0
+                                                    }
+                                                }
+                                                sourceEditorVisible = !sourceEditorVisible
+                                            },
+                                            modifier = Modifier.fillMaxWidth(),
+                                        ) {
+                                            Text(if (sourceEditorVisible) "Hide Source" else "Edit Source")
+                                        }
                                     }
                                 }
                             }
@@ -908,6 +1130,212 @@ private fun FullscreenToolbarButton(
 }
 
 @Composable
+private fun ViewerContentArea(
+    activeDocument: ActiveViewerDocument,
+    renderedPages: List<RenderedPdfPage>,
+    zoom: Float,
+    isLoading: Boolean,
+    errorMessage: String?,
+    sourceEditorVisible: Boolean,
+    sourceEditorText: String?,
+    sourceEditorDirty: Boolean,
+    sourceEditorAutoRefresh: Boolean,
+    sourceEditorRefreshPending: Boolean,
+    onSourceEditorTextChange: (String) -> Unit,
+    onSourceEditorAutoRefreshChange: (Boolean) -> Unit,
+    onRefreshSourcePreview: () -> Unit,
+    onResetSourceEditorText: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    BoxWithConstraints(modifier = modifier) {
+        val showEditor = sourceEditorVisible &&
+            sourceEditorText != null &&
+            activeDocument.sourceSnapshot != null
+
+        if (showEditor) {
+            if (maxWidth < 860.dp) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    LilyPondSourceEditorPane(
+                        sourceText = sourceEditorText,
+                        isDirty = sourceEditorDirty,
+                        autoRefreshEnabled = sourceEditorAutoRefresh,
+                        refreshPending = sourceEditorRefreshPending,
+                        onSourceTextChange = onSourceEditorTextChange,
+                        onAutoRefreshChange = onSourceEditorAutoRefreshChange,
+                        onRefreshPreview = onRefreshSourcePreview,
+                        onResetSourceText = onResetSourceEditorText,
+                        modifier = Modifier
+                            .weight(0.45f)
+                            .fillMaxWidth(),
+                    )
+                    ViewerPagePane(
+                        activeDocument = activeDocument,
+                        renderedPages = renderedPages,
+                        zoom = zoom,
+                        isLoading = isLoading,
+                        errorMessage = errorMessage,
+                        modifier = Modifier
+                            .weight(0.55f)
+                            .fillMaxWidth(),
+                    )
+                }
+            } else {
+                Row(modifier = Modifier.fillMaxSize()) {
+                    LilyPondSourceEditorPane(
+                        sourceText = sourceEditorText,
+                        isDirty = sourceEditorDirty,
+                        autoRefreshEnabled = sourceEditorAutoRefresh,
+                        refreshPending = sourceEditorRefreshPending,
+                        onSourceTextChange = onSourceEditorTextChange,
+                        onAutoRefreshChange = onSourceEditorAutoRefreshChange,
+                        onRefreshPreview = onRefreshSourcePreview,
+                        onResetSourceText = onResetSourceEditorText,
+                        modifier = Modifier
+                            .weight(0.42f)
+                            .fillMaxSize(),
+                    )
+                    ViewerPagePane(
+                        activeDocument = activeDocument,
+                        renderedPages = renderedPages,
+                        zoom = zoom,
+                        isLoading = isLoading,
+                        errorMessage = errorMessage,
+                        modifier = Modifier
+                            .weight(0.58f)
+                            .fillMaxSize(),
+                    )
+                }
+            }
+        } else {
+            ViewerPagePane(
+                activeDocument = activeDocument,
+                renderedPages = renderedPages,
+                zoom = zoom,
+                isLoading = isLoading,
+                errorMessage = errorMessage,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ViewerPagePane(
+    activeDocument: ActiveViewerDocument,
+    renderedPages: List<RenderedPdfPage>,
+    zoom: Float,
+    isLoading: Boolean,
+    errorMessage: String?,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            activeDocument.isPreparing || isLoading ->
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+
+            renderedPages.isNotEmpty() -> PdfPageCanvas(pages = renderedPages, zoom = zoom)
+
+            else -> ViewerMessage(
+                title = if (activeDocument.liveErrorMessage != null) {
+                    "LilyPond render failed"
+                } else {
+                    "Viewer unavailable"
+                },
+                body = activeDocument.liveErrorMessage
+                    ?: errorMessage
+                    ?: "The viewer could not load this PDF page.",
+            )
+        }
+    }
+}
+
+@Composable
+private fun LilyPondSourceEditorPane(
+    sourceText: String,
+    isDirty: Boolean,
+    autoRefreshEnabled: Boolean,
+    refreshPending: Boolean,
+    onSourceTextChange: (String) -> Unit,
+    onAutoRefreshChange: (Boolean) -> Unit,
+    onRefreshPreview: () -> Unit,
+    onResetSourceText: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.padding(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.large,
+        tonalElevation = 6.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "LilyPond source",
+                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Serif),
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Auto refresh",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Switch(
+                        checked = autoRefreshEnabled,
+                        onCheckedChange = onAutoRefreshChange,
+                        modifier = Modifier.semantics {
+                            contentDescription = "Toggle LilyPond auto refresh"
+                        },
+                    )
+                    TextButton(
+                        onClick = onRefreshPreview,
+                        enabled = refreshPending,
+                        modifier = Modifier.semantics {
+                            contentDescription = "Refresh LilyPond preview"
+                        },
+                    ) {
+                        Text("Refresh")
+                    }
+                    TextButton(
+                        onClick = onResetSourceText,
+                        enabled = isDirty,
+                    ) {
+                        Text("Reset")
+                    }
+                }
+            }
+            OutlinedTextField(
+                value = sourceText,
+                onValueChange = onSourceTextChange,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .semantics {
+                        contentDescription = "LilyPond source editor"
+                    },
+                singleLine = false,
+            )
+        }
+    }
+}
+
+@Composable
 private fun PdfPageCanvas(
     pages: List<RenderedPdfPage>,
     zoom: Float,
@@ -990,6 +1418,7 @@ private fun ViewerMessage(
 }
 
 private fun Modifier.viewerShortcutHandler(
+    enabled: Boolean = true,
     keybindings: ViewerKeybindings,
     onToggleFullscreen: (() -> Unit)?,
     onNextPage: (() -> Unit)?,
@@ -1000,6 +1429,9 @@ private fun Modifier.viewerShortcutHandler(
     onZoomOut: () -> Unit,
     onTogglePageViewMode: () -> Unit,
 ): Modifier = onPreviewKeyEvent { event ->
+    if (!enabled) {
+        return@onPreviewKeyEvent false
+    }
     if (event.type != KeyEventType.KeyDown) {
         return@onPreviewKeyEvent false
     }
@@ -1075,6 +1507,3 @@ private fun nextPageIndex(
 } else {
     (currentPage + pageStep).coerceAtMost((pageCount - 1).coerceAtLeast(0))
 }
-
-private fun ViewerDocumentState.isLilyPondSourceDocument(): Boolean =
-    document.originalFileName.substringAfterLast('.', "").lowercase() in LilyPondSourceExtensions
