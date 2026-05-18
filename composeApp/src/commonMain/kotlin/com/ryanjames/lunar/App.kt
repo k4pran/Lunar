@@ -289,32 +289,28 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
                                             horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
                                             verticalAlignment = Alignment.CenterVertically,
                                         ) {
-                                            LunarTooltip("Close viewer preview") {
-                                                androidx.compose.material3.OutlinedButton(
-                                                    onClick = appState::closePreview,
-                                                ) {
-                                                    Text("Close")
-                                                }
+                                            androidx.compose.material3.OutlinedButton(
+                                                onClick = appState::closePreview,
+                                            ) {
+                                                Text("Close")
                                             }
-                                            LunarTooltip("Open fullscreen viewer") {
-                                                androidx.compose.material3.Button(
-                                                    onClick = {
-                                                        when (val target = appState.previewTarget) {
-                                                            is ViewerTarget.Score ->
-                                                                appState.openFullscreen(target.itemId)
+                                            androidx.compose.material3.Button(
+                                                onClick = {
+                                                    when (val target = appState.previewTarget) {
+                                                        is ViewerTarget.Score ->
+                                                            appState.openFullscreen(target.itemId)
 
-                                                            is ViewerTarget.Songbook ->
-                                                                appState.openSongbookFullscreen(target.songbookId)
+                                                        is ViewerTarget.Songbook ->
+                                                            appState.openSongbookFullscreen(target.songbookId)
 
-                                                            null -> Unit
-                                                        }
-                                                    },
-                                                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                                                        containerColor = MaterialTheme.colorScheme.primary,
-                                                    ),
-                                                ) {
-                                                    Text("View Fullscreen", color = MaterialTheme.colorScheme.onPrimary)
-                                                }
+                                                        null -> Unit
+                                                    }
+                                                },
+                                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                                    containerColor = MaterialTheme.colorScheme.primary,
+                                                ),
+                                            ) {
+                                                Text("View Fullscreen", color = MaterialTheme.colorScheme.onPrimary)
                                             }
                                         }
                                     }
@@ -506,31 +502,29 @@ private fun RowScope.BottomNavItem(
     }
 
     Box(modifier = Modifier.weight(1f)) {
-        LunarTooltip("Open $title") {
-            Surface(
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick),
+            color = containerColor,
+            shape = MaterialTheme.shapes.large,
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(onClick = onClick),
-                color = containerColor,
-                shape = MaterialTheme.shapes.large,
+                    .padding(vertical = 12.dp),
+                verticalArrangement = Arrangement.Center,
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp),
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        color = if (selected) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
             }
         }
     }

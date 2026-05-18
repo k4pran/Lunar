@@ -735,25 +735,21 @@ private fun RandomLibraryActionsRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(modifier = Modifier.weight(1f)) {
-            LunarTooltip("Open a random score from the current library view") {
-                OutlinedButton(
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = hasScores,
-                    onClick = onOpenRandomSheet,
-                ) {
-                    Text("Open random sheet")
-                }
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = hasScores,
+                onClick = onOpenRandomSheet,
+            ) {
+                Text("Open random sheet")
             }
         }
         Box(modifier = Modifier.weight(1f)) {
-            LunarTooltip("Create a temporary random setlist from the current library view") {
-                Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = hasScores,
-                    onClick = onCreateRandomSetlist,
-                ) {
-                    Text("Random setlist")
-                }
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = hasScores,
+                onClick = onCreateRandomSetlist,
+            ) {
+                Text("Random setlist")
             }
         }
     }
@@ -1423,13 +1419,11 @@ private fun SearchAndSortControlsRow(
             selected = appState.layoutMode,
             onSelect = appState::updateLayoutMode,
         )
-        LunarTooltip("Show favorites only") {
-            FilterChip(
-                selected = appState.query.favoritesOnly,
-                onClick = appState::toggleFavoriteFilter,
+        FilterChip(
+            selected = appState.query.favoritesOnly,
+            onClick = appState::toggleFavoriteFilter,
                 label = { Text("★") },
-            )
-        }
+        )
     }
 }
 
@@ -1442,23 +1436,21 @@ private fun SortMenuButton(
     var expanded by remember { mutableStateOf(false) }
 
     Box(modifier = modifier) {
-        LunarTooltip("Sort by ${current.label()}") {
-            OutlinedButton(
-                onClick = { expanded = true },
-                modifier = Modifier
+        OutlinedButton(
+            onClick = { expanded = true },
+            modifier = Modifier
                     .fillMaxWidth()
                     .semantics {
                         contentDescription = "Sort by ${current.label()}"
                     },
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(current.label())
-                    ChevronDownGlyph(color = MaterialTheme.colorScheme.onSurface)
-                }
+                Text(current.label())
+                ChevronDownGlyph(color = MaterialTheme.colorScheme.onSurface)
             }
         }
         DropdownMenu(
@@ -1756,11 +1748,12 @@ private fun LibraryActionIconButton(
     onClick: () -> Unit,
     contentDescription: String,
     modifier: Modifier = Modifier,
+    tooltipText: String = contentDescription,
     content: @Composable (Color) -> Unit,
 ) {
     val shape = MaterialTheme.shapes.small
 
-    LunarTooltip(contentDescription, modifier = modifier) {
+    LunarTooltip(tooltipText, modifier = modifier) {
         Surface(
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
             shape = shape,
@@ -1803,6 +1796,7 @@ private fun LibraryItemQuickActions(
             LibraryActionIconButton(
                 onClick = { appState.downloadScore(item) },
                 contentDescription = "Download ${item.title}",
+                tooltipText = "Download score",
             ) { contentColor ->
                 DownloadGlyph(color = contentColor)
             }
@@ -1813,6 +1807,11 @@ private fun LibraryItemQuickActions(
                 "Remove ${item.title} from favorites"
             } else {
                 "Mark ${item.title} as favorite"
+            },
+            tooltipText = if (item.isFavorite) {
+                "Remove from favorites"
+            } else {
+                "Mark as favorite"
             },
         ) {
             Text(
@@ -1829,6 +1828,7 @@ private fun LibraryItemQuickActions(
         LibraryActionIconButton(
             onClick = { appState.showScoreInfo(item.id) },
             contentDescription = "Show info for ${item.title}",
+            tooltipText = "Show info",
         ) {
             Text(
                 text = "i",
@@ -1841,6 +1841,7 @@ private fun LibraryItemQuickActions(
             LibraryActionIconButton(
                 onClick = { appState.restoreScore(item.id) },
                 contentDescription = "Restore ${item.title}",
+                tooltipText = "Restore score",
             ) {
                 Text(
                     text = "+",
@@ -1853,6 +1854,7 @@ private fun LibraryItemQuickActions(
             LibraryActionIconButton(
                 onClick = { appState.hideScore(item.id) },
                 contentDescription = "Hide ${item.title}",
+                tooltipText = "Hide score",
             ) {
                 Text(
                     text = "\u2298",
@@ -1865,6 +1867,7 @@ private fun LibraryItemQuickActions(
         LibraryActionIconButton(
             onClick = { appState.startEditing(item.id) },
             contentDescription = "Edit ${item.title}",
+            tooltipText = "Edit score",
         ) {
             Text(
                 text = "\u270E",
@@ -1876,6 +1879,7 @@ private fun LibraryItemQuickActions(
         LibraryActionIconButton(
             onClick = { appState.requestDelete(item.id) },
             contentDescription = "Delete ${item.title}",
+            tooltipText = "Delete score",
         ) {
             Text(
                 text = "\uD83D\uDDD1",
@@ -2310,10 +2314,8 @@ private fun LibraryCard(
                                 includeDownload = appState.canDownloadScores,
                                 mode = mode,
                             )
-                            LunarTooltip("Open ${item.title}") {
-                                androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
-                                    Text("Open")
-                                }
+                            androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
+                                Text("Open")
                             }
                         }
                     }
@@ -2353,10 +2355,8 @@ private fun GridLibraryCardFooter(
                     .weight(1f)
                     .horizontalScroll(rememberScrollState()),
             )
-            LunarTooltip("Open ${item.title}") {
-                androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
-                    Text("Open")
-                }
+            androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
+                Text("Open")
             }
         }
     }
@@ -2826,8 +2826,8 @@ private fun DeleteSongbookDialog(
 @Composable
 private fun ViewerSupportBadge(item: SheetMusicItem) {
     val description = when (item.viewerSupport) {
-        ScoreViewerSupport.PDF -> "${item.title} opens with PDF Viewer"
-        ScoreViewerSupport.LILYPOND -> "${item.title} opens with LilyPond Viewer"
+        ScoreViewerSupport.PDF -> "PDF viewer"
+        ScoreViewerSupport.LILYPOND -> "LilyPond viewer"
     }
     val containerColor = when (item.viewerSupport) {
         ScoreViewerSupport.PDF -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.76f)

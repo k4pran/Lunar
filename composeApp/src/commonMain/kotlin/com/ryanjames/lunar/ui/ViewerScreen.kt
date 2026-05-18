@@ -448,7 +448,7 @@ fun ViewerScreen(
                         )
                     }
                 }
-                CompactNavButton("<", canGoPrevious, tooltip = "Previous page") {
+                CompactNavButton("<", canGoPrevious) {
                     currentPage = (currentPage - pageStep).coerceAtLeast(0)
                 }
                 Text(
@@ -469,16 +469,15 @@ fun ViewerScreen(
                             .padding(horizontal = 8.dp, vertical = 4.dp),
                     )
                 }
-                CompactNavButton(">", canGoNext, tooltip = "Next page") {
+                CompactNavButton(">", canGoNext) {
                     currentPage = nextPageIndex(currentPage, resolvedPageCount, pageStep)
                 }
-                CompactNavButton("-", zoom > MinZoom, tooltip = "Zoom out") { zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom) }
-                CompactNavButton("+", zoom < MaxZoom, tooltip = "Zoom in") { zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom) }
-                CompactNavButton("Fit", zoom != FitZoom, tooltip = "Fit page to viewer") { zoom = FitZoom }
+                CompactNavButton("-", zoom > MinZoom) { zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom) }
+                CompactNavButton("+", zoom < MaxZoom) { zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom) }
+                CompactNavButton("Fit", zoom != FitZoom) { zoom = FitZoom }
                 CompactNavButton(
                     label = if (twoPageMode) "1-Up" else "2-Up",
                     enabled = true,
-                    tooltip = if (twoPageMode) "Switch to single-page view" else "Switch to two-page view",
                 ) {
                     twoPageMode = !twoPageMode
                     zoom = FitZoom
@@ -487,11 +486,6 @@ fun ViewerScreen(
                     CompactNavButton(
                         label = if (sourceEditorVisible) "View" else "Edit",
                         enabled = true,
-                        tooltip = if (sourceEditorVisible) {
-                            "Hide LilyPond source editor"
-                        } else {
-                            "Show LilyPond source editor side by side"
-                        },
                     ) {
                         if (!sourceEditorVisible && !sourceEditorTextReady) {
                             activeDocument.sourceSnapshot.let { source ->
@@ -513,13 +507,13 @@ fun ViewerScreen(
                     )
                 }
                 if (!documentState.isHidden && onHideScore != null) {
-                    CompactNavButton("Hide", true, tooltip = "Hide this score", onClick = onHideScore)
+                    CompactNavButton("Hide", true, onClick = onHideScore)
                 }
                 if (onEnterFullscreen != null) {
-                    CompactNavButton("Full", true, tooltip = "Open fullscreen viewer", onClick = onEnterFullscreen)
+                    CompactNavButton("Full", true, onClick = onEnterFullscreen)
                 }
-                CompactNavButton("\u2669", true, tooltip = "Open metronome", onClick = { showMetronomeDialog = true })
-                CompactNavButton(backButtonLabel, true, tooltip = backButtonLabel, onClick = onBack)
+                CompactNavButton("\u2669", true, onClick = { showMetronomeDialog = true })
+                CompactNavButton(backButtonLabel, true, onClick = onBack)
             }
         }
 
@@ -860,13 +854,11 @@ fun FullscreenViewerScreen(
                         ) {
                             FullscreenToolbarButton(
                                 label = "Prev",
-                                tooltip = "Previous page",
                                 enabled = canGoPrevious,
                                 onClick = { currentPage = (currentPage - pageStep).coerceAtLeast(0) },
                             )
                             FullscreenToolbarButton(
                                 label = "Next",
-                                tooltip = "Next page",
                                 enabled = canGoNext,
                                 onClick = {
                                     currentPage = nextPageIndex(currentPage, resolvedPageCount, pageStep)
@@ -890,36 +882,30 @@ fun FullscreenViewerScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             Box(modifier = Modifier.weight(1f)) {
-                                LunarTooltip("Zoom out") {
-                                    FilledTonalButton(
-                                        onClick = { zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom) },
-                                        enabled = zoom > MinZoom,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        Text("Zoom -")
-                                    }
+                                FilledTonalButton(
+                                    onClick = { zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom) },
+                                    enabled = zoom > MinZoom,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text("Zoom -")
                                 }
                             }
                             Box(modifier = Modifier.weight(1f)) {
-                                LunarTooltip("Fit page to viewer") {
-                                    FilledTonalButton(
-                                        onClick = { zoom = FitZoom },
-                                        enabled = zoom != FitZoom,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        Text("Best Fit")
-                                    }
+                                FilledTonalButton(
+                                    onClick = { zoom = FitZoom },
+                                    enabled = zoom != FitZoom,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text("Best Fit")
                                 }
                             }
                             Box(modifier = Modifier.weight(1f)) {
-                                LunarTooltip("Zoom in") {
-                                    FilledTonalButton(
-                                        onClick = { zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom) },
-                                        enabled = zoom < MaxZoom,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        Text("Zoom +")
-                                    }
+                                FilledTonalButton(
+                                    onClick = { zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom) },
+                                    enabled = zoom < MaxZoom,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text("Zoom +")
                                 }
                             }
                         }
@@ -929,57 +915,43 @@ fun FullscreenViewerScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             Box(modifier = Modifier.weight(1f)) {
-                                LunarTooltip(
-                                    text = if (twoPageMode) "Switch to single-page view" else "Switch to two-page view",
+                                FilledTonalButton(
+                                    onClick = {
+                                        twoPageMode = !twoPageMode
+                                        zoom = FitZoom
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
                                 ) {
-                                    FilledTonalButton(
-                                        onClick = {
-                                            twoPageMode = !twoPageMode
-                                            zoom = FitZoom
-                                        },
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        Text(if (twoPageMode) "Single Page" else "Two Pages")
-                                    }
+                                    Text(if (twoPageMode) "Single Page" else "Two Pages")
                                 }
                             }
                             if (activeDocument.sourceSnapshot != null) {
                                 Box(modifier = Modifier.weight(1f)) {
-                                    LunarTooltip(
-                                        text = if (sourceEditorVisible) {
-                                            "Hide LilyPond source editor"
-                                        } else {
-                                            "Show LilyPond source editor side by side"
-                                        },
-                                    ) {
-                                        FilledTonalButton(
-                                            onClick = {
-                                                if (!sourceEditorVisible && !sourceEditorTextReady) {
-                                                    activeDocument.sourceSnapshot.let { source ->
-                                                        sourceEditorText = source.sourceText
-                                                        sourceEditorTextReady = true
-                                                        sourceEditorDirty = false
-                                                        sourceEditorManualRefreshText = null
-                                                        sourceEditorManualRefreshRequest = 0
-                                                    }
+                                    FilledTonalButton(
+                                        onClick = {
+                                            if (!sourceEditorVisible && !sourceEditorTextReady) {
+                                                activeDocument.sourceSnapshot.let { source ->
+                                                    sourceEditorText = source.sourceText
+                                                    sourceEditorTextReady = true
+                                                    sourceEditorDirty = false
+                                                    sourceEditorManualRefreshText = null
+                                                    sourceEditorManualRefreshRequest = 0
                                                 }
-                                                sourceEditorVisible = !sourceEditorVisible
-                                            },
-                                            modifier = Modifier.fillMaxWidth(),
-                                        ) {
-                                            Text(if (sourceEditorVisible) "Hide Source" else "Edit Source")
-                                        }
+                                            }
+                                            sourceEditorVisible = !sourceEditorVisible
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text(if (sourceEditorVisible) "Hide Source" else "Edit Source")
                                     }
                                 }
                             }
                             Box(modifier = Modifier.weight(1f)) {
-                                LunarTooltip("Open metronome") {
-                                    FilledTonalButton(
-                                        onClick = { showMetronomeDialog = true },
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        Text("\u2669 Metronome")
-                                    }
+                                FilledTonalButton(
+                                    onClick = { showMetronomeDialog = true },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text("\u2669 Metronome")
                                 }
                             }
                         }
@@ -990,42 +962,30 @@ fun FullscreenViewerScreen(
                         ) {
                             if (documentState.isFavorite != null && onToggleFavorite != null) {
                                 Box(modifier = Modifier.weight(1f)) {
-                                    LunarTooltip(
-                                        text = if (documentState.isFavorite) {
-                                            "Remove ${documentState.title} from favorites"
-                                        } else {
-                                            "Mark ${documentState.title} as favorite"
-                                        },
+                                    OutlinedButton(
+                                        onClick = onToggleFavorite,
+                                        modifier = Modifier.fillMaxWidth(),
                                     ) {
-                                        OutlinedButton(
-                                            onClick = onToggleFavorite,
-                                            modifier = Modifier.fillMaxWidth(),
-                                        ) {
-                                            Text(if (documentState.isFavorite) "Unfavorite" else "Favorite")
-                                        }
+                                        Text(if (documentState.isFavorite) "Unfavorite" else "Favorite")
                                     }
                                 }
                             }
                             if (!documentState.isHidden && onHideScore != null) {
                                 Box(modifier = Modifier.weight(1f)) {
-                                    LunarTooltip("Hide this score") {
-                                        OutlinedButton(
-                                            onClick = onHideScore,
-                                            modifier = Modifier.fillMaxWidth(),
-                                        ) {
-                                            Text("Hide score")
-                                        }
+                                    OutlinedButton(
+                                        onClick = onHideScore,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text("Hide score")
                                     }
                                 }
                             }
                             Box(modifier = Modifier.weight(1f)) {
-                                LunarTooltip("Exit fullscreen viewer") {
-                                    Button(
-                                        onClick = onBack,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        Text("Exit Fullscreen")
-                                    }
+                                Button(
+                                    onClick = onBack,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text("Exit Fullscreen")
                                 }
                             }
                         }
@@ -1044,33 +1004,30 @@ fun FullscreenViewerScreen(
 private fun CompactNavButton(
     label: String,
     enabled: Boolean,
-    tooltip: String,
     onClick: () -> Unit,
 ) {
     val themePalette = lunarThemePalette()
 
-    LunarTooltip(tooltip) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (enabled) {
-                themePalette.headerForeground
-            } else {
-                themePalette.headerForeground.copy(alpha = 0.3f)
-            },
-            modifier = Modifier
-                .clickable(enabled = enabled, onClick = onClick)
-                .background(
-                    if (enabled) {
-                        themePalette.headerForeground.copy(alpha = 0.15f)
-                    } else {
-                        Color.Transparent
-                    },
-                    MaterialTheme.shapes.small,
-                )
-                .padding(horizontal = 10.dp, vertical = 5.dp),
-        )
-    }
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelLarge,
+        color = if (enabled) {
+            themePalette.headerForeground
+        } else {
+            themePalette.headerForeground.copy(alpha = 0.3f)
+        },
+        modifier = Modifier
+            .clickable(enabled = enabled, onClick = onClick)
+            .background(
+                if (enabled) {
+                    themePalette.headerForeground.copy(alpha = 0.15f)
+                } else {
+                    Color.Transparent
+                },
+                MaterialTheme.shapes.small,
+            )
+            .padding(horizontal = 10.dp, vertical = 5.dp),
+    )
 }
 
 @Composable
@@ -1090,24 +1047,25 @@ private fun ViewerFavoriteButton(
     } else {
         themePalette.headerForeground.copy(alpha = 0.82f)
     }
-    val tooltip = if (isFavorite) {
+    val contentDescription = if (isFavorite) {
         "Remove $title from favorites"
     } else {
         "Mark $title as favorite"
     }
+    val tooltip = if (isFavorite) "Remove from favorites" else "Mark as favorite"
 
     LunarTooltip(tooltip) {
         Text(
         text = if (isFavorite) "★" else "☆",
-        style = MaterialTheme.typography.titleMedium,
-        color = iconColor,
-        modifier = Modifier
-            .semantics {
-                contentDescription = tooltip
-            }
-            .clickable(onClick = onToggleFavorite)
-            .background(backgroundColor, MaterialTheme.shapes.small)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.titleMedium,
+            color = iconColor,
+            modifier = Modifier
+                .semantics {
+                    this.contentDescription = contentDescription
+                }
+                .clickable(onClick = onToggleFavorite)
+                .background(backgroundColor, MaterialTheme.shapes.small)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
         )
     }
 }
@@ -1115,17 +1073,14 @@ private fun ViewerFavoriteButton(
 @Composable
 private fun FullscreenToolbarButton(
     label: String,
-    tooltip: String,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    LunarTooltip(tooltip) {
-        Button(
-            enabled = enabled,
-            onClick = onClick,
-        ) {
-            Text(label)
-        }
+    Button(
+        enabled = enabled,
+        onClick = onClick,
+    ) {
+        Text(label)
     }
 }
 
