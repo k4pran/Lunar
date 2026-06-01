@@ -1,8 +1,13 @@
 package com.ryanjames.lunar.platform
 
 import org.apache.pdfbox.Loader
+import org.apache.pdfbox.cos.COSName
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
+import org.apache.pdfbox.pdmodel.common.PDStream
+import org.apache.pdfbox.pdmodel.font.PDType1Font
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName
+import org.apache.pdfbox.pdmodel.PDResources
 import com.ryanjames.lunar.library.model.PdfDocumentReference
 import org.junit.Test
 import java.awt.Color
@@ -154,6 +159,36 @@ class DesktopScoreImportTest {
             assertEquals(1, descriptors.getValue("blue_bossa").pageCount)
         } finally {
             root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun songbookBuilderPreservesInheritedPdfResources() {
+        runBlocking {
+            val root = Files.createTempDirectory("lunar-songbook-resource-test").toFile()
+            try {
+                val scoresDirectory = File(root, "scores").apply { mkdirs() }
+                val sourceFile = File(root, "glyphs-from-parent-resources.pdf")
+                writeTestPdfWithInheritedFontResource(sourceFile)
+
+                val result = DesktopSongbookPdfBuilder(scoresDirectory)
+                    .buildSongbook(
+                        songbookName = "Gig book",
+                        appendedDocumentPaths = listOf(sourceFile.absolutePath),
+                        existingSongbookPath = null,
+                        coverImage = null,
+                    )
+
+                assertEquals(1, result.pageCount)
+                Loader.loadPDF(File(result.document.storedPath)).use { document ->
+                    assertEquals(1, document.numberOfPages)
+                    val resources = document.getPage(0).resources
+                    assertNotNull(resources)
+                    assertNotNull(resources.getFont(COSName.getPDFName("F1")))
+                }
+            } finally {
+                root.deleteRecursively()
+            }
         }
     }
 
@@ -323,6 +358,21 @@ private fun writeTestImage(
 private fun writeTestPdf(destination: File) {
     PDDocument().use { document ->
         document.addPage(PDPage())
+        document.save(destination)
+    }
+}
+
+private fun writeTestPdfWithInheritedFontResource(destination: File) {
+    PDDocument().use { document ->
+        val page = PDPage()
+        val content = "BT /F1 36 Tf 72 720 Td (Note heads) Tj ET"
+        page.setContents(PDStream(document, content.byteInputStream(Charsets.US_ASCII)))
+        document.addPage(page)
+
+        val resources = PDResources()
+        resources.put(COSName.getPDFName("F1"), PDType1Font(FontName.HELVETICA))
+        document.documentCatalog.pages.cosObject.setItem(COSName.RESOURCES, resources)
+
         document.save(destination)
     }
 }

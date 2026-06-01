@@ -37,6 +37,7 @@ import kotlinx.serialization.json.Json
 import okio.FileSystem
 import okio.Path.Companion.toPath
 import org.apache.pdfbox.Loader
+import org.apache.pdfbox.multipdf.PDFMergerUtility
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
 import org.apache.pdfbox.pdmodel.PDPageContentStream
@@ -798,7 +799,7 @@ private class DesktopPdfDocumentExporter : PdfDocumentExporter {
     }
 }
 
-private class DesktopSongbookPdfBuilder(
+internal class DesktopSongbookPdfBuilder(
     private val scoresDirectory: File,
 ) : SongbookPdfBuilder {
     override suspend fun buildSongbook(
@@ -863,9 +864,7 @@ private class DesktopSongbookPdfBuilder(
         }
 
         Loader.loadPDF(source).use { incoming ->
-            incoming.pages.forEach { page ->
-                target.importPage(page)
-            }
+            PDFMergerUtility().appendDocument(target, incoming)
         }
     }
 
