@@ -159,6 +159,8 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
                 onBack = appState::closeFullscreen,
                 onToggleFavorite = appState.fullscreenTarget.favoriteToggle(appState),
                 onHideScore = appState.fullscreenTarget.hideScore(appState),
+                onAddToSetlist = appState.fullscreenTarget.addToSetlist(appState),
+                onAddToSongbook = appState.fullscreenTarget.addToSongbook(appState),
                 onOpenRandomScore = { appState.openRandomSheetInCurrentViewer(libraryScopeItems) },
                 onPageChanged = appState.fullscreenTarget.pageChanged(appState),
                 onPageCountResolved = appState.fullscreenTarget.pageCountResolved(appState),
@@ -258,6 +260,8 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
                                             onBack = appState::closePreview,
                                             onToggleFavorite = appState.previewTarget.favoriteToggle(appState),
                                             onHideScore = appState.previewTarget.hideScore(appState),
+                                            onAddToSetlist = appState.previewTarget.addToSetlist(appState),
+                                            onAddToSongbook = appState.previewTarget.addToSongbook(appState),
                                             onOpenRandomScore = { appState.openRandomSheetInCurrentViewer(libraryScopeItems) },
                                             onPageChanged = appState.previewTarget.pageChanged(appState),
                                             onPageCountResolved = appState.previewTarget.pageCountResolved(appState),
@@ -434,6 +438,24 @@ private fun ViewerTarget?.favoriteToggle(appState: com.ryanjames.lunar.ui.LunarA
 private fun ViewerTarget?.hideScore(appState: com.ryanjames.lunar.ui.LunarAppState): (() -> Unit)? =
     when (this) {
         is ViewerTarget.Score -> { { appState.hideScore(itemId) } }
+        is ViewerTarget.Songbook, null -> null
+    }
+
+private fun ViewerTarget?.addToSetlist(appState: com.ryanjames.lunar.ui.LunarAppState): (() -> Unit)? =
+    when (this) {
+        is ViewerTarget.Score -> { { appState.showSetlistPickerForScore(itemId) } }
+        is ViewerTarget.Songbook, null -> null
+    }
+
+private fun ViewerTarget?.addToSongbook(appState: com.ryanjames.lunar.ui.LunarAppState): (() -> Unit)? =
+    when (this) {
+        is ViewerTarget.Score -> {
+            if (appState.canCreateSongbooks) {
+                { appState.showSongbookPickerForScore(itemId) }
+            } else {
+                null
+            }
+        }
         is ViewerTarget.Songbook, null -> null
     }
 

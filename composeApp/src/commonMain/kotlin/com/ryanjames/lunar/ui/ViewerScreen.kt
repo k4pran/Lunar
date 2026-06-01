@@ -254,6 +254,8 @@ fun ViewerScreen(
     onBack: () -> Unit,
     onToggleFavorite: (() -> Unit)? = null,
     onHideScore: (() -> Unit)? = null,
+    onAddToSetlist: (() -> Unit)? = null,
+    onAddToSongbook: (() -> Unit)? = null,
     onOpenRandomScore: (() -> Unit)? = null,
     onPageChanged: (Int) -> Unit,
     onPageCountResolved: (Int) -> Unit,
@@ -506,6 +508,12 @@ fun ViewerScreen(
                         onToggleFavorite = onToggleFavorite,
                     )
                 }
+                onAddToSetlist?.let { onClick ->
+                    CompactNavButton("Setlist", true, onClick = onClick)
+                }
+                onAddToSongbook?.let { onClick ->
+                    CompactNavButton("Songbook", true, onClick = onClick)
+                }
                 if (!documentState.isHidden && onHideScore != null) {
                     CompactNavButton("Hide", true, onClick = onHideScore)
                 }
@@ -574,6 +582,8 @@ fun FullscreenViewerScreen(
     onBack: () -> Unit,
     onToggleFavorite: (() -> Unit)? = null,
     onHideScore: (() -> Unit)? = null,
+    onAddToSetlist: (() -> Unit)? = null,
+    onAddToSongbook: (() -> Unit)? = null,
     onOpenRandomScore: (() -> Unit)? = null,
     onPageChanged: (Int) -> Unit,
     onPageCountResolved: (Int) -> Unit,
@@ -960,6 +970,26 @@ fun FullscreenViewerScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
+                            onAddToSetlist?.let { onClick ->
+                                Box(modifier = Modifier.weight(1f)) {
+                                    OutlinedButton(
+                                        onClick = onClick,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text("Add to setlist")
+                                    }
+                                }
+                            }
+                            onAddToSongbook?.let { onClick ->
+                                Box(modifier = Modifier.weight(1f)) {
+                                    OutlinedButton(
+                                        onClick = onClick,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) {
+                                        Text("Add to songbook")
+                                    }
+                                }
+                            }
                             if (documentState.isFavorite != null && onToggleFavorite != null) {
                                 Box(modifier = Modifier.weight(1f)) {
                                     OutlinedButton(

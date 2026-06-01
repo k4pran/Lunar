@@ -143,6 +143,58 @@ class ComposeAppCommonTest {
     }
 
     @Test
+    fun viewerSetlistActionSelectsCurrentScoreAndOpensPicker() = runBlocking {
+        val item = testSheetMusicItem(
+            id = "moon_river",
+            title = "Moon River",
+        )
+        val runtime = createTestPlatformRuntime(initialItems = listOf(item))
+        val appState = createTestLunarAppState(
+            scope = this,
+            runtime = runtime,
+        )
+
+        appState.openPreview(item)
+        appState.openFullscreen(item.id)
+
+        appState.showSetlistPickerForScore(item.id)
+
+        assertEquals(AppSection.LIBRARY, appState.selectedSection)
+        assertEquals(setOf(item.id), appState.selectedScoreIds)
+        assertTrue(appState.setlistPickerVisible)
+        assertFalse(appState.songbookPickerVisible)
+        assertEquals(null, appState.previewTarget)
+        assertEquals(null, appState.fullscreenTarget)
+    }
+
+    @Test
+    fun viewerSongbookActionSelectsCurrentScoreAndOpensPicker() = runBlocking {
+        val item = testSheetMusicItem(
+            id = "blue_bossa",
+            title = "Blue Bossa",
+        )
+        val runtime = createTestPlatformRuntime(
+            initialItems = listOf(item),
+            songbookCreationSupported = true,
+        )
+        val appState = createTestLunarAppState(
+            scope = this,
+            runtime = runtime,
+        )
+
+        appState.openPreview(item)
+
+        appState.showSongbookPickerForScore(item.id)
+
+        assertEquals(AppSection.LIBRARY, appState.selectedSection)
+        assertEquals(setOf(item.id), appState.selectedScoreIds)
+        assertFalse(appState.setlistPickerVisible)
+        assertTrue(appState.songbookPickerVisible)
+        assertEquals(null, appState.previewTarget)
+        assertEquals(null, appState.fullscreenTarget)
+    }
+
+    @Test
     fun hidingScoreClearsViewersAndRestoreMakesItVisibleAgain() = runBlocking {
         val item = testSheetMusicItem(
             id = "bad_scan",

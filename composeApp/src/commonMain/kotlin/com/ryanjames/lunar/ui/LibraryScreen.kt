@@ -3480,7 +3480,7 @@ private fun buildLibraryScreenModel(
             activeTemporarySetlist = activeTemporarySetlist,
             activeSetlist = activeSetlist,
         ),
-        selectedItems = currentScopeItems.filter { it.id in appState.selectedScoreIds },
+        selectedItems = visibleLibraryItems.filter { it.id in appState.selectedScoreIds },
         editingItem = snapshot.items.firstOrNull { it.id == appState.editingItemId },
         infoItem = snapshot.items.firstOrNull { it.id == appState.infoItemId },
         infoMetadata = appState.infoMetadata,

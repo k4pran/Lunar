@@ -290,6 +290,20 @@ class LunarAppState(
         }
     }
 
+    fun showSetlistPickerForScore(itemId: String) {
+        if (runtime.repository.getItem(itemId) == null) {
+            bannerMessage = "That score is no longer available."
+            return
+        }
+
+        focusLibrarySection()
+        previewTarget = null
+        fullscreenTarget = null
+        selectedScoreIds = setOf(itemId)
+        songbookPickerVisible = false
+        setlistPickerVisible = true
+    }
+
     fun dismissSetlistPicker() {
         setlistPickerVisible = false
     }
@@ -298,6 +312,24 @@ class LunarAppState(
         if (selectedScoreIds.isNotEmpty()) {
             songbookPickerVisible = true
         }
+    }
+
+    fun showSongbookPickerForScore(itemId: String) {
+        if (!runtime.capabilities.songbookCreationSupported) {
+            bannerMessage = "Songbook creation isn't available on this device."
+            return
+        }
+        if (runtime.repository.getItem(itemId) == null) {
+            bannerMessage = "That score is no longer available."
+            return
+        }
+
+        focusLibrarySection()
+        previewTarget = null
+        fullscreenTarget = null
+        selectedScoreIds = setOf(itemId)
+        setlistPickerVisible = false
+        songbookPickerVisible = true
     }
 
     fun dismissSongbookPicker() {
