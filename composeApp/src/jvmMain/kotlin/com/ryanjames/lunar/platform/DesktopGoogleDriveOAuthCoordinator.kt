@@ -1,7 +1,7 @@
 package com.ryanjames.lunar.platform
 
 import com.ryanjames.lunar.library.data.GoogleDriveStorageSettings
-import com.ryanjames.lunar.sync.GOOGLE_DRIVE_READONLY_SCOPE
+import com.ryanjames.lunar.sync.GOOGLE_DRIVE_SYNC_SCOPE
 import com.ryanjames.lunar.sync.GOOGLE_OAUTH_TOKEN_URL
 import com.ryanjames.lunar.sync.GoogleDriveAccessToken
 import com.ryanjames.lunar.sync.GoogleDriveOAuthCoordinator
@@ -277,7 +277,7 @@ class DesktopGoogleDriveOAuthCoordinator(
             add("client_id=${urlEncode(clientId)}")
             add("redirect_uri=${urlEncode(redirectUri)}")
             add("response_type=code")
-            add("scope=${urlEncode(GOOGLE_DRIVE_READONLY_SCOPE)}")
+            add("scope=${urlEncode(GOOGLE_DRIVE_SYNC_SCOPE)}")
             add("access_type=offline")
             add("prompt=consent")
             add("state=${urlEncode(state)}")

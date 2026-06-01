@@ -171,6 +171,17 @@ interface SheetMusicRepository {
         sourceId: String? = null,
     )
 
+    suspend fun markItemSynced(
+        itemId: String,
+        providerId: String,
+        providerName: String,
+        remoteId: String,
+        remoteVersion: String?,
+        sourceUri: String?,
+        syncedAtEpochMillis: Long,
+        sourceId: String? = null,
+    )
+
     suspend fun updateSyncStatus(syncStatus: SyncStatus)
 
     suspend fun getScoreMetadata(itemId: String): ScoreMetadata?
@@ -594,10 +605,15 @@ class DefaultSheetMusicRepository(
 
         mutationLock.withLock {
             val existingItems = _library.value.items
-            val existingRemoteItems = existingItems.filter { it.syncMetadata?.providerId == providerId }
-            val existingRemoteById = existingRemoteItems.associateBy { it.syncMetadata?.remoteId.orEmpty() }
-            val keptLocalItems = existingItems.filterNot { it.syncMetadata?.providerId == providerId }
+            val existingRemoteItems = existingItems.filter { it.hasSyncProvider(providerId) }
+            val existingRemoteById = existingRemoteItems.associateBy {
+                it.syncMetadataForProvider(providerId)?.remoteId.orEmpty()
+            }
             val incomingRemoteIds = items.mapTo(mutableSetOf()) { it.remoteId }
+            val removedRemoteItems = existingRemoteItems
+                .filter { existing -> existing.syncMetadataForProvider(providerId)?.remoteId !in incomingRemoteIds }
+            val keptLocalItems = existingItems.filterNot { it.hasSyncProvider(providerId) } +
+                removedRemoteItems.mapNotNull { existing -> existing.withoutSyncProvider(providerId) }
 
             val syncedItems = items.map { descriptor ->
                 val existing = existingRemoteById[descriptor.remoteId]
@@ -630,6 +646,13 @@ class DefaultSheetMusicRepository(
                     stalePaths += existing.document.storedPath
                 }
 
+                val nextSyncMetadata = RemoteSyncMetadata(
+                    providerId = providerId,
+                    providerName = providerName,
+                    remoteId = descriptor.remoteId,
+                    remoteVersion = descriptor.remoteVersion,
+                    lastSyncedEpochMillis = syncedAtEpochMillis,
+                )
                 val syncedItem = existing?.copy(
                     title = libraryFields.title,
                     composer = libraryFields.composer,
@@ -637,14 +660,7 @@ class DefaultSheetMusicRepository(
                     collection = resolvedCollection,
                     document = nextDocument,
                     pageCount = libraryFields.pageCount ?: existing.pageCount,
-                    syncMetadata = RemoteSyncMetadata(
-                        providerId = providerId,
-                        providerName = providerName,
-                        remoteId = descriptor.remoteId,
-                        remoteVersion = descriptor.remoteVersion,
-                        lastSyncedEpochMillis = syncedAtEpochMillis,
-                    ),
-                ) ?: SheetMusicItem(
+                )?.withSyncMetadata(nextSyncMetadata) ?: SheetMusicItem(
                     id = itemId,
                     title = libraryFields.title,
                     composer = libraryFields.composer,
@@ -653,13 +669,7 @@ class DefaultSheetMusicRepository(
                     document = nextDocument,
                     pageCount = libraryFields.pageCount,
                     dateAddedEpochMillis = descriptor.dateAddedEpochMillis ?: syncedAtEpochMillis,
-                    syncMetadata = RemoteSyncMetadata(
-                        providerId = providerId,
-                        providerName = providerName,
-                        remoteId = descriptor.remoteId,
-                        remoteVersion = descriptor.remoteVersion,
-                        lastSyncedEpochMillis = syncedAtEpochMillis,
-                    ),
+                    syncMetadata = nextSyncMetadata,
                     sourceId = sourceId,
                 )
                 syncedMetadataRecords += ImportedItemRecord(
@@ -669,11 +679,12 @@ class DefaultSheetMusicRepository(
                 syncedItem
             }
 
-            existingRemoteItems
-                .filter { existing -> existing.syncMetadata?.remoteId !in incomingRemoteIds }
-                .forEach {
-                    stalePaths += it.document.storedPath
-                    removedRemoteItemIds += it.id
+            removedRemoteItems
+                .forEach { existing ->
+                    if (existing.withoutSyncProvider(providerId) == null) {
+                        stalePaths += existing.document.storedPath
+                        removedRemoteItemIds += existing.id
+                    }
                 }
 
             val updatedItems = keptLocalItems + syncedItems
@@ -710,6 +721,46 @@ class DefaultSheetMusicRepository(
         ensureInitialized()
         mutationLock.withLock {
             _library.value = _library.value.copy(syncStatus = syncStatus)
+        }
+    }
+
+    override suspend fun markItemSynced(
+        itemId: String,
+        providerId: String,
+        providerName: String,
+        remoteId: String,
+        remoteVersion: String?,
+        sourceUri: String?,
+        syncedAtEpochMillis: Long,
+        sourceId: String?,
+    ) {
+        ensureInitialized()
+
+        mutateItem(itemId) { item ->
+            item.copy(
+                document = item.document.copy(
+                    sourceUri = sourceUri?.trim()?.ifEmpty { null } ?: item.document.sourceUri,
+                ),
+                sourceId = item.sourceId ?: sourceId,
+            ).withSyncMetadata(
+                RemoteSyncMetadata(
+                    providerId = providerId,
+                    providerName = providerName,
+                    remoteId = remoteId,
+                    remoteVersion = remoteVersion,
+                    lastSyncedEpochMillis = syncedAtEpochMillis,
+                )
+            )
+        }
+        getItem(itemId)?.let { item ->
+            val existingMetadata = scoreMetadataStorage.readMetadata(item.id)
+            persistMetadataRecord(
+                itemId = item.id,
+                metadata = metadataForLibraryItem(
+                    item = item,
+                    metadataId = existingMetadata?.id,
+                ),
+            )
         }
     }
 
@@ -1248,3 +1299,39 @@ private fun buildScoreMetadataId(
         ?.take(16)
         ?.ifEmpty { null }
     ?: itemId.trim().ifEmpty { "score" }
+
+private fun SheetMusicItem.syncMetadataForProvider(providerId: String): RemoteSyncMetadata? =
+    listOfNotNull(syncMetadata)
+        .plus(syncTargets)
+        .firstOrNull { metadata -> metadata.providerId == providerId }
+
+private fun SheetMusicItem.hasSyncProvider(providerId: String): Boolean =
+    syncMetadataForProvider(providerId) != null
+
+private fun SheetMusicItem.withSyncMetadata(metadata: RemoteSyncMetadata): SheetMusicItem {
+    val primary = syncMetadata
+    if (primary == null || primary.providerId == metadata.providerId) {
+        return copy(
+            syncMetadata = metadata,
+            syncTargets = syncTargets.filterNot { it.providerId == metadata.providerId },
+        )
+    }
+
+    val updatedTargets = (syncTargets.filterNot { it.providerId == metadata.providerId } + metadata)
+        .sortedBy { it.providerName.lowercase() }
+    return copy(syncTargets = updatedTargets)
+}
+
+private fun SheetMusicItem.withoutSyncProvider(providerId: String): SheetMusicItem? {
+    val primary = syncMetadata
+    val remainingTargets = syncTargets.filterNot { it.providerId == providerId }
+    return when {
+        primary?.providerId == providerId && remainingTargets.isEmpty() -> null
+        primary?.providerId == providerId -> copy(
+            syncMetadata = remainingTargets.first(),
+            syncTargets = remainingTargets.drop(1),
+        )
+        remainingTargets.size != syncTargets.size -> copy(syncTargets = remainingTargets)
+        else -> this
+    }
+}

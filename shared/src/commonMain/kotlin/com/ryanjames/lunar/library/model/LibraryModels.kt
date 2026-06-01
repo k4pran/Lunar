@@ -35,6 +35,7 @@ data class SheetMusicItem(
     val lastViewedPage: Int = 0,
     val pageCount: Int? = null,
     val syncMetadata: RemoteSyncMetadata? = null,
+    val syncTargets: List<RemoteSyncMetadata> = emptyList(),
     val sourceId: String? = null,
 )
 

@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -273,6 +274,20 @@ fun AddCloudSourceDialog(
     var driveRefreshToken by remember(existingSource) {
         mutableStateOf(existingGoogleDriveSource?.settings?.refreshToken.orEmpty())
     }
+    var driveUploadEnabled by remember(existingSource) {
+        mutableStateOf(existingGoogleDriveSource?.settings?.uploadEnabled ?: false)
+    }
+    var driveUploadRoot by remember(existingSource) {
+        val uploadRoot = existingGoogleDriveSource?.settings?.uploadRoot
+        mutableStateOf(
+            EditableGoogleDriveRoot(
+                id = uploadRoot?.id ?: generateSourceId(),
+                label = uploadRoot?.label.orEmpty(),
+                folderRef = uploadRoot?.folderId.orEmpty(),
+                folderStrategy = uploadRoot?.folderStrategy ?: CloudPathStrategy.COMPOSER_COLLECTION,
+            )
+        )
+    }
     val driveRoots = remember(existingSource) {
         mutableStateListOf<EditableGoogleDriveRoot>().apply {
             val existingRoots = existingGoogleDriveSource?.settings?.roots.orEmpty()
@@ -298,12 +313,15 @@ fun AddCloudSourceDialog(
         val folderId = extractGoogleDriveFolderId(root.folderRef)
         if (folderId.isNullOrBlank()) null else root to folderId
     }
+    val validDriveUploadRoot = extractGoogleDriveFolderId(driveUploadRoot.folderRef)
+        ?.takeIf(String::isNotBlank)
     val isValid = if (isSupabaseSelected) {
         projectUrl.isNotBlank() && bucketName.isNotBlank()
     } else {
         validDriveRoots.isNotEmpty() &&
             driveClientId.isNotBlank() &&
-            (googleDriveOAuthSupported || isEditing)
+            (googleDriveOAuthSupported || isEditing) &&
+            (!driveUploadEnabled || validDriveUploadRoot != null)
     }
 
     AlertDialog(
@@ -411,6 +429,10 @@ fun AddCloudSourceDialog(
                         oauthSupported = googleDriveOAuthSupported,
                         allowManualRefreshTokenEdit = isEditing,
                         roots = driveRoots,
+                        uploadEnabled = driveUploadEnabled,
+                        onUploadEnabledChange = { driveUploadEnabled = it },
+                        uploadRoot = driveUploadRoot,
+                        onUploadRootChange = { driveUploadRoot = it },
                     )
                 }
             }
@@ -449,6 +471,17 @@ fun AddCloudSourceDialog(
                                         folderId = folderId,
                                         folderStrategy = root.folderStrategy,
                                     )
+                                },
+                                uploadEnabled = driveUploadEnabled,
+                                uploadRoot = if (driveUploadEnabled && validDriveUploadRoot != null) {
+                                    GoogleDriveImportRoot(
+                                        id = driveUploadRoot.id,
+                                        label = driveUploadRoot.label.trim(),
+                                        folderId = validDriveUploadRoot,
+                                        folderStrategy = driveUploadRoot.folderStrategy,
+                                    )
+                                } else {
+                                    null
                                 },
                             ),
                         )
@@ -543,12 +576,16 @@ private fun GoogleDriveFields(
     oauthSupported: Boolean,
     allowManualRefreshTokenEdit: Boolean,
     roots: MutableList<EditableGoogleDriveRoot>,
+    uploadEnabled: Boolean,
+    onUploadEnabledChange: (Boolean) -> Unit,
+    uploadRoot: EditableGoogleDriveRoot,
+    onUploadRootChange: (EditableGoogleDriveRoot) -> Unit,
 ) {
     Text(
         text = if (allowManualRefreshTokenEdit) {
             "Google Drive stores its OAuth details with the source. Update the client settings, refresh token, or root folders here, then refresh the source when you're ready."
         } else {
-            "Google Drive uses a desktop OAuth sign-in. Add one or more root folders, paste your desktop OAuth client details, and Lunar will open the browser when you press Connect."
+            "Google Drive uses a desktop OAuth sign-in. Add one or more read roots, paste your desktop OAuth client details, and Lunar will open the browser when you press Connect."
         },
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -585,7 +622,7 @@ private fun GoogleDriveFields(
         text = if (allowManualRefreshTokenEdit) {
             "You can replace the saved refresh token here. Leave it blank if you want Lunar to ask for a new desktop sign-in the next time you refresh this source."
         } else if (oauthSupported) {
-            "Lunar requests offline access during the first Google sign-in, stores the returned refresh token locally, and uses it for later background sync."
+            "Lunar requests offline read and file-write access during the first Google sign-in, stores the returned refresh token locally, and uses it for later background sync."
         } else {
             "Google Drive sign-in is currently available on the desktop build. Add this source from Windows or Linux to complete the OAuth connection."
         },
@@ -625,6 +662,38 @@ private fun GoogleDriveFields(
             Text("Add Google Drive root")
         }
     }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Checkbox(
+            checked = uploadEnabled,
+            onCheckedChange = onUploadEnabledChange,
+        )
+        Column {
+            Text("Upload-sync new local imports")
+            Text(
+                "Use a dedicated writable Drive folder when you want Lunar to publish a cleaned layout.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    if (uploadEnabled) {
+        Text(
+            text = "Upload root",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        GoogleDriveRootEditor(
+            root = uploadRoot,
+            onRootChange = onUploadRootChange,
+            onRemove = { onUploadEnabledChange(false) },
+            removeLabel = "Disable upload-sync",
+        )
+    }
 }
 
 @Composable
@@ -632,6 +701,7 @@ private fun GoogleDriveRootEditor(
     root: EditableGoogleDriveRoot,
     onRootChange: (EditableGoogleDriveRoot) -> Unit,
     onRemove: () -> Unit,
+    removeLabel: String = "Remove root",
 ) {
     Column(
         modifier = Modifier
@@ -667,7 +737,7 @@ private fun GoogleDriveRootEditor(
             onClick = onRemove,
             colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
         ) {
-            Text("Remove root")
+            Text(removeLabel)
         }
     }
 }

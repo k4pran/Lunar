@@ -1086,6 +1086,7 @@ class LunarAppState(
                         currentStep = "Import complete",
                         processedDelta = imported.size,
                     )
+                    uploadImportedScoresToGoogleDrive(imported)
                 }
                 bannerMessage = when {
                     imported.isNotEmpty() -> {
@@ -1172,6 +1173,7 @@ class LunarAppState(
                             currentStep = "Import complete",
                             processedDelta = scores,
                         )
+                        uploadImportedScoresToGoogleDrive(imported)
                         "$scores score${if (scores == 1) "" else "s"} added to your library."
                     }
 
@@ -1217,6 +1219,31 @@ class LunarAppState(
                 accessToken = "",
             ),
         )
+    }
+
+    private suspend fun uploadImportedScoresToGoogleDrive(imported: List<SheetMusicItem>) {
+        val summary = runtime.syncManager.uploadImportedItemsToGoogleDrive(
+            sources = runtime.sourceRegistry.sources.value,
+            items = imported,
+        )
+        if (summary.attemptedCount == 0) return
+
+        when {
+            summary.uploadedCount > 0 && summary.errors.isEmpty() -> appendImportActivity(
+                message = "Uploaded ${summary.uploadedCount} score${if (summary.uploadedCount == 1) "" else "s"} to Google Drive.",
+                currentStep = "Google Drive upload complete",
+            )
+            summary.uploadedCount > 0 -> appendImportActivities(
+                messages = listOf(
+                    "Uploaded ${summary.uploadedCount} score${if (summary.uploadedCount == 1) "" else "s"} to Google Drive.",
+                ) + summary.errors,
+                currentStep = "Google Drive upload completed with issues",
+            )
+            summary.errors.isNotEmpty() -> appendImportActivities(
+                messages = summary.errors,
+                currentStep = "Google Drive upload failed",
+            )
+        }
     }
 
     private fun startImportActivity(initialMessage: String) {

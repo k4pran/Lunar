@@ -622,6 +622,14 @@ private fun SourceCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    val uploadRoot = source.settings.uploadRoot
+                    if (source.settings.uploadEnabled && uploadRoot != null) {
+                        Text(
+                            text = "Upload-sync: ${uploadRoot.label.ifBlank { uploadRoot.folderId }}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
                     source.settings.roots.take(2).forEach { root ->
                         Text(
                             text = root.label.ifBlank { root.folderId },

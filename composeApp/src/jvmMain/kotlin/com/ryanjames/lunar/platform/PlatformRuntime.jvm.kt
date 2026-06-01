@@ -1002,6 +1002,44 @@ private class DesktopSyncHttpClient(
         }
         connection.inputStream.bufferedReader().use { it.readText() }
     }
+
+    override suspend fun postMultipart(
+        url: String,
+        metadataJson: String,
+        fileName: String,
+        fileBytes: ByteArray,
+        contentType: String,
+        headers: Map<String, String>,
+    ): String = withContext(Dispatchers.IO) {
+        val settings = settingsProvider()
+        val boundary = "lunar-${System.currentTimeMillis()}-${Random.nextInt(1000, 9999)}"
+        val connection = java.net.URI(url).toURL().openConnection() as java.net.HttpURLConnection
+        connection.apply {
+            requestMethod = "POST"
+            setRequestProperty("Content-Type", "multipart/related; boundary=$boundary")
+            setRequestProperty("Accept", "application/json")
+            headers.forEach { (key, value) -> setRequestProperty(key, value) }
+            connectTimeout = settings.cloudConnectTimeoutMillis
+            readTimeout = settings.cloudReadTimeoutMillis
+            doOutput = true
+        }
+        connection.outputStream.use { output ->
+            output.write("--$boundary\r\n".toByteArray(Charsets.UTF_8))
+            output.write("Content-Type: application/json; charset=UTF-8\r\n\r\n".toByteArray(Charsets.UTF_8))
+            output.write(metadataJson.toByteArray(Charsets.UTF_8))
+            output.write("\r\n--$boundary\r\n".toByteArray(Charsets.UTF_8))
+            output.write("Content-Type: $contentType\r\n".toByteArray(Charsets.UTF_8))
+            output.write("Content-Disposition: attachment; filename=\"${fileName.replace("\"", "_")}\"\r\n\r\n".toByteArray(Charsets.UTF_8))
+            output.write(fileBytes)
+            output.write("\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8))
+        }
+        val responseCode = connection.responseCode
+        if (responseCode !in 200..299) {
+            val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+            throw java.io.IOException("HTTP $responseCode from multipart POST $url: $errorBody")
+        }
+        connection.inputStream.bufferedReader().use { it.readText() }
+    }
 }
 
 private class DesktopStoredDocumentFingerprinter : StoredDocumentFingerprinter {
@@ -1230,6 +1268,14 @@ private class DesktopManagedPdfStore(
             output.write(contents)
         }
         destination.absolutePath
+    }
+
+    override suspend fun readPdf(storedPath: String): ByteArray = withContext(Dispatchers.IO) {
+        val file = File(storedPath)
+        if (!file.exists()) {
+            throw IOException("Managed PDF was not found: ${file.name}")
+        }
+        file.readBytes()
     }
 
     override suspend fun exists(storedPath: String): Boolean = withContext(Dispatchers.IO) {

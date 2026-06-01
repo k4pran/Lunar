@@ -318,6 +318,110 @@ class ComposeAppCommonTest {
     }
 
     @Test
+    fun googleDriveUploadUsesRootLayoutAndMarksImportedItemSynced() = runBlocking {
+        val item = testSheetMusicItem(
+            id = "moonlight",
+            title = "Moonlight Sonata",
+            composer = "Beethoven",
+            originalFileName = "Moonlight Sonata.pdf",
+        )
+        val repository = DefaultSheetMusicRepository(
+            InMemoryLibraryStorage(initialItems = listOf(item))
+        )
+        val httpClient = UploadingGoogleDriveHttpClient()
+        val manager = LibrarySyncManager(
+            repository = repository,
+            httpClient = httpClient,
+            pdfStore = FakeManagedPdfStore(),
+            renderer = FakePdfPageRenderer(),
+        )
+        val source = CloudGoogleDriveSource(
+            id = "drive_source",
+            label = "Google Drive",
+            addedAtEpochMillis = 1L,
+            settings = GoogleDriveStorageSettings(
+                accessToken = "token",
+                roots = listOf(
+                    GoogleDriveImportRoot(
+                        id = "root",
+                        label = "Root",
+                        folderId = "root-folder",
+                        folderStrategy = CloudPathStrategy.COMPOSER,
+                    )
+                ),
+                uploadEnabled = true,
+                uploadRoot = GoogleDriveImportRoot(
+                    id = "upload-root",
+                    label = "Clean Root",
+                    folderId = "upload-root-folder",
+                    folderStrategy = CloudPathStrategy.COMPOSER,
+                ),
+            ),
+        )
+
+        repository.initialize()
+        manager.initialize()
+
+        val summary = manager.uploadImportedItemsToGoogleDrive(
+            sources = listOf(source),
+            items = listOf(item),
+        )
+
+        assertEquals(1, summary.uploadedCount)
+        assertEquals(emptyList(), summary.errors)
+        assertTrue(
+            httpClient.createdFolderMetadata.any { metadata ->
+                metadata.contains("\"name\":\"Beethoven\"") &&
+                    metadata.contains("\"parents\":[\"upload-root-folder\"]")
+            },
+            "Expected the composer folder to be created under the configured root.",
+        )
+        assertTrue(
+            httpClient.uploadMetadata.any { metadata ->
+                metadata.contains("\"name\":\"Moonlight Sonata.pdf\"") &&
+                    metadata.contains("\"parents\":[\"beethoven-folder\"]")
+            },
+            "Expected the PDF to upload into the composer folder.",
+        )
+        val syncedItem = repository.library.value.items.single()
+        assertEquals("drive_source", syncedItem.syncMetadata?.providerId)
+        assertEquals("uploaded-file", syncedItem.syncMetadata?.remoteId)
+        assertEquals("https://drive.google.com/file/d/uploaded-file/view", syncedItem.document.sourceUri)
+    }
+
+    @Test
+    fun googleDriveUploadCanWriteToMultipleEnabledSources() = runBlocking {
+        val item = testSheetMusicItem(id = "prelude", title = "Prelude")
+        val repository = DefaultSheetMusicRepository(
+            InMemoryLibraryStorage(initialItems = listOf(item))
+        )
+        val manager = LibrarySyncManager(
+            repository = repository,
+            httpClient = UploadingGoogleDriveHttpClient(),
+            pdfStore = FakeManagedPdfStore(),
+            renderer = FakePdfPageRenderer(),
+        )
+        val primary = uploadEnabledDriveSource("drive_primary", "Primary Drive")
+        val backup = uploadEnabledDriveSource("drive_backup", "Backup Drive")
+
+        repository.initialize()
+        manager.initialize()
+
+        val summary = manager.uploadImportedItemsToGoogleDrive(
+            sources = listOf(primary, backup),
+            items = listOf(item),
+        )
+
+        assertEquals(2, summary.uploadedCount)
+        val syncedItem = repository.library.value.items.single()
+        assertEquals("drive_primary", syncedItem.syncMetadata?.providerId)
+        assertTrue(
+            syncedItem.syncTargets.any { target -> target.providerId == "drive_backup" },
+            "Expected the second upload-enabled source to be retained as an additional sync target.",
+        )
+    }
+
+    @Test
     fun updatingGoogleDriveSourceReplacesSavedRefreshToken() = runBlocking {
         val existingSource = CloudGoogleDriveSource(
             id = "drive_source",
@@ -720,6 +824,82 @@ private class ExpiredRefreshTokenGoogleDriveHttpClient : SyncHttpClient {
     }
 }
 
+private class UploadingGoogleDriveHttpClient : SyncHttpClient {
+    val createdFolderMetadata = mutableListOf<String>()
+    val uploadMetadata = mutableListOf<String>()
+
+    override suspend fun getText(url: String, headers: Map<String, String>): String {
+        assertEquals("Bearer token", headers["Authorization"])
+        return """{"files":[]}"""
+    }
+
+    override suspend fun getBytes(url: String, headers: Map<String, String>): ByteArray =
+        error("Downloads are not used by this upload test")
+
+    override suspend fun postJson(url: String, jsonBody: String, headers: Map<String, String>): String {
+        assertEquals("Bearer token", headers["Authorization"])
+        createdFolderMetadata += jsonBody
+        return """
+            {
+              "id": "beethoven-folder",
+              "name": "Beethoven",
+              "mimeType": "application/vnd.google-apps.folder"
+            }
+        """.trimIndent()
+    }
+
+    override suspend fun postMultipart(
+        url: String,
+        metadataJson: String,
+        fileName: String,
+        fileBytes: ByteArray,
+        contentType: String,
+        headers: Map<String, String>,
+    ): String {
+        assertEquals("Bearer token", headers["Authorization"])
+        assertTrue(fileName.endsWith(".pdf"), "Expected uploaded file to remain a PDF.")
+        assertEquals(byteArrayOf(1, 2, 3, 4).toList(), fileBytes.toList())
+        assertEquals("application/pdf", contentType)
+        uploadMetadata += metadataJson
+        return """
+            {
+              "id": "uploaded-file",
+              "name": "Moonlight Sonata.pdf",
+              "mimeType": "application/pdf",
+              "modifiedTime": "2026-04-12T00:00:01Z",
+              "webViewLink": "https://drive.google.com/file/d/uploaded-file/view"
+            }
+        """.trimIndent()
+    }
+}
+
+private fun uploadEnabledDriveSource(
+    id: String,
+    label: String,
+): CloudGoogleDriveSource = CloudGoogleDriveSource(
+    id = id,
+    label = label,
+    addedAtEpochMillis = 1L,
+    settings = GoogleDriveStorageSettings(
+        accessToken = "token",
+        roots = listOf(
+            GoogleDriveImportRoot(
+                id = "${id}_read",
+                label = "Read Root",
+                folderId = "${id}_read_folder",
+                folderStrategy = CloudPathStrategy.FLAT,
+            )
+        ),
+        uploadEnabled = true,
+        uploadRoot = GoogleDriveImportRoot(
+            id = "${id}_upload",
+            label = "Upload Root",
+            folderId = "upload-root-folder",
+            folderStrategy = CloudPathStrategy.FLAT,
+        ),
+    ),
+)
+
 private class TestGoogleDriveOAuthCoordinator(
     private val session: GoogleDriveOAuthSession,
 ) : GoogleDriveOAuthCoordinator {
@@ -744,6 +924,8 @@ private class TestGoogleDriveOAuthCoordinator(
 private class FakeManagedPdfStore : ManagedPdfStore {
     override suspend fun savePdf(originalFileName: String, contents: ByteArray): String =
         "/managed/$originalFileName"
+
+    override suspend fun readPdf(storedPath: String): ByteArray = byteArrayOf(1, 2, 3, 4)
 
     override suspend fun exists(storedPath: String): Boolean = false
 }

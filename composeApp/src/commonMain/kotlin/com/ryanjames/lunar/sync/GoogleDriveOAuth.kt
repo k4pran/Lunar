@@ -87,4 +87,6 @@ internal fun tokenExpiryEpochMillis(
 ): Long = currentEpochMillis + expiresInSeconds.toLong() * 1000L
 
 internal const val GOOGLE_DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+internal const val GOOGLE_DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+internal const val GOOGLE_DRIVE_SYNC_SCOPE = "$GOOGLE_DRIVE_READONLY_SCOPE $GOOGLE_DRIVE_FILE_SCOPE"
 internal const val GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"

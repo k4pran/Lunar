@@ -23,11 +23,14 @@ import com.ryanjames.lunar.sync.UnsupportedGoogleDriveOAuthCoordinator
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlin.time.Clock
+import kotlin.time.Instant
 
 data class CloudLibraryProviderOption(
     val id: String,
@@ -50,6 +53,15 @@ data class CloudSyncState(
     val activityLog: List<String> = emptyList(),
 )
 
+data class GoogleDriveUploadSummary(
+    val uploadedCount: Int = 0,
+    val skippedCount: Int = 0,
+    val errors: List<String> = emptyList(),
+) {
+    val attemptedCount: Int
+        get() = uploadedCount + skippedCount + errors.size
+}
+
 interface SyncHttpClient {
     suspend fun getText(url: String, headers: Map<String, String> = emptyMap()): String
 
@@ -66,16 +78,31 @@ interface SyncHttpClient {
         formBody: String,
         headers: Map<String, String> = emptyMap(),
     ): String = throw UnsupportedOperationException("postForm is not implemented for this sync client.")
+
+    suspend fun postMultipart(
+        url: String,
+        metadataJson: String,
+        fileName: String,
+        fileBytes: ByteArray,
+        contentType: String,
+        headers: Map<String, String> = emptyMap(),
+    ): String = throw UnsupportedOperationException("postMultipart is not implemented for this sync client.")
 }
 
 interface ManagedPdfStore {
     suspend fun savePdf(originalFileName: String, contents: ByteArray): String
+
+    suspend fun readPdf(storedPath: String): ByteArray =
+        throw UnsupportedOperationException("Managed PDF reads are unavailable on this target.")
 
     suspend fun exists(storedPath: String): Boolean
 }
 
 object NoOpManagedPdfStore : ManagedPdfStore {
     override suspend fun savePdf(originalFileName: String, contents: ByteArray): String =
+        throw UnsupportedOperationException("Managed PDF storage is unavailable on this target.")
+
+    override suspend fun readPdf(storedPath: String): ByteArray =
         throw UnsupportedOperationException("Managed PDF storage is unavailable on this target.")
 
     override suspend fun exists(storedPath: String): Boolean = false
@@ -93,6 +120,15 @@ class FailingSyncHttpClient(private val message: String) : SyncHttpClient {
 
     override suspend fun postForm(url: String, formBody: String, headers: Map<String, String>): String =
         throw UnsupportedOperationException(message)
+
+    override suspend fun postMultipart(
+        url: String,
+        metadataJson: String,
+        fileName: String,
+        fileBytes: ByteArray,
+        contentType: String,
+        headers: Map<String, String>,
+    ): String = throw UnsupportedOperationException(message)
 }
 
 @Serializable
@@ -113,6 +149,15 @@ private data class GoogleDriveFile(
     val id: String,
     val name: String,
     val mimeType: String,
+    val modifiedTime: String? = null,
+    val webViewLink: String? = null,
+)
+
+@Serializable
+private data class GoogleDriveCreatedFile(
+    val id: String,
+    val name: String = "",
+    val mimeType: String = "",
     val modifiedTime: String? = null,
     val webViewLink: String? = null,
 )
@@ -182,6 +227,80 @@ class LibrarySyncManager(
 
     fun clearGoogleAccessToken(sourceId: String) {
         googleAccessTokens.remove(sourceId)
+    }
+
+    suspend fun uploadImportedItemsToGoogleDrive(
+        sources: List<LibrarySource>,
+        items: List<SheetMusicItem>,
+    ): GoogleDriveUploadSummary {
+        ensureInitialized()
+        val localItems = items
+        if (localItems.isEmpty()) return GoogleDriveUploadSummary()
+
+        val googleSources = sources
+            .filterIsInstance<CloudGoogleDriveSource>()
+            .filter { it.settings.normalized().canUploadToGoogleDrive() }
+        if (googleSources.isEmpty()) return GoogleDriveUploadSummary()
+
+        var uploadedCount = 0
+        var skippedCount = 0
+        val errors = mutableListOf<String>()
+        val syncedAt = clock.now().toEpochMilliseconds()
+
+        googleSources.forEach { source ->
+            val sourceItems = localItems.filterNot { item -> item.hasSyncProvider(source.id) }
+            if (sourceItems.isEmpty()) return@forEach
+
+            val config = source.settings.normalized()
+            val root = config.uploadRoot
+            if (root == null) {
+                skippedCount += sourceItems.size
+                errors += "${source.label}: no Google Drive upload root is configured."
+                return@forEach
+            }
+
+            val accessToken = runCatching { resolveGoogleAccessToken(source, config) }
+                .getOrElse { error ->
+                    skippedCount += sourceItems.size
+                    errors += "${source.label}: ${error.describeSyncFailure()}"
+                    return@forEach
+                }
+            val headers = buildMap {
+                put("Authorization", "Bearer $accessToken")
+                put("Accept", "application/json")
+            }
+
+            sourceItems.forEach { item ->
+                try {
+                    val upload = uploadItemToGoogleDrive(
+                        source = source,
+                        config = config,
+                        root = root,
+                        headers = headers,
+                        item = item,
+                    )
+                    repository.markItemSynced(
+                        itemId = item.id,
+                        providerId = source.id,
+                        providerName = source.label,
+                        remoteId = upload.id,
+                        remoteVersion = upload.modifiedTime,
+                        sourceUri = upload.webViewLink ?: buildGoogleDriveViewUrl(upload.id),
+                        syncedAtEpochMillis = syncedAt,
+                        sourceId = source.id,
+                    )
+                    uploadedCount += 1
+                } catch (error: Throwable) {
+                    errors += "${source.label}: failed to upload ${item.document.originalFileName} - ${error.describeSyncFailure()}"
+                }
+            }
+        }
+
+        return GoogleDriveUploadSummary(
+            uploadedCount = uploadedCount,
+            skippedCount = skippedCount,
+            errors = errors,
+        )
     }
 
     suspend fun refresh(force: Boolean) {
@@ -809,6 +928,124 @@ class LibrarySyncManager(
         return json.decodeFromString(GoogleDriveListResponse.serializer(), response)
     }
 
+    private suspend fun uploadItemToGoogleDrive(
+        source: CloudGoogleDriveSource,
+        config: GoogleDriveStorageSettings,
+        root: GoogleDriveImportRoot,
+        headers: Map<String, String>,
+        item: SheetMusicItem,
+    ): GoogleDriveCreatedFile {
+        val folderId = resolveGoogleDriveUploadFolder(
+            source = source,
+            root = root,
+            headers = headers,
+            item = item,
+        )
+        val uploadFileName = uploadFileName(item)
+        val existingFile = findGoogleDriveChild(
+            parentFolderId = folderId,
+            name = uploadFileName,
+            mimeType = PDF_MIME_TYPE,
+            headers = headers,
+        )
+        if (existingFile != null) {
+            return GoogleDriveCreatedFile(
+                id = existingFile.id,
+                name = existingFile.name,
+                mimeType = existingFile.mimeType,
+                modifiedTime = existingFile.modifiedTime,
+                webViewLink = existingFile.webViewLink,
+            )
+        }
+
+        val metadataJson = buildGoogleDriveFileMetadata(
+            name = uploadFileName,
+            parentFolderId = folderId,
+        )
+        val response = httpClient.postMultipart(
+            url = buildGoogleDriveUploadUrl(config.apiKey),
+            metadataJson = metadataJson,
+            fileName = uploadFileName,
+            fileBytes = pdfStore.readPdf(item.document.storedPath),
+            contentType = PDF_MIME_TYPE,
+            headers = headers,
+        )
+        return json.decodeFromString(GoogleDriveCreatedFile.serializer(), response)
+    }
+
+    private suspend fun resolveGoogleDriveUploadFolder(
+        source: CloudGoogleDriveSource,
+        root: GoogleDriveImportRoot,
+        headers: Map<String, String>,
+        item: SheetMusicItem,
+    ): String {
+        var currentFolderId = root.folderId
+        uploadFolderSegments(item, root.folderStrategy).forEach { segment ->
+            val existingFolder = findGoogleDriveChild(
+                parentFolderId = currentFolderId,
+                name = segment,
+                mimeType = GOOGLE_DRIVE_FOLDER_MIME_TYPE,
+                headers = headers,
+            )
+            currentFolderId = existingFolder?.id ?: createGoogleDriveFolder(
+                source = source,
+                parentFolderId = currentFolderId,
+                name = segment,
+                headers = headers,
+            ).id
+        }
+        return currentFolderId
+    }
+
+    private suspend fun createGoogleDriveFolder(
+        source: CloudGoogleDriveSource,
+        parentFolderId: String,
+        name: String,
+        headers: Map<String, String>,
+    ): GoogleDriveCreatedFile {
+        appendActivity(
+            message = "${source.label}: creating Drive folder $name.",
+            currentStep = "Uploading PDFs to ${source.label}",
+        )
+        val response = httpClient.postJson(
+            url = "$GOOGLE_DRIVE_FILES_BASE_URL?fields=${urlEncode("id,name,mimeType,modifiedTime,webViewLink")}&supportsAllDrives=true",
+            jsonBody = buildGoogleDriveFolderMetadata(
+                name = name,
+                parentFolderId = parentFolderId,
+            ),
+            headers = headers,
+        )
+        return json.decodeFromString(GoogleDriveCreatedFile.serializer(), response)
+    }
+
+    private suspend fun findGoogleDriveChild(
+        parentFolderId: String,
+        name: String,
+        mimeType: String,
+        headers: Map<String, String>,
+    ): GoogleDriveFile? {
+        val filters = buildList {
+            add("'${googleDriveQueryString(parentFolderId)}' in parents")
+            add("name = '${googleDriveQueryString(name)}'")
+            add("mimeType = '${googleDriveQueryString(mimeType)}'")
+            add("trashed = false")
+        }.joinToString(" and ")
+        val queryParams = buildList {
+            add("q=${urlEncode(filters)}")
+            add("fields=${urlEncode("files(id,name,mimeType,modifiedTime,webViewLink)")}")
+            add("pageSize=1")
+            add("supportsAllDrives=true")
+            add("includeItemsFromAllDrives=true")
+        }.joinToString("&")
+        val response = httpClient.getText(
+            url = "$GOOGLE_DRIVE_FILES_BASE_URL?$queryParams",
+            headers = headers,
+        )
+        return json.decodeFromString(GoogleDriveListResponse.serializer(), response)
+            .files
+            .firstOrNull()
+    }
+
     private suspend fun resolveManagedDescriptor(
         providerId: String,
         remoteId: String,
@@ -1072,18 +1309,21 @@ private fun GoogleDriveStorageSettings.normalized(): GoogleDriveStorageSettings 
     clientSecret = clientSecret.trim(),
     refreshToken = refreshToken.trim(),
     accessToken = accessToken.trim(),
-    roots = roots.mapNotNull { root ->
-        val folderId = root.folderId.trim()
-        if (folderId.isBlank()) {
-            null
-        } else {
-            root.copy(
-                label = root.label.trim(),
-                folderId = folderId,
-            )
-        }
-    },
+    roots = roots.mapNotNull { root -> root.normalized() },
+    uploadRoot = uploadRoot?.normalized(),
 )
+
+private fun GoogleDriveImportRoot.normalized(): GoogleDriveImportRoot? {
+    val folderId = folderId.trim()
+    return if (folderId.isBlank()) {
+        null
+    } else {
+        copy(
+            label = label.trim(),
+            folderId = folderId,
+        )
+    }
+}
 
 private fun GoogleDriveStorageSettings.isComplete(): Boolean =
     roots.isNotEmpty() && (
@@ -1091,10 +1331,22 @@ private fun GoogleDriveStorageSettings.isComplete(): Boolean =
             (clientId.isNotBlank() && refreshToken.isNotBlank())
         )
 
+private fun GoogleDriveStorageSettings.canUploadToGoogleDrive(): Boolean =
+    uploadEnabled &&
+        uploadRoot != null &&
+        (
+            accessToken.isNotBlank() ||
+                (clientId.isNotBlank() && refreshToken.isNotBlank())
+            )
+
 private fun List<SheetMusicItem>.groupByComposerDuplicateKey(): Map<String, List<SheetMusicItem>> =
     mapNotNull { item ->
         composerDuplicateKey(item.title, item.composer)?.let { key -> key to item }
     }.groupBy({ it.first }, { it.second })
+
+private fun SheetMusicItem.hasSyncProvider(providerId: String): Boolean =
+    syncMetadata?.providerId == providerId ||
+        syncTargets.any { metadata -> metadata.providerId == providerId }
 
 private fun List<SheetMusicItem>.groupByCollectionDuplicateKey(): Map<String, List<SheetMusicItem>> =
     mapNotNull { item ->
@@ -1164,12 +1416,94 @@ private fun buildGoogleDriveDownloadUrl(fileId: String, apiKey: String): String 
     return if (apiKey.isBlank()) baseUrl else "$baseUrl&key=${urlEncode(apiKey)}"
 }
 
+private fun buildGoogleDriveUploadUrl(apiKey: String): String {
+    val baseUrl = "$GOOGLE_DRIVE_UPLOAD_BASE_URL?uploadType=multipart&fields=${urlEncode("id,name,mimeType,modifiedTime,webViewLink")}&supportsAllDrives=true"
+    return if (apiKey.isBlank()) baseUrl else "$baseUrl&key=${urlEncode(apiKey)}"
+}
+
 private fun buildGoogleDriveViewUrl(fileId: String): String =
     "https://drive.google.com/file/d/${urlEncodePathSegment(fileId)}/view"
+
+private fun buildGoogleDriveFileMetadata(
+    name: String,
+    parentFolderId: String,
+): String = """{"name":"${jsonString(name)}","mimeType":"$PDF_MIME_TYPE","parents":["${jsonString(parentFolderId)}"]}"""
+
+private fun buildGoogleDriveFolderMetadata(
+    name: String,
+    parentFolderId: String,
+): String = """{"name":"${jsonString(name)}","mimeType":"$GOOGLE_DRIVE_FOLDER_MIME_TYPE","parents":["${jsonString(parentFolderId)}"]}"""
+
+private fun uploadFolderSegments(
+    item: SheetMusicItem,
+    strategy: CloudPathStrategy,
+): List<String> = when (strategy) {
+    CloudPathStrategy.FLAT -> emptyList()
+    CloudPathStrategy.COMPOSER -> listOfNotNull(item.composer?.safeDriveFolderSegment())
+    CloudPathStrategy.COLLECTION -> listOfNotNull(item.collection?.safeDriveFolderSegment())
+    CloudPathStrategy.COMPOSER_COLLECTION -> listOfNotNull(
+        item.composer?.safeDriveFolderSegment(),
+        item.collection?.safeDriveFolderSegment(),
+    )
+    CloudPathStrategy.INSTRUMENT -> listOfNotNull(item.tags.firstOrNull()?.safeDriveFolderSegment())
+    CloudPathStrategy.DATE_ADDED -> listOf(formatDriveDateFolder(item.dateAddedEpochMillis))
+}
+
+private fun uploadFileName(item: SheetMusicItem): String {
+    val originalName = item.document.originalFileName.trim()
+    val stem = originalName
+        .substringBeforeLast('.')
+        .trim()
+        .ifEmpty { item.title.trim() }
+        .ifEmpty { "score" }
+        .replace(Regex("[\\\\/:*?\"<>|]+"), "_")
+        .trim()
+        .ifEmpty { "score" }
+    return "$stem.pdf"
+}
+
+private fun String.safeDriveFolderSegment(): String? = trim()
+    .replace(Regex("[\\\\/:*?\"<>|]+"), "_")
+    .trim()
+    .ifEmpty { null }
+
+private fun formatDriveDateFolder(epochMillis: Long): String {
+    val date = Instant.fromEpochMilliseconds(epochMillis)
+        .toLocalDateTime(TimeZone.currentSystemDefault())
+        .date
+    val monthNumber = date.month.ordinal + 1
+    return "${date.year}-${monthNumber.toString().padStart(2, '0')}"
+}
+
+private fun jsonString(value: String): String = buildString {
+    value.forEach { char ->
+        when (char) {
+            '\\' -> append("\\\\")
+            '"' -> append("\\\"")
+            '\b' -> append("\\b")
+            '\u000C' -> append("\\f")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            else -> {
+                if (char.code < 0x20) {
+                    append("\\u")
+                    append(char.code.toString(16).padStart(4, '0'))
+                } else {
+                    append(char)
+                }
+            }
+        }
+    }
+}
+
+private fun googleDriveQueryString(value: String): String =
+    value.replace("\\", "\\\\").replace("'", "\\'")
 
 private const val DEFAULT_AUTO_REFRESH_INTERVAL_MILLIS = 5 * 60_000L
 private const val ACCESS_TOKEN_EXPIRY_SKEW_MILLIS = 60_000L
 private const val MAX_ACTIVITY_LOG_ENTRIES = 250
 private const val GOOGLE_DRIVE_FILES_BASE_URL = "https://www.googleapis.com/drive/v3/files"
+private const val GOOGLE_DRIVE_UPLOAD_BASE_URL = "https://www.googleapis.com/upload/drive/v3/files"
 private const val GOOGLE_DRIVE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 private const val PDF_MIME_TYPE = "application/pdf"

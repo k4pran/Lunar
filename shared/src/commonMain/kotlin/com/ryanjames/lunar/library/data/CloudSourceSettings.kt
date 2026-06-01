@@ -26,6 +26,7 @@ data class SupabasePublicStorageSettings(
     val rootDirectory: String = "",
     val folderStrategy: CloudPathStrategy = CloudPathStrategy.FLAT,
     val anonKey: String = "",
+    val uploadEnabled: Boolean = false,
 )
 
 @Serializable
@@ -44,4 +45,6 @@ data class GoogleDriveStorageSettings(
     val refreshToken: String = "",
     val accessToken: String = "",
     val roots: List<GoogleDriveImportRoot> = emptyList(),
+    val uploadEnabled: Boolean = false,
+    val uploadRoot: GoogleDriveImportRoot? = null,
 )

@@ -33,5 +33,6 @@ plugins {
 }
 
 include(":composeApp")
+include(":questApp")
 include(":server")
 include(":shared")
