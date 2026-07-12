@@ -3,6 +3,7 @@ package com.ryanjames.lunar.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,11 +21,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -46,8 +50,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -60,6 +67,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.ryanjames.lunar.composeapp.generated.resources.Res
+import com.ryanjames.lunar.composeapp.generated.resources.lilypond_logo
+import com.ryanjames.lunar.composeapp.generated.resources.pdf_logo
 import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.library.model.ScoreViewerSupport
 import com.ryanjames.lunar.library.model.SheetMusicItem
@@ -70,6 +80,7 @@ import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.RenderedPdfPage
 import com.ryanjames.lunar.settings.ViewerKeybindings
 import kotlinx.coroutines.delay
+import org.jetbrains.compose.resources.painterResource
 
 private const val MinZoom = 0.2f
 private const val MaxZoom = 4.0f
@@ -449,6 +460,15 @@ fun ViewerScreen(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    ViewerDocumentMetaRow(
+                        viewerSupport = documentState.document.viewerSupport,
+                        pageCount = resolvedPageCount,
+                        statusLabel = visibleViewerStatusLabel(
+                            statusLabel = activeDocument.statusLabel,
+                            viewerSupport = documentState.document.viewerSupport,
+                        ),
+                        foregroundColor = themePalette.headerForeground,
+                    )
                 }
                 CompactNavButton("<", canGoPrevious) {
                     currentPage = (currentPage - pageStep).coerceAtLeast(0)
@@ -458,32 +478,23 @@ fun ViewerScreen(
                     style = MaterialTheme.typography.labelMedium,
                     color = themePalette.headerForeground.copy(alpha = 0.9f),
                 )
-                activeDocument.statusLabel?.let { status ->
-                    Text(
-                        text = status,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = themePalette.headerForeground.copy(alpha = 0.78f),
-                        modifier = Modifier
-                            .background(
-                                themePalette.headerForeground.copy(alpha = 0.12f),
-                                MaterialTheme.shapes.small,
-                            )
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                    )
-                }
                 CompactNavButton(">", canGoNext) {
                     currentPage = nextPageIndex(currentPage, resolvedPageCount, pageStep)
                 }
                 CompactNavButton("-", zoom > MinZoom) { zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom) }
                 CompactNavButton("+", zoom < MaxZoom) { zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom) }
                 CompactNavButton("Fit", zoom != FitZoom) { zoom = FitZoom }
-                CompactNavButton(
-                    label = if (twoPageMode) "1-Up" else "2-Up",
-                    enabled = true,
-                ) {
-                    twoPageMode = !twoPageMode
-                    zoom = FitZoom
-                }
+                LayoutModeDropdownButton(
+                    twoPageMode = twoPageMode,
+                    onSelectSinglePage = {
+                        twoPageMode = false
+                        zoom = FitZoom
+                    },
+                    onSelectTwoPage = {
+                        twoPageMode = true
+                        zoom = FitZoom
+                    },
+                )
                 if (activeDocument.sourceSnapshot != null) {
                     CompactNavButton(
                         label = if (sourceEditorVisible) "View" else "Edit",
@@ -508,20 +519,33 @@ fun ViewerScreen(
                         onToggleFavorite = onToggleFavorite,
                     )
                 }
-                onAddToSetlist?.let { onClick ->
-                    CompactNavButton("Setlist", true, onClick = onClick)
-                }
-                onAddToSongbook?.let { onClick ->
-                    CompactNavButton("Songbook", true, onClick = onClick)
-                }
+                ViewerAddDropdownButton(
+                    onAddToSetlist = onAddToSetlist,
+                    onAddToSongbook = onAddToSongbook,
+                )
                 if (!documentState.isHidden && onHideScore != null) {
-                    CompactNavButton("Hide", true, onClick = onHideScore)
+                    CompactToolbarIconButton(
+                        contentDescription = "Hide score",
+                        onClick = onHideScore,
+                    ) { color ->
+                        HideScoreIcon(color = color)
+                    }
                 }
                 if (onEnterFullscreen != null) {
-                    CompactNavButton("Full", true, onClick = onEnterFullscreen)
+                    CompactToolbarIconButton(
+                        contentDescription = "Enter fullscreen",
+                        onClick = onEnterFullscreen,
+                    ) { color ->
+                        FullscreenIcon(color = color)
+                    }
                 }
                 CompactNavButton("\u2669", true, onClick = { showMetronomeDialog = true })
-                CompactNavButton(backButtonLabel, true, onClick = onBack)
+                CompactToolbarIconButton(
+                    contentDescription = backButtonLabel,
+                    onClick = onBack,
+                ) { color ->
+                    CloseIcon(color = color)
+                }
             }
         }
 
@@ -840,15 +864,15 @@ fun FullscreenViewerScreen(
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                 }
-                                activeDocument.statusLabel?.let { status ->
-                                    Text(
-                                        text = status,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = themePalette.viewerForeground.copy(alpha = 0.72f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
+                                ViewerDocumentMetaRow(
+                                    viewerSupport = documentState.document.viewerSupport,
+                                    pageCount = resolvedPageCount,
+                                    statusLabel = visibleViewerStatusLabel(
+                                        statusLabel = activeDocument.statusLabel,
+                                        viewerSupport = documentState.document.viewerSupport,
+                                    ),
+                                    foregroundColor = themePalette.viewerForeground,
+                                )
                             }
                             Text(
                                 text = buildPageLabel(currentPage, resolvedPageCount, renderedPages.size),
@@ -970,26 +994,11 @@ fun FullscreenViewerScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            onAddToSetlist?.let { onClick ->
-                                Box(modifier = Modifier.weight(1f)) {
-                                    OutlinedButton(
-                                        onClick = onClick,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        Text("Add to setlist")
-                                    }
-                                }
-                            }
-                            onAddToSongbook?.let { onClick ->
-                                Box(modifier = Modifier.weight(1f)) {
-                                    OutlinedButton(
-                                        onClick = onClick,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        Text("Add to songbook")
-                                    }
-                                }
-                            }
+                            FullscreenAddDropdownButton(
+                                onAddToSetlist = onAddToSetlist,
+                                onAddToSongbook = onAddToSongbook,
+                                modifier = Modifier.weight(1f),
+                            )
                             if (documentState.isFavorite != null && onToggleFavorite != null) {
                                 Box(modifier = Modifier.weight(1f)) {
                                     OutlinedButton(
@@ -1004,9 +1013,16 @@ fun FullscreenViewerScreen(
                                 Box(modifier = Modifier.weight(1f)) {
                                     OutlinedButton(
                                         onClick = onHideScore,
-                                        modifier = Modifier.fillMaxWidth(),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .semantics {
+                                                contentDescription = "Hide score"
+                                            },
                                     ) {
-                                        Text("Hide score")
+                                        HideScoreIcon(
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp),
+                                        )
                                     }
                                 }
                             }
@@ -1028,6 +1044,494 @@ fun FullscreenViewerScreen(
     if (showMetronomeDialog) {
         MetronomeDialog(onDismiss = { showMetronomeDialog = false })
     }
+}
+
+@Composable
+private fun ViewerDocumentMetaRow(
+    viewerSupport: ScoreViewerSupport,
+    pageCount: Int?,
+    statusLabel: String?,
+    foregroundColor: Color,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ViewerSupportIcon(
+            viewerSupport = viewerSupport,
+            foregroundColor = foregroundColor,
+        )
+        pageCount?.let { count ->
+            Text(
+                text = pageCountLabel(count),
+                style = MaterialTheme.typography.labelSmall,
+                color = foregroundColor.copy(alpha = 0.74f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        statusLabel?.let { status ->
+            Text(
+                text = status,
+                style = MaterialTheme.typography.labelSmall,
+                color = foregroundColor.copy(alpha = 0.74f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ViewerSupportIcon(
+    viewerSupport: ScoreViewerSupport,
+    foregroundColor: Color,
+) {
+    val description = when (viewerSupport) {
+        ScoreViewerSupport.PDF -> "PDF viewer"
+        ScoreViewerSupport.LILYPOND -> "LilyPond viewer"
+    }
+    val logo = when (viewerSupport) {
+        ScoreViewerSupport.PDF -> Res.drawable.pdf_logo
+        ScoreViewerSupport.LILYPOND -> Res.drawable.lilypond_logo
+    }
+
+    LunarTooltip(description) {
+        Surface(
+            color = foregroundColor.copy(alpha = 0.13f),
+            shape = MaterialTheme.shapes.small,
+            modifier = Modifier
+                .size(24.dp)
+                .semantics {
+                    contentDescription = description
+                },
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(3.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter = painterResource(logo),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LayoutModeDropdownButton(
+    twoPageMode: Boolean,
+    onSelectSinglePage: () -> Unit,
+    onSelectTwoPage: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box {
+        CompactToolbarIconButton(
+            contentDescription = if (twoPageMode) "Two-page layout" else "Single-page layout",
+            onClick = { expanded = true },
+        ) { color ->
+            PageLayoutIcon(twoPage = twoPageMode, color = color)
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            Row(
+                modifier = Modifier.padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                LayoutModeMenuOption(
+                    twoPage = false,
+                    selected = !twoPageMode,
+                    contentDescription = "Single-page layout",
+                    onClick = {
+                        expanded = false
+                        onSelectSinglePage()
+                    },
+                )
+                LayoutModeMenuOption(
+                    twoPage = true,
+                    selected = twoPageMode,
+                    contentDescription = "Two-page layout",
+                    onClick = {
+                        expanded = false
+                        onSelectTwoPage()
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ViewerAddDropdownButton(
+    onAddToSetlist: (() -> Unit)?,
+    onAddToSongbook: (() -> Unit)?,
+) {
+    if (onAddToSetlist == null && onAddToSongbook == null) return
+
+    var expanded by remember { mutableStateOf(false) }
+    val description = addActionsDescription(
+        onAddToSetlist = onAddToSetlist,
+        onAddToSongbook = onAddToSongbook,
+    )
+
+    Box {
+        CompactToolbarIconButton(
+            contentDescription = description,
+            onClick = { expanded = true },
+        ) { color ->
+            AddIcon(color = color)
+        }
+        AddActionsDropdownMenu(
+            expanded = expanded,
+            onDismiss = { expanded = false },
+            onAddToSetlist = onAddToSetlist?.let { onClick ->
+                {
+                    expanded = false
+                    onClick()
+                }
+            },
+            onAddToSongbook = onAddToSongbook?.let { onClick ->
+                {
+                    expanded = false
+                    onClick()
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun FullscreenAddDropdownButton(
+    onAddToSetlist: (() -> Unit)?,
+    onAddToSongbook: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    if (onAddToSetlist == null && onAddToSongbook == null) return
+
+    var expanded by remember { mutableStateOf(false) }
+    val description = addActionsDescription(
+        onAddToSetlist = onAddToSetlist,
+        onAddToSongbook = onAddToSongbook,
+    )
+
+    Box(modifier = modifier) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics {
+                    contentDescription = description
+                },
+        ) {
+            AddIcon(
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Add")
+        }
+        AddActionsDropdownMenu(
+            expanded = expanded,
+            onDismiss = { expanded = false },
+            onAddToSetlist = onAddToSetlist?.let { onClick ->
+                {
+                    expanded = false
+                    onClick()
+                }
+            },
+            onAddToSongbook = onAddToSongbook?.let { onClick ->
+                {
+                    expanded = false
+                    onClick()
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun AddActionsDropdownMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onAddToSetlist: (() -> Unit)?,
+    onAddToSongbook: (() -> Unit)?,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+    ) {
+        onAddToSetlist?.let { onClick ->
+            DropdownMenuItem(
+                text = { Text("Add to setlist") },
+                onClick = onClick,
+            )
+        }
+        onAddToSongbook?.let { onClick ->
+            DropdownMenuItem(
+                text = { Text("Add to songbook") },
+                onClick = onClick,
+            )
+        }
+    }
+}
+
+private fun addActionsDescription(
+    onAddToSetlist: (() -> Unit)?,
+    onAddToSongbook: (() -> Unit)?,
+): String = when {
+    onAddToSetlist != null && onAddToSongbook != null -> "Add to setlist or songbook"
+    onAddToSetlist != null -> "Add to setlist"
+    else -> "Add to songbook"
+}
+
+@Composable
+private fun LayoutModeMenuOption(
+    twoPage: Boolean,
+    selected: Boolean,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    val color = MaterialTheme.colorScheme.onSurface
+    val background = if (selected) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+    }
+
+    LunarTooltip(contentDescription) {
+        Surface(
+            color = background,
+            shape = MaterialTheme.shapes.small,
+            modifier = Modifier
+                .size(44.dp)
+                .semantics {
+                    this.contentDescription = contentDescription
+                }
+                .clickable(onClick = onClick),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                PageLayoutIcon(
+                    twoPage = twoPage,
+                    color = color,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactToolbarIconButton(
+    contentDescription: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+    content: @Composable (Color) -> Unit,
+) {
+    val themePalette = lunarThemePalette()
+    val iconColor = if (enabled) {
+        themePalette.headerForeground
+    } else {
+        themePalette.headerForeground.copy(alpha = 0.32f)
+    }
+    val background = if (enabled) {
+        themePalette.headerForeground.copy(alpha = 0.15f)
+    } else {
+        Color.Transparent
+    }
+
+    LunarTooltip(contentDescription) {
+        Surface(
+            color = background,
+            shape = MaterialTheme.shapes.small,
+            modifier = Modifier
+                .size(32.dp)
+                .semantics {
+                    this.contentDescription = contentDescription
+                }
+                .clickable(enabled = enabled, onClick = onClick),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(7.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                content(iconColor)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PageLayoutIcon(
+    twoPage: Boolean,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val strokeWidth = size.minDimension * 0.11f
+        val pageGap = size.minDimension * 0.14f
+        val pageWidth = if (twoPage) {
+            (size.width - pageGap) / 2f
+        } else {
+            size.width * 0.68f
+        }
+        val pageHeight = size.height * 0.78f
+        val startY = (size.height - pageHeight) / 2f
+        val startX = if (twoPage) 0f else (size.width - pageWidth) / 2f
+        val style = Stroke(width = strokeWidth)
+
+        drawRect(
+            color = color,
+            topLeft = Offset(startX, startY),
+            size = androidx.compose.ui.geometry.Size(pageWidth, pageHeight),
+            style = style,
+        )
+        if (twoPage) {
+            drawRect(
+                color = color,
+                topLeft = Offset(startX + pageWidth + pageGap, startY),
+                size = androidx.compose.ui.geometry.Size(pageWidth, pageHeight),
+                style = style,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FullscreenIcon(
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val strokeWidth = size.minDimension * 0.13f
+        val armLength = size.minDimension * 0.34f
+        val inset = strokeWidth / 2f
+        val maxX = size.width - inset
+        val maxY = size.height - inset
+        val style = Stroke(width = strokeWidth, cap = StrokeCap.Square)
+
+        drawLine(color, Offset(inset, armLength), Offset(inset, inset), strokeWidth, StrokeCap.Square)
+        drawLine(color, Offset(inset, inset), Offset(armLength, inset), strokeWidth, StrokeCap.Square)
+        drawLine(color, Offset(maxX - armLength + inset, inset), Offset(maxX, inset), strokeWidth, StrokeCap.Square)
+        drawLine(color, Offset(maxX, inset), Offset(maxX, armLength), strokeWidth, StrokeCap.Square)
+        drawLine(color, Offset(maxX, maxY - armLength + inset), Offset(maxX, maxY), strokeWidth, StrokeCap.Square)
+        drawLine(color, Offset(maxX, maxY), Offset(maxX - armLength + inset, maxY), strokeWidth, StrokeCap.Square)
+        drawLine(color, Offset(armLength, maxY), Offset(inset, maxY), strokeWidth, StrokeCap.Square)
+        drawLine(color, Offset(inset, maxY), Offset(inset, maxY - armLength + inset), strokeWidth, StrokeCap.Square)
+    }
+}
+
+@Composable
+private fun AddIcon(
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val strokeWidth = size.minDimension * 0.14f
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val inset = size.minDimension * 0.18f
+        drawLine(
+            color = color,
+            start = Offset(inset, center.y),
+            end = Offset(size.width - inset, center.y),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = color,
+            start = Offset(center.x, inset),
+            end = Offset(center.x, size.height - inset),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+@Composable
+private fun HideScoreIcon(
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val strokeWidth = size.minDimension * 0.11f
+        val eyeWidth = size.width * 0.82f
+        val eyeHeight = size.height * 0.46f
+        val eyeStart = Offset((size.width - eyeWidth) / 2f, (size.height - eyeHeight) / 2f)
+        drawOval(
+            color = color,
+            topLeft = eyeStart,
+            size = androidx.compose.ui.geometry.Size(eyeWidth, eyeHeight),
+            style = Stroke(width = strokeWidth),
+        )
+        drawCircle(
+            color = color,
+            radius = size.minDimension * 0.11f,
+            center = Offset(size.width / 2f, size.height / 2f),
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.16f, size.height * 0.84f),
+            end = Offset(size.width * 0.84f, size.height * 0.16f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+@Composable
+private fun CloseIcon(
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val strokeWidth = size.minDimension * 0.14f
+        val inset = strokeWidth
+        drawLine(
+            color = color,
+            start = Offset(inset, inset),
+            end = Offset(size.width - inset, size.height - inset),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = color,
+            start = Offset(size.width - inset, inset),
+            end = Offset(inset, size.height - inset),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+private fun pageCountLabel(pageCount: Int): String =
+    "$pageCount page${if (pageCount == 1) "" else "s"}"
+
+private fun visibleViewerStatusLabel(
+    statusLabel: String?,
+    viewerSupport: ScoreViewerSupport,
+): String? {
+    val defaultStatusLabel = when (viewerSupport) {
+        ScoreViewerSupport.PDF -> "PDF Viewer"
+        ScoreViewerSupport.LILYPOND -> "LilyPond Viewer"
+    }
+    return statusLabel
+        ?.takeUnless { it == defaultStatusLabel }
+        ?.takeUnless { it == "Loading LilyPond Viewer" }
 }
 
 @Composable

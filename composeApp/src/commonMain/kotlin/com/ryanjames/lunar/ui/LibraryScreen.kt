@@ -53,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -106,6 +107,7 @@ fun LibraryScreen(
 ) {
     val screenModel = buildLibraryScreenModel(snapshot = snapshot, appState = appState)
     val focusRequester = remember { FocusRequester() }
+    var isTextInputFocused by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
@@ -117,6 +119,9 @@ fun LibraryScreen(
             .focusRequester(focusRequester)
             .focusable()
             .onKeyEvent { event ->
+                if (isTextInputFocused) {
+                    return@onKeyEvent false
+                }
                 if (event.type != KeyEventType.KeyDown) {
                     return@onKeyEvent false
                 }
@@ -151,7 +156,10 @@ fun LibraryScreen(
             appState.browseMode != LibraryBrowseMode.SETLISTS &&
             appState.browseMode != LibraryBrowseMode.SONGBOOKS
         ) {
-            SearchAndSortBar(appState = appState)
+            SearchAndSortBar(
+                appState = appState,
+                onTextInputFocusChanged = { isTextInputFocused = it },
+            )
             RefineLibraryPanel(
                 availableCollections = screenModel.filterCollections,
                 availableTags = screenModel.filterTags,
@@ -1330,7 +1338,10 @@ private fun SetlistDetailView(
 }
 
 @Composable
-private fun SearchAndSortBar(appState: LunarAppState) {
+private fun SearchAndSortBar(
+    appState: LunarAppState,
+    onTextInputFocusChanged: (Boolean) -> Unit,
+) {
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val stackControls = maxWidth < 680.dp
 
@@ -1342,6 +1353,7 @@ private fun SearchAndSortBar(appState: LunarAppState) {
                 LibrarySearchField(
                     searchText = appState.query.searchText,
                     onValueChange = appState::updateSearchText,
+                    onFocusChanged = onTextInputFocusChanged,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 SearchAndSortControlsRow(
@@ -1359,6 +1371,7 @@ private fun SearchAndSortBar(appState: LunarAppState) {
                 LibrarySearchField(
                     searchText = appState.query.searchText,
                     onValueChange = appState::updateSearchText,
+                    onFocusChanged = onTextInputFocusChanged,
                     modifier = Modifier.weight(1f),
                 )
                 SearchAndSortControlsRow(
@@ -1374,14 +1387,17 @@ private fun SearchAndSortBar(appState: LunarAppState) {
 private fun LibrarySearchField(
     searchText: String,
     onValueChange: (String) -> Unit,
+    onFocusChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     OutlinedTextField(
         value = searchText,
         onValueChange = onValueChange,
-        modifier = modifier.semantics {
-            contentDescription = "Library search"
-        },
+        modifier = modifier
+            .onFocusChanged { onFocusChanged(it.hasFocus) }
+            .semantics {
+                contentDescription = "Library search"
+            },
         singleLine = true,
         label = { Text("Search title, composer, tags...") },
     )

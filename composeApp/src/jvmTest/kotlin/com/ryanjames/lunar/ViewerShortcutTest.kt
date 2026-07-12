@@ -77,8 +77,9 @@ class ViewerShortcutTest {
         }
 
         rule.onNodeWithText("1 / 6").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Single-page layout").assertIsDisplayed()
         rule.onRoot().performKeyInput { pressKey(Key.T) }
-        rule.onNodeWithText("1-Up").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Two-page layout").assertIsDisplayed()
         rule.onRoot().performKeyInput { pressKey(Key.L) }
         rule.onNodeWithText("3 / 6").assertIsDisplayed()
         rule.onRoot().performKeyInput { pressKey(Key.H) }
@@ -123,7 +124,7 @@ class ViewerShortcutTest {
     }
 
     @Test
-    fun viewerScreenLabelsPdfViewerForPdfDocuments() {
+    fun viewerScreenShowsPdfBadgeAndPageCountForPdfDocuments() {
         val runtime = createShortcutTestRuntime()
         val documentState = ViewerDocumentState(
             id = "moon_river",
@@ -144,7 +145,58 @@ class ViewerShortcutTest {
             }
         }
 
-        rule.onNodeWithText("PDF Viewer").assertIsDisplayed()
+        rule.onNodeWithContentDescription("PDF viewer").assertIsDisplayed()
+        rule.onNodeWithText("6 pages").assertIsDisplayed()
+        assertTrue(rule.onAllNodesWithText("PDF Viewer").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test
+    fun viewerScreenGroupsCollectionActionsBehindAddMenuAndUsesHideIcon() {
+        val runtime = createShortcutTestRuntime()
+        val documentState = ViewerDocumentState(
+            id = "moon_river",
+            title = "Moon River",
+            document = testSheetMusicItem(id = "moon_river", title = "Moon River").document,
+            pageCount = 6,
+        )
+        var setlistAdds = 0
+        var songbookAdds = 0
+        var hiddenScores = 0
+
+        rule.setContent {
+            LunarTheme(theme = AppColorTheme.OCEAN) {
+                ViewerScreen(
+                    runtime = runtime,
+                    documentState = documentState,
+                    onBack = {},
+                    onHideScore = { hiddenScores += 1 },
+                    onAddToSetlist = { setlistAdds += 1 },
+                    onAddToSongbook = { songbookAdds += 1 },
+                    onPageChanged = { _ -> },
+                    onPageCountResolved = { _ -> },
+                )
+            }
+        }
+
+        rule.onNodeWithContentDescription("Add to setlist or songbook").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Hide score").assertIsDisplayed()
+        assertTrue(rule.onAllNodesWithText("Add to setlist").fetchSemanticsNodes().isEmpty())
+        assertTrue(rule.onAllNodesWithText("Add to songbook").fetchSemanticsNodes().isEmpty())
+
+        rule.onNodeWithContentDescription("Add to setlist or songbook").performClick()
+        rule.onNodeWithText("Add to setlist").assertIsDisplayed()
+        rule.onNodeWithText("Add to songbook").assertIsDisplayed()
+        rule.onNodeWithText("Add to setlist").performClick()
+
+        rule.onNodeWithContentDescription("Add to setlist or songbook").performClick()
+        rule.onNodeWithText("Add to songbook").performClick()
+        rule.onNodeWithContentDescription("Hide score").performClick()
+
+        rule.runOnIdle {
+            assertEquals(1, setlistAdds)
+            assertEquals(1, songbookAdds)
+            assertEquals(1, hiddenScores)
+        }
     }
 
     @Test
@@ -209,9 +261,10 @@ class ViewerShortcutTest {
         }
 
         rule.waitUntil(timeoutMillis = 5_000) {
-            rule.onAllNodesWithText("LilyPond Viewer").fetchSemanticsNodes().isNotEmpty()
+            pdfRenderer.inspectedPaths.contains("/live/moon_river.pdf")
         }
-        rule.onNodeWithText("LilyPond Viewer").assertIsDisplayed()
+        rule.onNodeWithContentDescription("LilyPond viewer").assertIsDisplayed()
+        assertTrue(rule.onAllNodesWithText("LilyPond Viewer").fetchSemanticsNodes().isEmpty())
         rule.runOnIdle {
             assertTrue(lilyPondRenderer.renderedRevisions.contains("moon-river-v1"))
             assertTrue(pdfRenderer.inspectedPaths.contains("/live/moon_river.pdf"))

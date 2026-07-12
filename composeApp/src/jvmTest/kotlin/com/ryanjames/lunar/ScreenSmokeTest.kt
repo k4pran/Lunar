@@ -139,6 +139,47 @@ class ScreenSmokeTest {
 
     @Test
     @OptIn(ExperimentalTestApi::class)
+    fun libraryScreenDoesNotOpenRandomScoreWhileTypingInSearch() {
+        runBlocking {
+            val item = testSheetMusicItem(
+                id = "clair_de_lune",
+                title = "Clair de Lune",
+            )
+            val runtime = createTestPlatformRuntime(initialItems = listOf(item))
+            val appState = createTestLunarAppState(
+                scope = backgroundScope(),
+                runtime = runtime,
+            )
+
+            rule.setContent {
+                LunarTheme(theme = AppColorTheme.DARCULA) {
+                    LibraryScreen(
+                        runtime = runtime,
+                        snapshot = runtime.repository.library.value,
+                        appState = appState,
+                        viewerKeybindings = ViewerKeybindings(openRandomScore = "R"),
+                    )
+                }
+            }
+
+            rule.onNodeWithContentDescription("Library search").performClick()
+            rule.onNodeWithContentDescription("Library search").performKeyInput {
+                pressKey(Key.R)
+            }
+
+            rule.runOnIdle {
+                assertEquals(null, appState.previewTarget)
+            }
+            rule.onNodeWithContentDescription("Library search").performTextReplacement("R")
+            rule.runOnIdle {
+                assertEquals("R", appState.query.searchText)
+                assertEquals(null, appState.previewTarget)
+            }
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
     fun libraryScreenOpensRandomSetlistDialogAndSavedSetlistDetail() {
         runBlocking {
             val items = listOf(
