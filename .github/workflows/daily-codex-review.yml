@@ -1,0 +1,139 @@
+name: Daily Codex Review
+
+on:
+  schedule:
+    # Runs daily at 08:17 America/New_York time.
+    - cron: "17 8 * * *"
+      timezone: "America/New_York"
+
+  # Allows the workflow to be tested manually.
+  workflow_dispatch:
+
+concurrency:
+  group: daily-codex-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    name: Review repository
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    outputs:
+      review-result: ${{ steps.codex.outputs.final-message }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run Codex review
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: .github/codex/prompts/daily-review.md
+          output-file: codex-daily-review.md
+          sandbox: read-only
+
+      - name: Upload review result
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-daily-review
+          path: codex-daily-review.md
+          if-no-files-found: error
+          retention-days: 14
+
+  create-issue:
+    name: Create selected issue
+    needs: review
+    runs-on: ubuntu-latest
+
+    if: >-
+      needs.review.outputs.review-result != '' &&
+      needs.review.outputs.review-result != 'NO_ISSUE'
+
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Create GitHub issue
+        uses: actions/github-script@v7
+        env:
+          CODEX_RESULT: ${{ needs.review.outputs.review-result }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const result = process.env.CODEX_RESULT.trim();
+            const titlePrefix = "ISSUE_TITLE:";
+            const bodyMarker = "ISSUE_BODY:";
+
+            if (!result.startsWith(titlePrefix)) {
+              core.setFailed(
+                "Codex output did not start with ISSUE_TITLE:. No issue was created."
+              );
+              return;
+            }
+
+            const bodyMarkerIndex = result.indexOf(bodyMarker);
+
+            if (bodyMarkerIndex === -1) {
+              core.setFailed(
+                "Codex output did not contain ISSUE_BODY:. No issue was created."
+              );
+              return;
+            }
+
+            const title = result
+              .slice(titlePrefix.length, bodyMarkerIndex)
+              .trim();
+
+            const body = result
+              .slice(bodyMarkerIndex + bodyMarker.length)
+              .trim();
+
+            if (!title || !body) {
+              core.setFailed(
+                "Codex returned an empty issue title or body. No issue was created."
+              );
+              return;
+            }
+
+            const existingIssues = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: "open",
+                per_page: 100
+              }
+            );
+
+            const duplicate = existingIssues.find(
+              issue =>
+                !issue.pull_request &&
+                issue.title.trim().toLowerCase() === title.toLowerCase()
+            );
+
+            if (duplicate) {
+              core.notice(
+                `An open issue with this title already exists: #${duplicate.number}`
+              );
+              return;
+            }
+
+            const created = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body
+            });
+
+            core.notice(
+              `Created issue #${created.data.number}: ${created.data.title}`
+            );
