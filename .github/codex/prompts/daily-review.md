@@ -1,71 +1,94 @@
 Review this repository as a senior software engineer.
 
-Your goal is to identify the single most valuable concrete task that the
-project owner should focus on next.
+Your goal is to identify the single most valuable concrete engineering task that the project owner should focus on next.
 
-## Review scope
+This is a daily repository-health review. You must produce exactly one actionable GitHub issue during every run.
 
-1. Examine commits and code changes made during the previous 24 hours.
-2. Use Git history to identify those changes.
-3. Read surrounding code when necessary to understand their impact.
-4. Consider:
+## Repository scope
 
-    * likely defects or regressions;
-    * missing or inadequate tests;
-    * error-handling or lifecycle problems;
-    * resource leaks or concurrency problems;
-    * documentation made inaccurate by recent changes;
-    * concrete technical debt exposed by recent changes.
-5. Prefer tasks supported by clear evidence in the repository.
-6. Select only one task: the highest-value actionable finding.
+Review the repository as it currently exists on the checked-out `master` branch.
 
-## When no issue should be created
+Do not limit the review to:
 
-Do not create an issue merely to satisfy the daily run.
+* commits from the previous 24 hours;
+* recently modified files;
+* recently opened issues;
+* the most active area of the repository.
 
-Return exactly:
+Instead, proactively explore the current codebase and identify the highest-value unresolved task supported by repository evidence.
 
-NO_ISSUE
+Git history may be used for context, but recency must not be the primary selection criterion.
 
-when:
+## Review process
 
-* there were no meaningful changes during the previous 24 hours;
-* no concrete actionable problem was found;
-* all findings are weak or speculative;
-* the best task already appears to be addressed by the current code.
+1. Inspect the repository structure to understand its major components and responsibilities.
+2. Examine a meaningful part of the implementation in sufficient depth to identify a concrete task.
+3. Read surrounding production code, tests, configuration, build files, and documentation when relevant.
+4. Check whether the suspected problem is already handled elsewhere in the repository.
+5. Check existing open GitHub issues when that information is available, and do not propose a duplicate.
+6. Select exactly one task: the highest-value focused improvement that can reasonably be completed independently.
 
-## Required output
+Vary the areas reviewed across daily runs when possible. Do not repeatedly inspect only the same recently modified files or subsystem.
 
-When a worthwhile task exists, return exactly this format:
+## Areas to consider
 
-ISSUE_TITLE: <concise actionable title>
+Prioritize findings involving:
+
+* confirmed or strongly evidenced defects;
+* data loss or data-integrity risks;
+* incorrect state, range, identity, or persistence modelling;
+* lifecycle or resource-management problems;
+* concurrency, synchronization, or cancellation problems;
+* error-handling paths that can silently lose work;
+* security or privacy risks;
+* performance problems supported by the implementation;
+* missing tests around complex or high-risk behaviour;
+* inaccurate documentation or contracts;
+* concrete architectural or technical debt that makes future defects likely.
+
+A missing-test issue is acceptable only when it identifies specific risky behaviour, exact production code, and the cases that need verification.
+
+A technical-debt issue is acceptable only when it describes a focused, evidenced problem with a concrete completion condition.
+
+## Required result
+
+You must return exactly one issue proposal.
+
+`NO_ISSUE` is not a valid result.
+
+When no severe defect is found, select the most valuable concrete reliability, maintainability, testing, performance, documentation, or architectural improvement supported by the repository.
+
+Do not invent a problem merely to make the issue sound urgent. Clearly distinguish confirmed behaviour from likely risk.
+
+## Required output format
+
+Return exactly the following format, with no introductory or concluding text:
+
+ISSUE_TITLE: <concise, actionable title>
 
 ISSUE_BODY:
 
 ## Summary
 
-<Explain the problem or improvement clearly.>
+<Clearly explain the problem and the desired outcome.>
 
 ## Evidence
 
-<Identify the relevant files, classes, methods, or symbols and explain the
-repository evidence supporting the issue.>
+<Identify the relevant files, classes, methods, symbols, tests, configuration, or documentation. Explain the repository evidence supporting the task.>
 
 ## Impact
 
-<Explain the likely effect on users, maintainability, reliability, performance,
-or development work.>
+<Explain the likely effect on users, correctness, reliability, maintainability, performance, security, or development work. Do not exaggerate the impact.>
 
 ## Suggested approach
 
-<Describe a reasonable implementation direction without prescribing every
-implementation detail.>
+<Describe a reasonable implementation direction without prescribing every implementation detail.>
 
 ## Acceptance criteria
 
-* <Concrete verifiable criterion>
-* <Concrete verifiable criterion>
-* <Concrete verifiable criterion>
+* <Concrete and independently verifiable criterion>
+* <Concrete and independently verifiable criterion>
+* <Concrete and independently verifiable criterion>
 
 ## Priority
 
@@ -77,15 +100,19 @@ Automatically identified by the daily Codex repository review.
 
 ## Rules
 
-* Return only `NO_ISSUE` or the required issue format.
-* Select no more than one issue.
+* Return exactly one issue using the required format.
+* Do not return `NO_ISSUE`.
+* Do not return multiple alternatives.
 * Do not modify repository files.
-* Do not create commits, branches, pull requests, or GitHub issues directly.
-* Do not run project code or untrusted repository scripts.
+* Do not create commits, branches, or pull requests.
+* Do not run project code, builds, tests, package scripts, or untrusted repository scripts.
+* Repository inspection commands such as `git`, `find`, `ls`, `sed`, `cat`, `grep`, and `rg` are allowed.
 * Do not expose credentials or secret values.
-* Do not present speculation as a confirmed problem.
-* Do not select purely cosmetic changes.
-* Do not create vague tasks such as "improve code quality" or "add more tests."
-* Prefer a focused issue that can reasonably be completed independently.
-* Ignore generated files, dependencies, binaries, build outputs, caches,
-  Unity Library and Temp directories, Gradle build directories, and IDE files.
+* Do not present speculation as a confirmed defect.
+* Do not select purely cosmetic work.
+* Do not create vague tasks such as “improve code quality,” “refactor the project,” or “add more tests.”
+* Do not propose an issue that is already resolved by the current code.
+* Do not propose a duplicate of an existing open issue when existing issues are available for inspection.
+* Prefer a focused task that can be implemented and reviewed independently.
+* Ignore generated files, dependencies, binaries, build outputs, caches, Gradle build directories, Unity Library and Temp directories, and IDE files.
+* The workflow will create the GitHub issue from your output. Do not attempt to create the issue directly.

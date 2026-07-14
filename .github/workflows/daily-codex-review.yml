@@ -25,9 +25,10 @@ jobs:
       review-result: ${{ steps.codex.outputs.final-message }}
 
     steps:
-      - name: Check out repository
+      - name: Check out master
         uses: actions/checkout@v5
         with:
+          ref: master
           fetch-depth: 0
           persist-credentials: false
 
@@ -53,23 +54,35 @@ jobs:
     needs: review
     runs-on: ubuntu-latest
 
-    if: >-
-      needs.review.outputs.review-result != '' &&
-      needs.review.outputs.review-result != 'NO_ISSUE'
-
     permissions:
       contents: read
       issues: write
 
     steps:
-      - name: Create GitHub issue
-        uses: actions/github-script@v7
+      - name: Validate output and create GitHub issue
+        uses: actions/github-script@v9
         env:
           CODEX_RESULT: ${{ needs.review.outputs.review-result }}
         with:
           github-token: ${{ github.token }}
+          retries: 3
           script: |
-            const result = process.env.CODEX_RESULT.trim();
+            const result = (process.env.CODEX_RESULT ?? "").trim();
+
+            if (!result) {
+              core.setFailed(
+                "Codex returned an empty result. No issue was created."
+              );
+              return;
+            }
+
+            if (result === "NO_ISSUE") {
+              core.setFailed(
+                "Codex returned NO_ISSUE, but the daily review prompt requires one issue."
+              );
+              return;
+            }
+
             const titlePrefix = "ISSUE_TITLE:";
             const bodyMarker = "ISSUE_BODY:";
 
@@ -97,14 +110,22 @@ jobs:
               .slice(bodyMarkerIndex + bodyMarker.length)
               .trim();
 
-            if (!title || !body) {
+            if (!title) {
               core.setFailed(
-                "Codex returned an empty issue title or body. No issue was created."
+                "Codex returned an empty issue title. No issue was created."
               );
               return;
             }
 
-            const existingIssues = await github.paginate(
+            if (!body) {
+              core.setFailed(
+                "Codex returned an empty issue body. No issue was created."
+              );
+              return;
+            }
+
+            // Prevent an exact-title duplicate as a final safety check.
+            const existingItems = await github.paginate(
               github.rest.issues.listForRepo,
               {
                 owner: context.repo.owner,
@@ -114,15 +135,14 @@ jobs:
               }
             );
 
-            const duplicate = existingIssues.find(
-              issue =>
-                !issue.pull_request &&
-                issue.title.trim().toLowerCase() === title.toLowerCase()
+            const duplicate = existingItems.find(item =>
+              !item.pull_request &&
+              item.title.trim().toLowerCase() === title.toLowerCase()
             );
 
             if (duplicate) {
-              core.notice(
-                `An open issue with this title already exists: #${duplicate.number}`
+              core.setFailed(
+                `Codex selected a duplicate of open issue #${duplicate.number}: ${duplicate.title}`
               );
               return;
             }
