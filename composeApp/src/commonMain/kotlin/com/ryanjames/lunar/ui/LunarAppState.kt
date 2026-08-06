@@ -3,6 +3,7 @@ package com.ryanjames.lunar.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -75,6 +76,16 @@ class LunarAppState(
 
     val canPickSongbookCover: Boolean
         get() = runtime.capabilities.songbookCoverImageSupported
+
+    val thumbnailCache: ScoreThumbnailCache<ImageBitmap> = ScoreThumbnailCache(
+        renderer = { item ->
+            runtime.renderer.renderPage(
+                documentPath = item.document.storedPath,
+                pageIndex = 0,
+                targetWidth = ThumbnailTargetWidthPx,
+            )?.image
+        },
+    )
 
     var selectedSection: AppSection by mutableStateOf(AppSection.LIBRARY)
         private set
@@ -833,6 +844,7 @@ class LunarAppState(
         val itemId = deleteCandidateItemId ?: return
         scope.launch {
             runtime.repository.deleteItem(itemId)
+            thumbnailCache.clearKey(itemId)
             selectedScoreIds = selectedScoreIds - itemId
             if (selectedScoreIds.isEmpty()) {
                 setlistPickerVisible = false
