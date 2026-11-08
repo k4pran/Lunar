@@ -77,6 +77,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+            implementation(libs.okio.fakefilesystem)
         }
         jvmTest.dependencies {
             implementation(compose.desktop.currentOs)

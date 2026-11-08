@@ -73,7 +73,7 @@ class JsonAppSettingsStore(
     override suspend fun reset() {
         ensureInitialized()
         mutex.withLock {
-            val defaults = AppSettings()
+            val defaults = AppSettings().normalize()
             writeToDisk(defaults)
             state.value = defaults
         }

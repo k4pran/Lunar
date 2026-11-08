@@ -109,7 +109,7 @@ Lunar already uses an on-disk filesystem cache rather than a database for the fi
 
 - `library.json` stores the aggregated library metadata
 - `sources.json` stores configured local/cloud sources
-- `app_settings.json` stores global defaults such as viewer mode, theme, refresh cadence, and network timeouts
+- `app_settings.json` stores global defaults such as viewer mode, skin (Paper or Moonlight; older `theme` values migrate automatically), refresh cadence, and network timeouts
 - `scores/` stores managed PDF copies for imported and synced scores
 
 This means:
