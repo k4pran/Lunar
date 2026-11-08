@@ -2,7 +2,7 @@ package com.ryanjames.lunar.ui.design
 
 import com.ryanjames.lunar.settings.AppSkin
 import com.ryanjames.lunar.ui.AppSection
-import com.ryanjames.lunar.ui.LibraryBrowseMode
+import com.ryanjames.lunar.ui.LibraryArrangement
 
 /**
  * Stable test tags for structural lookups, so UI tests survive wording changes. Prefer these over
@@ -18,7 +18,8 @@ object LunarTestTags {
 
     fun navigationItem(section: AppSection): String = "navigation_item_${section.name.lowercase()}"
 
-    fun libraryBrowseTab(mode: LibraryBrowseMode): String = "library_browse_tab_${mode.name.lowercase()}"
+    fun libraryArrangementTab(arrangement: LibraryArrangement): String =
+        "library_arrangement_tab_${arrangement.name.lowercase()}"
 
     fun libraryRow(itemId: String): String = "library_row_$itemId"
 

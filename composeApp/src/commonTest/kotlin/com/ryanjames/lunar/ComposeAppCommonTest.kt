@@ -24,6 +24,7 @@ import com.ryanjames.lunar.sync.LibrarySyncManager
 import com.ryanjames.lunar.sync.ManagedPdfStore
 import com.ryanjames.lunar.sync.SyncHttpClient
 import com.ryanjames.lunar.ui.AppSection
+import com.ryanjames.lunar.ui.LibraryArrangement
 import com.ryanjames.lunar.ui.LibraryBrowseMode
 import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.buildRandomSightReadingSelection
@@ -558,12 +559,14 @@ class ComposeAppCommonTest {
     }
 
     @Test
-    fun leavingSetlistsBrowseClosesOpenSetlistDetail() = runBlocking {
+    fun leavingSetlistsSectionClosesOpenSetlistDetail() = runBlocking {
         val appState = createTestLunarAppState(this)
 
         appState.openSetlist("saved-setlist")
-        appState.updateBrowseMode(LibraryBrowseMode.BY_COLLECTION)
+        assertEquals(AppSection.SETLISTS, appState.selectedSection)
+        appState.selectArrangement(LibraryArrangement.COLLECTION)
 
+        assertEquals(AppSection.LIBRARY, appState.selectedSection)
         assertEquals(LibraryBrowseMode.BY_COLLECTION, appState.browseMode)
         assertEquals(null, appState.selectedSetlistId)
         assertFalse(appState.temporarySetlistOpen)
@@ -581,7 +584,7 @@ class ComposeAppCommonTest {
 
         appState.openTemporarySetlist()
 
-        assertEquals(LibraryBrowseMode.SETLISTS, appState.browseMode)
+        assertEquals(AppSection.SETLISTS, appState.selectedSection)
         assertEquals(null, appState.selectedSetlistId)
         assertTrue(appState.temporarySetlistOpen)
     }
@@ -659,7 +662,7 @@ class ComposeAppCommonTest {
         assertEquals("Evening book", songbook.name)
         assertEquals(items.map { it.id }, songbook.itemIds)
         assertEquals("/songbooks/evening-book.pdf", songbook.document.storedPath)
-        assertEquals(LibraryBrowseMode.SONGBOOKS, appState.browseMode)
+        assertEquals(AppSection.SONGBOOKS, appState.selectedSection)
         assertEquals(ViewerTarget.Songbook(songbook.id), appState.previewTarget)
         assertEquals("Saved \"Evening book\".", appState.bannerMessage)
     }

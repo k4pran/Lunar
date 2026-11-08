@@ -7,14 +7,11 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,7 +35,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -66,21 +62,30 @@ import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.design.LunarTestTags
 import com.ryanjames.lunar.ui.design.lunarTokens
 import com.ryanjames.lunar.ui.currentLibraryScopeItems
-import com.ryanjames.lunar.ui.lunarThemePalette
 import com.ryanjames.lunar.ui.rememberLunarAppState
+import com.ryanjames.lunar.ui.shell.LunarAppShell
 import com.ryanjames.lunar.ui.toViewerDocumentState
 import com.ryanjames.lunar.settings.ViewerPageModePreference
 import com.ryanjames.lunar.settings.intervalMillis
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 
+/**
+ * @param sidebarToggleRequests window-level shortcut requests (desktop Ctrl+B) to toggle the
+ * sidebar even when nothing inside the app holds keyboard focus.
+ */
 @Composable
-fun App() {
+fun App(sidebarToggleRequests: Flow<Unit> = emptyFlow()) {
     val runtime = rememberPlatformRuntime()
-    LunarApp(runtime)
+    LunarApp(runtime, sidebarToggleRequests)
 }
 
 @Composable
-internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
+internal fun LunarApp(
+    runtime: com.ryanjames.lunar.platform.PlatformRuntime,
+    sidebarToggleRequests: Flow<Unit> = emptyFlow(),
+) {
     val appState = rememberLunarAppState(runtime)
     val snapshot by runtime.repository.library.collectAsState()
     val importerState by runtime.importer.state.collectAsState()
@@ -148,6 +153,10 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
         }
     }
 
+    LaunchedEffect(appState, sidebarToggleRequests) {
+        sidebarToggleRequests.collect { appState.toggleSidebarCollapsed() }
+    }
+
     LaunchedEffect(appState.bannerMessage) {
         val message = appState.bannerMessage ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(message)
@@ -155,8 +164,6 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
     }
 
     LunarTheme(skin = appSettings.resolvedSkin) {
-        val themePalette = lunarThemePalette()
-
         if (fullscreenDocument != null) {
             FullscreenViewerScreen(
                 runtime = runtime,
@@ -179,55 +186,51 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
                     .externalScoreDropTarget(
                         enabled = runtime.capabilities.fileImportSupported,
                         onDroppedPaths = appState::importDroppedPaths,
-                    )
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.background,
-                                themePalette.appBackgroundGradientBottom,
-                            )
-                        )
                     ),
             ) {
-                Scaffold(
-                    containerColor = Color.Transparent,
-                    snackbarHost = { SnackbarHost(snackbarHostState) },
-                    bottomBar = {
-                        BottomNavigationPanel(
-                            selectedSection = appState.selectedSection,
-                            onSelectSection = appState::selectSection,
-                        )
-                    },
-                ) { innerPadding ->
-                    when (appState.selectedSection) {
-                        AppSection.IMPORT -> ImportScreen(
-                            runtime = runtime,
-                            importerState = importerState,
-                            syncState = syncState,
-                            settings = appSettings,
-                            libraryCount = snapshot.items.size,
-                            appState = appState,
-                            modifier = Modifier.padding(innerPadding),
-                        )
+                LunarAppShell(
+                    appState = appState,
+                    snapshot = snapshot,
+                    syncState = syncState,
+                    settings = appSettings,
+                ) { sidebarContextVisible ->
+                    Scaffold(
+                        containerColor = Color.Transparent,
+                        snackbarHost = { SnackbarHost(snackbarHostState) },
+                    ) { innerPadding ->
+                        when (appState.selectedSection) {
+                            AppSection.IMPORT -> ImportScreen(
+                                runtime = runtime,
+                                importerState = importerState,
+                                syncState = syncState,
+                                settings = appSettings,
+                                libraryCount = snapshot.items.size,
+                                appState = appState,
+                                modifier = Modifier.padding(innerPadding),
+                            )
 
-                        AppSection.LIBRARY -> LibraryScreen(
-                            runtime = runtime,
-                            snapshot = snapshot,
-                            appState = appState,
-                            viewerKeybindings = appSettings.viewerKeybindings,
-                            modifier = Modifier.padding(innerPadding),
-                        )
+                            AppSection.LIBRARY,
+                            AppSection.SETLISTS,
+                            AppSection.SONGBOOKS -> LibraryScreen(
+                                runtime = runtime,
+                                snapshot = snapshot,
+                                appState = appState,
+                                viewerKeybindings = appSettings.viewerKeybindings,
+                                showArrangementSwitcher = !sidebarContextVisible,
+                                modifier = Modifier.padding(innerPadding),
+                            )
 
-                        AppSection.COMPOSE -> ComposeScreen(
-                            runtime = runtime,
-                            modifier = Modifier.padding(innerPadding),
-                        )
+                            AppSection.COMPOSE -> ComposeScreen(
+                                runtime = runtime,
+                                modifier = Modifier.padding(innerPadding),
+                            )
 
-                        AppSection.SETTINGS -> SettingsScreen(
-                            settings = appSettings,
-                            appState = appState,
-                            modifier = Modifier.padding(innerPadding),
-                        )
+                            AppSection.SETTINGS -> SettingsScreen(
+                                settings = appSettings,
+                                appState = appState,
+                                modifier = Modifier.padding(innerPadding),
+                            )
+                        }
                     }
                 }
 
@@ -484,91 +487,3 @@ private fun ViewerTarget?.pageCountResolved(appState: com.ryanjames.lunar.ui.Lun
         is ViewerTarget.Score -> { pageCount -> appState.updateViewerPageCount(itemId, pageCount) }
         is ViewerTarget.Songbook, null -> { _ -> }
     }
-
-@Composable
-internal fun BottomNavigationPanel(
-    selectedSection: AppSection,
-    onSelectSection: (AppSection) -> Unit,
-) {
-    Surface(
-        tonalElevation = 8.dp,
-        shadowElevation = 8.dp,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag(LunarTestTags.NAVIGATION)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            BottomNavItem(
-                title = "Sources",
-                section = AppSection.IMPORT,
-                selected = selectedSection == AppSection.IMPORT,
-                onClick = { onSelectSection(AppSection.IMPORT) },
-            )
-            BottomNavItem(
-                title = "Library",
-                section = AppSection.LIBRARY,
-                selected = selectedSection == AppSection.LIBRARY,
-                onClick = { onSelectSection(AppSection.LIBRARY) },
-            )
-            BottomNavItem(
-                title = "Compose",
-                section = AppSection.COMPOSE,
-                selected = selectedSection == AppSection.COMPOSE,
-                onClick = { onSelectSection(AppSection.COMPOSE) },
-            )
-            BottomNavItem(
-                title = "Settings",
-                section = AppSection.SETTINGS,
-                selected = selectedSection == AppSection.SETTINGS,
-                onClick = { onSelectSection(AppSection.SETTINGS) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun RowScope.BottomNavItem(
-    title: String,
-    section: AppSection,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val containerColor = if (selected) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-    }
-
-    Box(modifier = Modifier.weight(1f)) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag(LunarTestTags.navigationItem(section))
-                .clickable(onClick = onClick),
-            color = containerColor,
-            shape = MaterialTheme.shapes.large,
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 12.dp),
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                    color = if (selected) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-            }
-        }
-    }
-}
