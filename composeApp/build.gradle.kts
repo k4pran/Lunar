@@ -127,6 +127,10 @@ compose.desktop {
     application {
         mainClass = "com.ryanjames.lunar.MainKt"
 
+        buildTypes.release.proguard {
+            configurationFiles.from(project.file("compose-desktop.pro"))
+        }
+
         nativeDistributions {
             targetFormats(
                 TargetFormat.AppImage,
