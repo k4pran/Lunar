@@ -677,7 +677,7 @@ private class DesktopPdfPageRenderer : PdfPageRenderer {
 
             val renderer = PDFRenderer(document)
             val pageSize = document.getPage(pageIndex).mediaBox
-            val scale = max(targetWidth, 1200).toFloat() / pageSize.width
+            val scale = max(targetWidth, 128).toFloat() / pageSize.width
             val image = renderer.renderImage(pageIndex, scale)
 
             RenderedPdfPage(

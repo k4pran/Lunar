@@ -562,7 +562,7 @@ private class AndroidPdfPageRenderer : PdfPageRenderer {
                 }
 
                 renderer.openPage(pageIndex).use { page ->
-                    val width = targetWidth.coerceAtLeast(960)
+                    val width = targetWidth.coerceAtLeast(128)
                     val scale = width.toFloat() / page.width.coerceAtLeast(1)
                     val height = (page.height * scale).roundToInt().coerceAtLeast(1)
                     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)

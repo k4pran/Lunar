@@ -1,5 +1,24 @@
 # Lunar Agent Guide
 
+## Agent Workflow (feature work)
+When starting a new feature, follow this sequence:
+
+1. **Explore first.** Read the README roadmap (`README.md`, "Roadmap Direction") and the actual code to see what is already implemented vs. stubbed. Cross-reference stated roadmap items with reality (the README can be stale vs. the source). Search for hard `UnsupportedOperationException` throw-sites and platform capability flags (`PlatformCapabilities` in `PlatformRuntime.kt`) to find genuinely unwired targets.
+
+2. **Turn findings into GitHub issues.** Use the `gh` CLI (auth already configured for the current account) to create one issue per feature suggestion, each grounded in file:line references. Use `--body-file` for any body containing backticks or special characters to avoid shell-quoting corruption. Tag with `enhancement`; add `good first issue` for small, isolated tasks.
+
+3. **Branch off `master`.** Create and checkout a feature branch: `git checkout -b feature/<short-name> master`.
+
+4. **Implement incrementally, tests first/next.**
+   - Prefer small, composable helpers; keep pure domain logic in `shared/`.
+   - Add/adjust tests alongside the change (see "Testing Expectations").
+   - Round-trip settings changes through stores; keep local-first behavior intact.
+
+5. **Run the validation suite** (see "Validation Before Submitting") before opening a PR. Do not claim success without it. When possible, push a commit per logical step so the PR diff reads clearly.
+
+6. **Open a PR against `master`** (`gh pr create`), filling the template with the summary + what was tested + residual risks. Do not commit or merge without being asked.
+
+
 ## Project Shape
 - `composeApp/`: Compose Multiplatform app UI, app state, platform runtime wiring, desktop/Android packaging.
 - `shared/`: shared models, repository/storage logic, query/filter logic, duplicate detection, source registry types.

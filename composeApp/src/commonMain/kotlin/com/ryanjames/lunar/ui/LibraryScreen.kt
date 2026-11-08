@@ -63,6 +63,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -2232,6 +2233,16 @@ private fun LibraryCard(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                if (appState.layoutMode == LibraryLayoutMode.GRID) {
+                    ScoreThumbnail(
+                        item = item,
+                        cache = appState.thumbnailCache,
+                        modifier = Modifier
+                            .width(96.dp)
+                            .height(128.dp)
+                            .clip(MaterialTheme.shapes.medium),
+                    )
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
