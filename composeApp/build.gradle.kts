@@ -133,8 +133,10 @@ compose.desktop {
         }
 
         nativeDistributions {
+            // No TargetFormat.AppImage: it is the same jpackage app image that
+            // createReleaseDistributable already writes to binaries/<build>/app, and the two
+            // tasks sharing that output breaks packageReleaseDmg's task validation on macOS.
             targetFormats(
-                TargetFormat.AppImage,
                 TargetFormat.Deb,
                 TargetFormat.Dmg,
                 TargetFormat.Exe,
