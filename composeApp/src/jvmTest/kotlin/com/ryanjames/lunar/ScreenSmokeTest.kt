@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsNotSelected
@@ -82,6 +83,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import com.ryanjames.lunar.ui.shell.LunarAppShell
 import com.ryanjames.lunar.ui.shell.SidebarDrawerTag
+import com.ryanjames.lunar.ui.shell.SidebarPrimaryDestinations
 import com.ryanjames.lunar.ui.shell.sidebarNavTag
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -768,19 +770,55 @@ class ScreenSmokeTest {
             }
         }
     }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun compactDrawerClosesOnEscape() {
+        runBlocking {
+            val runtime = createTestPlatformRuntime()
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            rule.setShellContent(runtime, appState, width = 420.dp)
+
+            rule.onNodeWithContentDescription("Open navigation").performClick()
+            rule.onNodeWithTag(SidebarDrawerTag).assertIsDisplayed()
+            rule.onRoot().performKeyInput { pressKey(Key.Escape) }
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithTag(SidebarDrawerTag).fetchSemanticsNodes().isEmpty()
+            }
+            rule.runOnIdle { assertEquals(AppSection.LIBRARY, appState.selectedSection) }
+        }
+    }
+
+    @Test
+    fun shortRailKeepsSettingsReachable() {
+        runBlocking {
+            val runtime = createTestPlatformRuntime()
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            // A landscape phone: medium width selects the rail, but six items cannot fit.
+            rule.setShellContent(runtime, appState, width = 800.dp, height = 240.dp)
+
+            val lastPrimary = SidebarPrimaryDestinations.last().section
+            rule.onNodeWithTag(sidebarNavTag(lastPrimary)).performScrollTo().performClick()
+            rule.runOnIdle { assertEquals(lastPrimary, appState.selectedSection) }
+
+            rule.onNodeWithTag(sidebarNavTag(AppSection.SETTINGS)).assertIsDisplayed().performClick()
+            rule.runOnIdle { assertEquals(AppSection.SETTINGS, appState.selectedSection) }
+        }
+    }
 }
 
 private fun ComposeContentTestRule.setShellContent(
     runtime: com.ryanjames.lunar.platform.PlatformRuntime,
     appState: com.ryanjames.lunar.ui.LunarAppState,
     width: Dp,
+    height: Dp = 700.dp,
 ) {
     setContent {
         val settings by runtime.settingsStore.settings.collectAsState()
         val focusRequester = remember { FocusRequester() }
         LaunchedEffect(Unit) { focusRequester.requestFocus() }
         LunarTheme(skin = AppSkin.PAPER) {
-            Box(modifier = Modifier.requiredSize(width = width, height = 700.dp)) {
+            Box(modifier = Modifier.requiredSize(width = width, height = height)) {
                 LunarAppShell(
                     appState = appState,
                     snapshot = runtime.repository.library.collectAsState().value,
