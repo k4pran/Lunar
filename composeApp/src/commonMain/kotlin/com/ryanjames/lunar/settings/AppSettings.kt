@@ -15,6 +15,7 @@ data class AppSettings(
     val cacheLimit: CacheLimitPreset = CacheLimitPreset.GB_2,
     val cloudConnectTimeoutSeconds: Int = 15,
     val cloudReadTimeoutSeconds: Int = 60,
+    val sidebarCollapsed: Boolean = false,
 ) {
     val cloudConnectTimeoutMillis: Int
         get() = cloudConnectTimeoutSeconds.coerceIn(5, 120) * 1000

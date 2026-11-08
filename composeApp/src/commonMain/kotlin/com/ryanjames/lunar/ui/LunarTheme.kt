@@ -31,7 +31,6 @@ import com.ryanjames.lunar.ui.design.newsreaderFamily
  */
 @Immutable
 data class LunarThemePalette(
-    val appBackgroundGradientBottom: Color,
     val headerGradientStart: Color,
     val headerGradientEnd: Color,
     val headerForeground: Color,
@@ -127,7 +126,6 @@ internal fun LunarColors.toColorScheme(): ColorScheme {
 }
 
 private fun LunarColors.toLegacyPalette(): LunarThemePalette = LunarThemePalette(
-    appBackgroundGradientBottom = faint,
     headerGradientStart = accent,
     headerGradientEnd = accentDeep,
     headerForeground = onAccent,

@@ -1,14 +1,26 @@
 package com.ryanjames.lunar
 
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.getValue
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyAncestor
@@ -18,6 +30,7 @@ import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -67,6 +80,9 @@ import com.ryanjames.lunar.ui.design.LunarTestTags
 import java.nio.file.Files
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import com.ryanjames.lunar.ui.shell.LunarAppShell
+import com.ryanjames.lunar.ui.shell.SidebarDrawerTag
+import com.ryanjames.lunar.ui.shell.sidebarNavTag
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -288,7 +304,7 @@ class ScreenSmokeTest {
             rule.onNodeWithText("Create a random setlist").assertIsDisplayed()
             rule.onNodeWithText("Cancel").performClick()
 
-            rule.onNodeWithTag(LunarTestTags.libraryBrowseTab(LibraryBrowseMode.SETLISTS)).performClick()
+            rule.runOnIdle { appState.selectSection(AppSection.SETLISTS) }
             rule.onNodeWithText("Morning rehearsal").assertIsDisplayed()
             rule.onNodeWithText("Open").performClick()
             rule.onNodeWithText("Saved automatically. Delete it whenever you no longer need it.").assertIsDisplayed()
@@ -399,7 +415,7 @@ class ScreenSmokeTest {
             rule.onNodeWithText("Choose cover").assertIsDisplayed()
             rule.onNodeWithText("Cancel").performClick()
 
-            rule.onNodeWithTag(LunarTestTags.libraryBrowseTab(LibraryBrowseMode.SONGBOOKS)).performClick()
+            rule.runOnIdle { appState.selectSection(AppSection.SONGBOOKS) }
             rule.onNodeWithText("Standards Book").assertIsDisplayed()
             rule.onNodeWithText("Standards Book").performClick()
             rule.runOnIdle {
@@ -671,19 +687,120 @@ class ScreenSmokeTest {
     }
 
     @Test
-    fun bottomNavigationShowsComposeSection() {
-        rule.setContent {
-            LunarTheme(skin = AppSkin.PAPER) {
-                BottomNavigationPanel(
-                    selectedSection = AppSection.LIBRARY,
-                    onSelectSection = {},
-                )
+    fun expandedSidebarNavigatesEverySection() {
+        runBlocking {
+            val runtime = createTestPlatformRuntime(
+                initialItems = listOf(testSheetMusicItem(id = "moon_river", title = "Moon River", collection = "Standards")),
+            )
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            rule.setShellContent(runtime, appState, width = 1024.dp)
+
+            rule.onNodeWithText("Lunar").assertIsDisplayed()
+            rule.onNodeWithTag("sidebar-arrange-FAVOURITES").assertIsDisplayed()
+            rule.onNodeWithText("Standards").assertIsDisplayed()
+            rule.onNodeWithTag("sidebar-arrange-FAVOURITES").performClick()
+            rule.runOnIdle { assertTrue(appState.query.favoritesOnly) }
+
+            rule.navigateEverySection(appState)
+
+            // The contextual part is Library-only.
+            rule.runOnIdle { appState.selectSection(AppSection.SETLISTS) }
+            assertTrue(rule.onAllNodesWithTag("sidebar-arrange-ALL").fetchSemanticsNodes().isEmpty())
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun collapsedRailNavigatesEverySectionAndPersistsToggle() {
+        runBlocking {
+            val runtime = createTestPlatformRuntime(initialSettings = AppSettings(sidebarCollapsed = true))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            rule.setShellContent(runtime, appState, width = 1024.dp)
+
+            assertTrue(rule.onAllNodesWithText("Lunar").fetchSemanticsNodes().isEmpty())
+            rule.onNodeWithContentDescription("Setlists").assertIsDisplayed()
+            rule.navigateEverySection(appState)
+
+            rule.onNodeWithContentDescription("Expand sidebar").performClick()
+            rule.waitUntil(timeoutMillis = 5_000) { !runtime.settingsStore.settings.value.sidebarCollapsed }
+            rule.onNodeWithText("Lunar").assertIsDisplayed()
+
+            rule.onNodeWithTag("shell-content").performSemanticsAction(SemanticsActions.RequestFocus)
+            rule.onNodeWithTag("shell-content").assertIsFocused()
+            rule.onRoot().performKeyInput {
+                keyDown(Key.CtrlLeft)
+                pressKey(Key.B)
+                keyUp(Key.CtrlLeft)
+            }
+            rule.waitUntil(timeoutMillis = 5_000) { runtime.settingsStore.settings.value.sidebarCollapsed }
+            rule.onNodeWithContentDescription("Expand sidebar").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun mediumWidthShowsRailWithoutExpandButton() {
+        runBlocking {
+            val runtime = createTestPlatformRuntime()
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            rule.setShellContent(runtime, appState, width = 800.dp)
+
+            rule.onNodeWithContentDescription("Songbooks").assertIsDisplayed()
+            assertTrue(rule.onAllNodesWithContentDescription("Expand sidebar").fetchSemanticsNodes().isEmpty())
+            rule.onNodeWithText("content:LIBRARY:inline").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun compactDrawerNavigatesEverySection() {
+        runBlocking {
+            val runtime = createTestPlatformRuntime()
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            rule.setShellContent(runtime, appState, width = 420.dp)
+
+            assertTrue(rule.onAllNodesWithTag(SidebarDrawerTag).fetchSemanticsNodes().isEmpty())
+            AppSection.entries.forEach { section ->
+                rule.onNodeWithContentDescription("Open navigation").performClick()
+                rule.onNodeWithTag(SidebarDrawerTag).assertIsDisplayed()
+                rule.onNodeWithTag(sidebarNavTag(section)).performClick()
+                rule.runOnIdle { assertEquals(section, appState.selectedSection) }
+                assertTrue(rule.onAllNodesWithTag(SidebarDrawerTag).fetchSemanticsNodes().isEmpty())
+                rule.onNodeWithText("content:${section.name}:", substring = true).assertIsDisplayed()
             }
         }
+    }
+}
 
-        AppSection.entries.forEach { section ->
-            rule.onNodeWithTag(LunarTestTags.navigationItem(section)).assertIsDisplayed()
+private fun ComposeContentTestRule.setShellContent(
+    runtime: com.ryanjames.lunar.platform.PlatformRuntime,
+    appState: com.ryanjames.lunar.ui.LunarAppState,
+    width: Dp,
+) {
+    setContent {
+        val settings by runtime.settingsStore.settings.collectAsState()
+        val focusRequester = remember { FocusRequester() }
+        LaunchedEffect(Unit) { focusRequester.requestFocus() }
+        LunarTheme(skin = AppSkin.PAPER) {
+            Box(modifier = Modifier.requiredSize(width = width, height = 700.dp)) {
+                LunarAppShell(
+                    appState = appState,
+                    snapshot = runtime.repository.library.collectAsState().value,
+                    syncState = CloudSyncState(),
+                    settings = settings,
+                ) { sidebarContextVisible ->
+                    Box(modifier = Modifier.testTag("shell-content").focusRequester(focusRequester).focusable()) {
+                        val mode = if (sidebarContextVisible) "sidebar" else "inline"
+                        Text("content:${appState.selectedSection.name}:$mode")
+                    }
+                }
+            }
         }
+    }
+}
+
+private fun ComposeContentTestRule.navigateEverySection(appState: com.ryanjames.lunar.ui.LunarAppState) {
+    AppSection.entries.forEach { section ->
+        onNodeWithTag(sidebarNavTag(section)).performClick()
+        runOnIdle { assertEquals(section, appState.selectedSection) }
     }
 }
 

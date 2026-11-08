@@ -106,9 +106,12 @@ fun LibraryScreen(
     snapshot: LibrarySnapshot,
     appState: LunarAppState,
     viewerKeybindings: ViewerKeybindings = ViewerKeybindings(),
+    showArrangementSwitcher: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val screenModel = buildLibraryScreenModel(snapshot = snapshot, appState = appState)
+    val hostedSection = appState.hostedSection
+    val showingHiddenScores = appState.showingHiddenScores
     val focusRequester = remember { FocusRequester() }
     var isTextInputFocused by remember { mutableStateOf(false) }
 
@@ -144,11 +147,13 @@ fun LibraryScreen(
             visibleScoreCount = screenModel.visibleScoreCount,
             hiddenScoreCount = screenModel.hiddenScoreCount,
         )
-        BrowseModeSwitcher(appState = appState)
+        if (showArrangementSwitcher && hostedSection == AppSection.LIBRARY) {
+            ArrangementSwitcher(appState = appState)
+        }
         if (
             screenModel.visibleScoreCount > 0 &&
-            appState.browseMode != LibraryBrowseMode.SONGBOOKS &&
-            appState.browseMode != LibraryBrowseMode.HIDDEN
+            hostedSection != AppSection.SONGBOOKS &&
+            !showingHiddenScores
         ) {
             RandomLibraryActionsRow(
                 availableCount = screenModel.currentScopeItems.size,
@@ -156,10 +161,7 @@ fun LibraryScreen(
                 onCreateRandomSetlist = appState::showRandomSetlistBuilder,
             )
         }
-        if (
-            appState.browseMode != LibraryBrowseMode.SETLISTS &&
-            appState.browseMode != LibraryBrowseMode.SONGBOOKS
-        ) {
+        if (hostedSection == AppSection.LIBRARY) {
             SearchAndSortBar(
                 appState = appState,
                 onTextInputFocusChanged = { isTextInputFocused = it },
@@ -172,7 +174,7 @@ fun LibraryScreen(
                 appState = appState,
             )
         }
-        if (screenModel.selectedItems.isNotEmpty() && appState.browseMode != LibraryBrowseMode.HIDDEN) {
+        if (screenModel.selectedItems.isNotEmpty() && !showingHiddenScores) {
             SelectionActionBar(
                 selectedCount = screenModel.selectedItems.size,
                 onAddToSetlist = appState::showSetlistPicker,
@@ -184,132 +186,165 @@ fun LibraryScreen(
 
         // Main content area
         Box(modifier = Modifier.weight(1f)) {
-            when (appState.browseMode) {
-                LibraryBrowseMode.ALL -> {
-                    if (screenModel.visibleItems.isEmpty()) {
-                        EmptyLibraryState(
-                            totalItemCount = screenModel.visibleScoreCount,
-                            onOpenImport = { appState.selectSection(AppSection.IMPORT) },
-                            onClearFilters = appState::clearFilters,
-                        )
-                    } else {
-                        FlatScoreList(items = screenModel.visibleItems, appState = appState)
-                    }
-                }
+            when (hostedSection) {
+                AppSection.SETLISTS -> SetlistsContent(
+                    snapshot = snapshot,
+                    screenModel = screenModel,
+                    appState = appState,
+                )
 
-                LibraryBrowseMode.HIDDEN -> {
-                    if (screenModel.visibleItems.isEmpty()) {
-                        HiddenScoresEmptyState(
-                            hiddenCount = screenModel.hiddenScoreCount,
-                            onClearFilters = appState::clearFilters,
-                        )
-                    } else {
-                        FlatScoreList(
-                            items = screenModel.visibleItems,
-                            appState = appState,
-                            mode = ScoreListMode.HIDDEN,
-                        )
-                    }
-                }
+                AppSection.SONGBOOKS -> SongbooksOverview(
+                    songbooks = snapshot.songbooks,
+                    itemsById = screenModel.itemsById,
+                    onOpenSongbook = appState::openSongbook,
+                    onDeleteSongbook = appState::requestDeleteSongbook,
+                    onOpenLibrary = { appState.selectSection(AppSection.LIBRARY) },
+                )
 
-                LibraryBrowseMode.BY_COLLECTION -> {
-                    val group = appState.selectedGroup
-                    if (group == null) {
-                        GroupList(
-                            groups = screenModel.collections,
-                            itemsByGroup = screenModel.collectionGroups,
-                            emptyLabel = "No collections found. Import PDFs with a collection folder strategy.",
-                            onSelectGroup = appState::selectGroup,
-                        )
-                    } else {
-                        DrillDownScoreList(
-                            groupName = group,
-                            items = screenModel.visibleItems.itemsInBrowseGroup(
-                                browseMode = LibraryBrowseMode.BY_COLLECTION,
-                                groupName = group,
-                            ),
-                            appState = appState,
-                            onBack = appState::clearGroupSelection,
-                        )
-                    }
-                }
-
-                LibraryBrowseMode.BY_COMPOSER -> {
-                    val group = appState.selectedGroup
-                    if (group == null) {
-                        GroupList(
-                            groups = screenModel.composers,
-                            itemsByGroup = screenModel.composerGroups,
-                            emptyLabel = "No composers found. Import PDFs with a composer folder strategy.",
-                            onSelectGroup = appState::selectGroup,
-                        )
-                    } else {
-                        DrillDownScoreList(
-                            groupName = group,
-                            items = screenModel.visibleItems.itemsInBrowseGroup(
-                                browseMode = LibraryBrowseMode.BY_COMPOSER,
-                                groupName = group,
-                            ),
-                            appState = appState,
-                            onBack = appState::clearGroupSelection,
-                        )
-                    }
-                }
-
-                LibraryBrowseMode.SETLISTS -> {
-                    val activeTemporarySetlist = screenModel.activeTemporarySetlist
-                    val activeSetlist = screenModel.activeSetlist
-                    if (activeTemporarySetlist != null) {
-                        TemporarySetlistDetailView(
-                            session = activeTemporarySetlist,
-                            items = screenModel.activeTemporarySetlistItems,
-                            appState = appState,
-                            onBack = appState::closeSetlist,
-                            onSave = appState::showSaveTemporarySetlistDialog,
-                            onDiscard = appState::discardTemporarySetlist,
-                        )
-                    } else if (activeSetlist == null) {
-                        SetlistsOverview(
-                            temporarySetlist = screenModel.temporarySetlist,
-                            setlists = snapshot.setlists,
-                            itemsById = screenModel.itemsById,
-                            onOpenTemporarySetlist = appState::openTemporarySetlist,
-                            onSaveTemporarySetlist = appState::showSaveTemporarySetlistDialog,
-                            onDiscardTemporarySetlist = appState::discardTemporarySetlist,
-                            onOpenSetlist = appState::openSetlist,
-                            onDeleteSetlist = appState::requestDeleteSetlist,
-                            onOpenLibrary = {
-                                appState.updateBrowseMode(LibraryBrowseMode.ALL)
-                            },
-                        )
-                    } else {
-                        SetlistDetailView(
-                            setlist = activeSetlist,
-                            items = screenModel.activeSetlistItems,
-                            appState = appState,
-                            onBack = appState::closeSetlist,
-                            onDeleteSetlist = {
-                                appState.requestDeleteSetlist(activeSetlist.id)
-                            },
-                        )
-                    }
-                }
-
-                LibraryBrowseMode.SONGBOOKS -> {
-                    SongbooksOverview(
-                        songbooks = snapshot.songbooks,
-                        itemsById = screenModel.itemsById,
-                        onOpenSongbook = appState::openSongbook,
-                        onDeleteSongbook = appState::requestDeleteSongbook,
-                        onOpenLibrary = {
-                            appState.updateBrowseMode(LibraryBrowseMode.ALL)
-                        },
-                    )
-                }
+                else -> LibraryBrowseContent(
+                    screenModel = screenModel,
+                    appState = appState,
+                )
             }
         }
     }
 
+    LibraryScreenDialogs(
+        runtime = runtime,
+        snapshot = snapshot,
+        screenModel = screenModel,
+        appState = appState,
+    )
+}
+
+@Composable
+private fun LibraryBrowseContent(
+    screenModel: LibraryScreenModel,
+    appState: LunarAppState,
+) {
+    when (appState.browseMode) {
+        LibraryBrowseMode.ALL -> {
+            if (screenModel.visibleItems.isEmpty()) {
+                EmptyLibraryState(
+                    totalItemCount = screenModel.visibleScoreCount,
+                    onOpenImport = { appState.selectSection(AppSection.IMPORT) },
+                    onClearFilters = appState::clearFilters,
+                )
+            } else {
+                FlatScoreList(items = screenModel.visibleItems, appState = appState)
+            }
+        }
+
+        LibraryBrowseMode.HIDDEN -> {
+            if (screenModel.visibleItems.isEmpty()) {
+                HiddenScoresEmptyState(
+                    hiddenCount = screenModel.hiddenScoreCount,
+                    onClearFilters = appState::clearFilters,
+                )
+            } else {
+                FlatScoreList(
+                    items = screenModel.visibleItems,
+                    appState = appState,
+                    mode = ScoreListMode.HIDDEN,
+                )
+            }
+        }
+
+        LibraryBrowseMode.BY_COLLECTION -> {
+            val group = appState.selectedGroup
+            if (group == null) {
+                GroupList(
+                    groups = screenModel.collections,
+                    itemsByGroup = screenModel.collectionGroups,
+                    emptyLabel = "No collections found. Import PDFs with a collection folder strategy.",
+                    onSelectGroup = appState::selectGroup,
+                )
+            } else {
+                DrillDownScoreList(
+                    groupName = group,
+                    items = screenModel.visibleItems.itemsInBrowseGroup(
+                        browseMode = LibraryBrowseMode.BY_COLLECTION,
+                        groupName = group,
+                    ),
+                    appState = appState,
+                    onBack = appState::clearGroupSelection,
+                )
+            }
+        }
+
+        LibraryBrowseMode.BY_COMPOSER -> {
+            val group = appState.selectedGroup
+            if (group == null) {
+                GroupList(
+                    groups = screenModel.composers,
+                    itemsByGroup = screenModel.composerGroups,
+                    emptyLabel = "No composers found. Import PDFs with a composer folder strategy.",
+                    onSelectGroup = appState::selectGroup,
+                )
+            } else {
+                DrillDownScoreList(
+                    groupName = group,
+                    items = screenModel.visibleItems.itemsInBrowseGroup(
+                        browseMode = LibraryBrowseMode.BY_COMPOSER,
+                        groupName = group,
+                    ),
+                    appState = appState,
+                    onBack = appState::clearGroupSelection,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SetlistsContent(
+    snapshot: LibrarySnapshot,
+    screenModel: LibraryScreenModel,
+    appState: LunarAppState,
+) {
+    val activeTemporarySetlist = screenModel.activeTemporarySetlist
+    val activeSetlist = screenModel.activeSetlist
+    if (activeTemporarySetlist != null) {
+        TemporarySetlistDetailView(
+            session = activeTemporarySetlist,
+            items = screenModel.activeTemporarySetlistItems,
+            appState = appState,
+            onBack = appState::closeSetlist,
+            onSave = appState::showSaveTemporarySetlistDialog,
+            onDiscard = appState::discardTemporarySetlist,
+        )
+    } else if (activeSetlist == null) {
+        SetlistsOverview(
+            temporarySetlist = screenModel.temporarySetlist,
+            setlists = snapshot.setlists,
+            itemsById = screenModel.itemsById,
+            onOpenTemporarySetlist = appState::openTemporarySetlist,
+            onSaveTemporarySetlist = appState::showSaveTemporarySetlistDialog,
+            onDiscardTemporarySetlist = appState::discardTemporarySetlist,
+            onOpenSetlist = appState::openSetlist,
+            onDeleteSetlist = appState::requestDeleteSetlist,
+            onOpenLibrary = { appState.selectSection(AppSection.LIBRARY) },
+        )
+    } else {
+        SetlistDetailView(
+            setlist = activeSetlist,
+            items = screenModel.activeSetlistItems,
+            appState = appState,
+            onBack = appState::closeSetlist,
+            onDeleteSetlist = {
+                appState.requestDeleteSetlist(activeSetlist.id)
+            },
+        )
+    }
+}
+
+@Composable
+private fun LibraryScreenDialogs(
+    runtime: PlatformRuntime,
+    snapshot: LibrarySnapshot,
+    screenModel: LibraryScreenModel,
+    appState: LunarAppState,
+) {
     val editingItem = screenModel.editingItem
     if (editingItem != null) {
         MetadataEditorDialog(
@@ -493,39 +528,26 @@ private fun SummaryPill(text: String) {
     }
 }
 
-// ─── Browse mode switcher ────────────────────────────────────────────────────
+// --- Arrangement switcher (shown when the sidebar context is not visible) ---
 
 @Composable
-private fun BrowseModeSwitcher(appState: LunarAppState) {
+private fun ArrangementSwitcher(appState: LunarAppState) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        BrowseModeTab("All", LibraryBrowseMode.ALL, appState.browseMode == LibraryBrowseMode.ALL) {
-            appState.updateBrowseMode(LibraryBrowseMode.ALL)
-        }
-        BrowseModeTab("Collections", LibraryBrowseMode.BY_COLLECTION, appState.browseMode == LibraryBrowseMode.BY_COLLECTION) {
-            appState.updateBrowseMode(LibraryBrowseMode.BY_COLLECTION)
-        }
-        BrowseModeTab("Composers", LibraryBrowseMode.BY_COMPOSER, appState.browseMode == LibraryBrowseMode.BY_COMPOSER) {
-            appState.updateBrowseMode(LibraryBrowseMode.BY_COMPOSER)
-        }
-        BrowseModeTab("Setlists", LibraryBrowseMode.SETLISTS, appState.browseMode == LibraryBrowseMode.SETLISTS) {
-            appState.updateBrowseMode(LibraryBrowseMode.SETLISTS)
-        }
-        BrowseModeTab("Songbooks", LibraryBrowseMode.SONGBOOKS, appState.browseMode == LibraryBrowseMode.SONGBOOKS) {
-            appState.updateBrowseMode(LibraryBrowseMode.SONGBOOKS)
-        }
-        BrowseModeTab("Hidden", LibraryBrowseMode.HIDDEN, appState.browseMode == LibraryBrowseMode.HIDDEN) {
-            appState.updateBrowseMode(LibraryBrowseMode.HIDDEN)
+        LibraryArrangement.entries.forEach { arrangement ->
+            BrowseModeTab(arrangement, appState.libraryArrangement == arrangement) {
+                appState.selectArrangement(arrangement)
+            }
         }
     }
 }
 
 @Composable
-private fun BrowseModeTab(label: String, mode: LibraryBrowseMode, selected: Boolean, onClick: () -> Unit) {
+private fun BrowseModeTab(arrangement: LibraryArrangement, selected: Boolean, onClick: () -> Unit) {
     val bg = if (selected) {
         MaterialTheme.colorScheme.primary
     } else {
@@ -536,11 +558,11 @@ private fun BrowseModeTab(label: String, mode: LibraryBrowseMode, selected: Bool
         color = bg,
         shape = MaterialTheme.shapes.large,
         modifier = Modifier
-            .testTag(LunarTestTags.libraryBrowseTab(mode))
+            .testTag(LunarTestTags.libraryArrangementTab(arrangement))
             .clickable(onClick = onClick),
     ) {
         Text(
-            text = label,
+            text = arrangement.label,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
             style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
             color = fg,
@@ -3423,7 +3445,7 @@ internal fun currentLibraryScopeItems(
     appState: LunarAppState,
 ): List<SheetMusicItem> {
     val visibleItems = snapshot.items.applyLibraryQuery(
-        appState.query.withHiddenFilterFor(appState.browseMode)
+        appState.query.withHiddenFilterFor(appState.showingHiddenScores)
     )
     val visibleLibraryItems = snapshot.items.filterNot { it.isHidden }
     val itemsById = visibleLibraryItems.associateBy { it.id }
@@ -3441,6 +3463,7 @@ internal fun currentLibraryScopeItems(
     return currentScopeItems(
         snapshotItems = visibleLibraryItems,
         visibleItems = visibleItems,
+        section = appState.hostedSection,
         browseMode = appState.browseMode,
         selectedGroup = appState.selectedGroup,
         activeTemporarySetlistItems = activeTemporarySetlistItems,
@@ -3456,11 +3479,11 @@ private fun buildLibraryScreenModel(
 ): LibraryScreenModel {
     val visibleLibraryItems = snapshot.items.filterNot { it.isHidden }
     val hiddenLibraryItems = snapshot.items.filter { it.isHidden }
-    val query = appState.query.withHiddenFilterFor(appState.browseMode)
+    val query = appState.query.withHiddenFilterFor(appState.showingHiddenScores)
     val visibleItems = snapshot.items.applyLibraryQuery(query)
     val collections = visibleLibraryItems.availableCollections().toList()
     val composers = visibleLibraryItems.availableComposers().toList()
-    val filterBaseItems = if (appState.browseMode == LibraryBrowseMode.HIDDEN) {
+    val filterBaseItems = if (appState.showingHiddenScores) {
         hiddenLibraryItems
     } else {
         visibleLibraryItems
@@ -3483,15 +3506,12 @@ private fun buildLibraryScreenModel(
     )
     return LibraryScreenModel(
         visibleItems = visibleItems,
-        headerVisibleCount = if (
-            appState.browseMode == LibraryBrowseMode.SETLISTS ||
-            appState.browseMode == LibraryBrowseMode.SONGBOOKS
-        ) {
+        headerVisibleCount = if (appState.hostedSection != AppSection.LIBRARY) {
             visibleLibraryItems.size
         } else {
             visibleItems.size
         },
-        headerTotalCount = if (appState.browseMode == LibraryBrowseMode.HIDDEN) {
+        headerTotalCount = if (appState.showingHiddenScores) {
             hiddenLibraryItems.size
         } else {
             visibleLibraryItems.size
@@ -3511,6 +3531,7 @@ private fun buildLibraryScreenModel(
         activeSetlistItems = activeSetlistItems,
         currentScopeItems = currentScopeItems,
         randomScopeLabel = randomScopeLabel(
+            section = appState.hostedSection,
             browseMode = appState.browseMode,
             selectedGroup = appState.selectedGroup,
             activeTemporarySetlist = activeTemporarySetlist,
@@ -3531,12 +3552,31 @@ private fun buildLibraryScreenModel(
 private fun currentScopeItems(
     snapshotItems: List<SheetMusicItem>,
     visibleItems: List<SheetMusicItem>,
+    section: AppSection,
     browseMode: LibraryBrowseMode,
     selectedGroup: String?,
     activeTemporarySetlistItems: List<SheetMusicItem>,
     activeSetlistItems: List<SheetMusicItem>,
     hasActiveTemporarySetlist: Boolean,
     hasActiveSetlist: Boolean,
+): List<SheetMusicItem> = when {
+    section == AppSection.SETLISTS -> when {
+        hasActiveTemporarySetlist -> activeTemporarySetlistItems
+        hasActiveSetlist -> activeSetlistItems
+        else -> snapshotItems
+    }
+    section == AppSection.SONGBOOKS -> emptyList()
+    else -> libraryScopeItems(
+        visibleItems = visibleItems,
+        browseMode = browseMode,
+        selectedGroup = selectedGroup,
+    )
+}
+
+private fun libraryScopeItems(
+    visibleItems: List<SheetMusicItem>,
+    browseMode: LibraryBrowseMode,
+    selectedGroup: String?,
 ): List<SheetMusicItem> = when (browseMode) {
     LibraryBrowseMode.ALL -> visibleItems
     LibraryBrowseMode.BY_COLLECTION -> selectedGroup?.let {
@@ -3545,19 +3585,20 @@ private fun currentScopeItems(
     LibraryBrowseMode.BY_COMPOSER -> selectedGroup?.let {
         visibleItems.itemsInBrowseGroup(browseMode, it)
     } ?: visibleItems
-    LibraryBrowseMode.SETLISTS -> when {
-        hasActiveTemporarySetlist -> activeTemporarySetlistItems
-        hasActiveSetlist -> activeSetlistItems
-        else -> snapshotItems
-    }
-    LibraryBrowseMode.SONGBOOKS -> emptyList()
     LibraryBrowseMode.HIDDEN -> emptyList()
 }
 
+/** The library-hosted section `LibraryScreen` renders; other sections fall back to Library. */
+internal val LunarAppState.hostedSection: AppSection
+    get() = if (selectedSection.isLibraryHosted) selectedSection else AppSection.LIBRARY
+
+private val LunarAppState.showingHiddenScores: Boolean
+    get() = hostedSection == AppSection.LIBRARY && browseMode == LibraryBrowseMode.HIDDEN
+
 private fun com.ryanjames.lunar.library.model.LibraryQuery.withHiddenFilterFor(
-    browseMode: LibraryBrowseMode,
+    showingHiddenScores: Boolean,
 ): com.ryanjames.lunar.library.model.LibraryQuery = copy(
-    hiddenFilter = if (browseMode == LibraryBrowseMode.HIDDEN) {
+    hiddenFilter = if (showingHiddenScores) {
         HiddenScoreFilter.HIDDEN
     } else {
         HiddenScoreFilter.VISIBLE
@@ -3565,21 +3606,24 @@ private fun com.ryanjames.lunar.library.model.LibraryQuery.withHiddenFilterFor(
 )
 
 private fun randomScopeLabel(
+    section: AppSection,
     browseMode: LibraryBrowseMode,
     selectedGroup: String?,
     activeTemporarySetlist: TemporarySetlistSession?,
     activeSetlist: LibrarySetlist?,
-): String = when (browseMode) {
-    LibraryBrowseMode.ALL -> "the current library view"
-    LibraryBrowseMode.BY_COLLECTION -> selectedGroup?.let { "\"$it\"" } ?: "the current library view"
-    LibraryBrowseMode.BY_COMPOSER -> selectedGroup?.let { "\"$it\"" } ?: "the current library view"
-    LibraryBrowseMode.SETLISTS -> when {
+): String = when {
+    section == AppSection.SETLISTS -> when {
         activeTemporarySetlist != null -> "this temporary setlist"
         activeSetlist != null -> "\"${activeSetlist.name}\""
         else -> "the full library"
     }
-    LibraryBrowseMode.SONGBOOKS -> "songbooks"
-    LibraryBrowseMode.HIDDEN -> "hidden scores"
+    section == AppSection.SONGBOOKS -> "songbooks"
+    else -> when (browseMode) {
+        LibraryBrowseMode.ALL -> "the current library view"
+        LibraryBrowseMode.BY_COLLECTION -> selectedGroup?.let { "\"$it\"" } ?: "the current library view"
+        LibraryBrowseMode.BY_COMPOSER -> selectedGroup?.let { "\"$it\"" } ?: "the current library view"
+        LibraryBrowseMode.HIDDEN -> "hidden scores"
+    }
 }
 
 private fun List<SheetMusicItem>.groupByCollectionName(): Map<String, List<SheetMusicItem>> =

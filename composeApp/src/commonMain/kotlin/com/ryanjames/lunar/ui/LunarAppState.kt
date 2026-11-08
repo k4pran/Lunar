@@ -46,17 +46,54 @@ enum class LibraryBrowseMode {
     ALL,
     BY_COLLECTION,
     BY_COMPOSER,
-    SETLISTS,
-    SONGBOOKS,
     HIDDEN,
 }
+
+/**
+ * The "Arrange by" choices shown in the sidebar's Library context. Each maps onto a
+ * [LibraryBrowseMode] plus the `favoritesOnly` query flag.
+ */
+enum class LibraryArrangement(val label: String) {
+    ALL("All"),
+    COMPOSER("Composer"),
+    COLLECTION("Collection"),
+    FAVOURITES("Favourites"),
+    HIDDEN("Hidden"),
+}
+
+internal fun libraryArrangementFor(
+    browseMode: LibraryBrowseMode,
+    favoritesOnly: Boolean,
+): LibraryArrangement = when (browseMode) {
+    LibraryBrowseMode.ALL -> if (favoritesOnly) LibraryArrangement.FAVOURITES else LibraryArrangement.ALL
+    LibraryBrowseMode.BY_COMPOSER -> LibraryArrangement.COMPOSER
+    LibraryBrowseMode.BY_COLLECTION -> LibraryArrangement.COLLECTION
+    LibraryBrowseMode.HIDDEN -> LibraryArrangement.HIDDEN
+}
+
+private val LibraryArrangement.browseMode: LibraryBrowseMode
+    get() = when (this) {
+        LibraryArrangement.ALL, LibraryArrangement.FAVOURITES -> LibraryBrowseMode.ALL
+        LibraryArrangement.COMPOSER -> LibraryBrowseMode.BY_COMPOSER
+        LibraryArrangement.COLLECTION -> LibraryBrowseMode.BY_COLLECTION
+        LibraryArrangement.HIDDEN -> LibraryBrowseMode.HIDDEN
+    }
 
 enum class AppSection {
     IMPORT,
     LIBRARY,
+    SETLISTS,
+    SONGBOOKS,
     COMPOSE,
     SETTINGS,
 }
+
+/** Sections whose content is hosted by `LibraryScreen` (and so share its score dialogs). */
+internal val AppSection.isLibraryHosted: Boolean
+    get() = this == AppSection.LIBRARY || this == AppSection.SETLISTS || this == AppSection.SONGBOOKS
+
+/** Only the Library section shows the contextual part of the sidebar (Arrange by, Collections). */
+internal fun sidebarShowsLibraryContext(section: AppSection): Boolean = section == AppSection.LIBRARY
 
 sealed interface ViewerTarget {
     data class Score(val itemId: String) : ViewerTarget
@@ -179,11 +216,40 @@ class LunarAppState(
     var bannerMessage: String? by mutableStateOf(null)
         private set
 
+    /**
+     * Session-only override for the sidebar collapse state. Compose collapses the sidebar
+     * while it is open without touching the persisted [AppSettings.sidebarCollapsed].
+     */
+    var temporarySidebarCollapsed: Boolean? by mutableStateOf(null)
+        private set
+
+    val libraryArrangement: LibraryArrangement
+        get() = libraryArrangementFor(browseMode, query.favoritesOnly)
+
     fun selectSection(section: AppSection) {
-        selectedSection = section
-        if (section != AppSection.LIBRARY) {
-            clearScoreSelection()
-            dismissLibraryTransientUi()
+        enterSection(section)
+    }
+
+    fun isSidebarCollapsed(settings: AppSettings): Boolean =
+        temporarySidebarCollapsed ?: settings.sidebarCollapsed
+
+    fun toggleSidebarCollapsed() {
+        val temporary = temporarySidebarCollapsed
+        if (temporary != null) {
+            temporarySidebarCollapsed = !temporary
+            return
+        }
+        updateStoredSettings { settings -> settings.copy(sidebarCollapsed = !settings.sidebarCollapsed) }
+    }
+
+    fun selectArrangement(arrangement: LibraryArrangement) {
+        enterSection(AppSection.LIBRARY)
+        if (browseMode != arrangement.browseMode) {
+            updateBrowseMode(arrangement.browseMode)
+        }
+        val favoritesOnly = arrangement == LibraryArrangement.FAVOURITES
+        if (query.favoritesOnly != favoritesOnly) {
+            updateQuery { copy(favoritesOnly = favoritesOnly) }
         }
     }
 
@@ -251,9 +317,6 @@ class LunarAppState(
         clearScoreSelection()
         browseMode = mode
         selectedGroup = null
-        if (mode != LibraryBrowseMode.SETLISTS) {
-            closeSetlistDetail()
-        }
     }
 
     fun selectGroup(groupName: String) {
@@ -453,7 +516,6 @@ class LunarAppState(
             itemIds = shuffledItems.map { it.id },
             createdAtEpochMillis = Clock.System.now().toEpochMilliseconds(),
         )
-        selectSection(AppSection.LIBRARY)
         showTemporarySetlist()
         dismissLibraryTransientUi()
         val scoreCount = shuffledItems.size
@@ -863,7 +925,7 @@ class LunarAppState(
                 dismissScoreInfo()
             }
             deleteCandidateItemId = null
-            selectedSection = AppSection.LIBRARY
+            focusLibrarySection()
             bannerMessage = "Score removed from your library."
         }
     }
@@ -1032,8 +1094,28 @@ class LunarAppState(
         }
     }
 
+    /**
+     * Score dialogs (setlist/songbook pickers) live in the library-hosted sections; stay in
+     * Setlists or Songbooks if already there, otherwise fall back to Library.
+     */
     private fun focusLibrarySection() {
-        selectedSection = AppSection.LIBRARY
+        if (!selectedSection.isLibraryHosted) {
+            enterSection(AppSection.LIBRARY)
+        }
+    }
+
+    /**
+     * The single transition for changing top-level sections. Switching clears the score
+     * selection and transient dialogs, closes any open setlist detail and manages the
+     * Compose-only sidebar collapse.
+     */
+    private fun enterSection(section: AppSection) {
+        if (selectedSection == section) return
+        clearScoreSelection()
+        dismissLibraryTransientUi()
+        closeSetlistDetail()
+        selectedSection = section
+        temporarySidebarCollapsed = if (section == AppSection.COMPOSE) true else null
     }
 
     private fun dismissLibraryTransientUi() {
@@ -1062,9 +1144,8 @@ class LunarAppState(
 
     private fun showSavedSetlist(setlistId: String) {
         clearScoreSelection()
+        enterSection(AppSection.SETLISTS)
         saveTemporarySetlistDialogVisible = false
-        browseMode = LibraryBrowseMode.SETLISTS
-        selectedGroup = null
         temporarySetlistOpen = false
         selectedSetlistId = setlistId
     }
@@ -1078,18 +1159,16 @@ class LunarAppState(
     }
 
     private fun showTemporarySetlist() {
+        enterSection(AppSection.SETLISTS)
         clearScoreSelection()
-        browseMode = LibraryBrowseMode.SETLISTS
-        selectedGroup = null
         selectedSetlistId = null
         temporarySetlistOpen = true
     }
 
     private fun showSongbooksOverview() {
+        enterSection(AppSection.SONGBOOKS)
         clearScoreSelection()
         closeSetlistDetail()
-        browseMode = LibraryBrowseMode.SONGBOOKS
-        selectedGroup = null
     }
 
     private fun runImport(
@@ -1134,7 +1213,7 @@ class LunarAppState(
                 }
                 bannerMessage = when {
                     imported.isNotEmpty() -> {
-                        selectedSection = AppSection.LIBRARY
+                        enterSection(AppSection.LIBRARY)
                         clearFilters()
                         val scores = imported.size
                         "$scores score${if (scores == 1) "" else "s"} added to your library."
@@ -1209,7 +1288,7 @@ class LunarAppState(
 
                 bannerMessage = when {
                     imported.isNotEmpty() -> {
-                        selectedSection = AppSection.LIBRARY
+                        enterSection(AppSection.LIBRARY)
                         clearFilters()
                         val scores = imported.size
                         appendImportActivity(
