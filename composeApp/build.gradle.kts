@@ -1,4 +1,5 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -169,4 +170,16 @@ compose.desktop {
             }
         }
     }
+}
+
+// The AppImage task writes the same app-image directory (binaries/main[-release]/app) that the
+// installer tasks (Dmg, Deb, Exe, Msi) read, so order them explicitly. Without this Gradle fails
+// packageReleaseDistributionForCurrentOS with an implicit-dependency validation error.
+tasks.withType<AbstractJPackageTask>().configureEach {
+    val appImageTaskName = Regex("^package(.*?)(AppImage|Dmg|Pkg|Deb|Rpm|Exe|Msi)$")
+        .matchEntire(name)
+        ?.takeIf { it.groupValues[2] != "AppImage" }
+        ?.let { "package${it.groupValues[1]}AppImage" }
+        ?: return@configureEach
+    mustRunAfter(appImageTaskName)
 }
