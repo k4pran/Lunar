@@ -86,6 +86,10 @@ fun isSidebarToggleShortcut(event: KeyEvent): Boolean =
         (event.isCtrlPressed || event.isMetaPressed) &&
         event.key == Key.B
 
+/** Escape closes the compact navigation drawer. */
+fun isDrawerDismissKey(event: KeyEvent): Boolean =
+    event.type == KeyEventType.KeyDown && event.key == Key.Escape
+
 /**
  * The adaptive app shell: a full sidebar, an icon rail or a drawer behind a slim top bar,
  * depending on the window width and the user's collapse preference.
@@ -104,6 +108,7 @@ internal fun LunarAppShell(
 ) {
     val collapsed = appState.isSidebarCollapsed(settings)
     val syncLine = sidebarSyncLine(syncState, Clock.System.now().toEpochMilliseconds())
+    var drawerOpen by remember { mutableStateOf(false) }
 
     BoxWithConstraints(
         modifier = modifier
@@ -113,6 +118,9 @@ internal fun LunarAppShell(
                 if (isSidebarToggleShortcut(event)) {
                     appState.toggleSidebarCollapsed()
                     true
+                } else if (drawerOpen && isDrawerDismissKey(event)) {
+                    drawerOpen = false
+                    true
                 } else {
                     false
                 }
@@ -120,7 +128,6 @@ internal fun LunarAppShell(
     ) {
         val windowClass = windowClassFor(maxWidth.value)
         val form = sidebarFormFor(windowClass, collapsed)
-        var drawerOpen by remember { mutableStateOf(false) }
         if (form != SidebarForm.DRAWER && drawerOpen) {
             drawerOpen = false
         }
@@ -180,6 +187,8 @@ internal fun LunarAppShell(
             }
         }
 
+        // System Back (Android) closes the drawer instead of leaving the app.
+        PlatformBackHandler(enabled = drawerOpen) { drawerOpen = false }
         if (drawerOpen) {
             SidebarDrawer(
                 appState = appState,
@@ -486,14 +495,23 @@ internal fun LunarSidebarRail(
             )
             Spacer(modifier = Modifier.height(6.dp))
         }
-        SidebarPrimaryDestinations.forEach { destination ->
-            RailItem(
-                destination = destination,
-                selected = selectedSection == destination.section,
-                onClick = { onSelectSection(destination.section) },
-            )
+        // The primary destinations scroll so short windows (landscape phones) still leave room
+        // for Settings, which stays pinned to the bottom.
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            SidebarPrimaryDestinations.forEach { destination ->
+                RailItem(
+                    destination = destination,
+                    selected = selectedSection == destination.section,
+                    onClick = { onSelectSection(destination.section) },
+                )
+            }
         }
-        Spacer(modifier = Modifier.weight(1f))
         RailItem(
             destination = SidebarSettingsDestination,
             selected = selectedSection == AppSection.SETTINGS,
