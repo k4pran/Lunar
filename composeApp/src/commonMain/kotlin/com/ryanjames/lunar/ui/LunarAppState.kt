@@ -25,7 +25,7 @@ import com.ryanjames.lunar.library.model.ViewerSupportFilter
 import com.ryanjames.lunar.platform.ImportRequestResult
 import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.SelectedCoverImage
-import com.ryanjames.lunar.settings.AppColorTheme
+import com.ryanjames.lunar.settings.AppSkin
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.AutoRefreshSchedule
 import com.ryanjames.lunar.settings.CacheLimitPreset
@@ -564,8 +564,8 @@ class LunarAppState(
         bannerMessage = "Viewer keybindings reset to defaults."
     }
 
-    fun updateTheme(theme: AppColorTheme) {
-        updateStoredSettings { settings -> settings.copy(theme = theme) }
+    fun updateSkin(skin: AppSkin) {
+        updateStoredSettings { settings -> settings.copy(skin = skin) }
     }
 
     fun updateRefreshOnLaunch(enabled: Boolean) {

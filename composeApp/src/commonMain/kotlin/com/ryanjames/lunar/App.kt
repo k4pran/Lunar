@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -62,6 +63,8 @@ import com.ryanjames.lunar.ui.SettingsScreen
 import com.ryanjames.lunar.ui.ViewerDocumentState
 import com.ryanjames.lunar.ui.ViewerScreen
 import com.ryanjames.lunar.ui.ViewerTarget
+import com.ryanjames.lunar.ui.design.LunarTestTags
+import com.ryanjames.lunar.ui.design.lunarTokens
 import com.ryanjames.lunar.ui.currentLibraryScopeItems
 import com.ryanjames.lunar.ui.lunarThemePalette
 import com.ryanjames.lunar.ui.rememberLunarAppState
@@ -122,7 +125,9 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
     }
 
     if (!appReady) {
-        StartupLoadingScreen(errorMessage = startupError)
+        LunarTheme(skin = appSettings.resolvedSkin) {
+            StartupLoadingScreen(errorMessage = startupError)
+        }
         return
     }
 
@@ -149,7 +154,7 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
         appState.clearBanner()
     }
 
-    LunarTheme(theme = appSettings.theme) {
+    LunarTheme(skin = appSettings.resolvedSkin) {
         val themePalette = lunarThemePalette()
 
         if (fullscreenDocument != null) {
@@ -347,11 +352,13 @@ private fun StartupLoadingScreen(
     } else {
         "Lunar startup failed"
     }
+    val tokens = lunarTokens()
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFF111820))
+            .testTag(LunarTestTags.STARTUP_SCREEN)
+            .background(tokens.colors.bg)
             .semantics {
                 contentDescription = description
             },
@@ -359,19 +366,26 @@ private fun StartupLoadingScreen(
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(tokens.spacing.md),
         ) {
-            StartupSpinner(rotation = rotation)
+            StartupSpinner(
+                rotation = rotation,
+                color = if (errorMessage == null) tokens.colors.accent else tokens.colors.danger,
+            )
             Text(
                 text = errorMessage ?: "Loading Lunar",
-                color = Color(0xFFE8F2F8),
+                style = tokens.typography.subtitle,
+                color = if (errorMessage == null) tokens.colors.ink2 else tokens.colors.danger,
             )
         }
     }
 }
 
 @Composable
-private fun StartupSpinner(rotation: Float) {
+private fun StartupSpinner(
+    rotation: Float,
+    color: Color,
+) {
     Canvas(modifier = Modifier.size(44.dp)) {
         val strokeWidth = 4.dp.toPx()
         val inset = strokeWidth / 2f
@@ -381,7 +395,7 @@ private fun StartupSpinner(rotation: Float) {
         )
         val topLeft = Offset(inset, inset)
         drawArc(
-            color = Color(0xFF8DD7FF).copy(alpha = 0.24f),
+            color = color.copy(alpha = 0.24f),
             startAngle = 0f,
             sweepAngle = 360f,
             useCenter = false,
@@ -390,7 +404,7 @@ private fun StartupSpinner(rotation: Float) {
             style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
         )
         drawArc(
-            color = Color(0xFF8DD7FF),
+            color = color,
             startAngle = rotation,
             sweepAngle = 88f,
             useCenter = false,
@@ -484,26 +498,31 @@ internal fun BottomNavigationPanel(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .testTag(LunarTestTags.NAVIGATION)
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             BottomNavItem(
                 title = "Sources",
+                section = AppSection.IMPORT,
                 selected = selectedSection == AppSection.IMPORT,
                 onClick = { onSelectSection(AppSection.IMPORT) },
             )
             BottomNavItem(
                 title = "Library",
+                section = AppSection.LIBRARY,
                 selected = selectedSection == AppSection.LIBRARY,
                 onClick = { onSelectSection(AppSection.LIBRARY) },
             )
             BottomNavItem(
                 title = "Compose",
+                section = AppSection.COMPOSE,
                 selected = selectedSection == AppSection.COMPOSE,
                 onClick = { onSelectSection(AppSection.COMPOSE) },
             )
             BottomNavItem(
                 title = "Settings",
+                section = AppSection.SETTINGS,
                 selected = selectedSection == AppSection.SETTINGS,
                 onClick = { onSelectSection(AppSection.SETTINGS) },
             )
@@ -514,6 +533,7 @@ internal fun BottomNavigationPanel(
 @Composable
 private fun RowScope.BottomNavItem(
     title: String,
+    section: AppSection,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
@@ -527,6 +547,7 @@ private fun RowScope.BottomNavItem(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
+                .testTag(LunarTestTags.navigationItem(section))
                 .clickable(onClick = onClick),
             color = containerColor,
             shape = MaterialTheme.shapes.large,

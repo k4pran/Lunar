@@ -1,21 +1,25 @@
 package com.ryanjames.lunar
 
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isPopup
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -34,29 +38,35 @@ import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.library.model.ScoreMetadata
 import com.ryanjames.lunar.library.model.ScoreMetadataComposer
 import com.ryanjames.lunar.library.model.ScoreMetadataSource
-import com.ryanjames.lunar.platform.CompositionPdfImporter
 import com.ryanjames.lunar.platform.CompositionPdfImportRequest
+import com.ryanjames.lunar.platform.CompositionPdfImporter
 import com.ryanjames.lunar.platform.ImporterState
 import com.ryanjames.lunar.platform.LibraryCacheSnapshot
-import com.ryanjames.lunar.platform.LilyPondLiveRenderer
 import com.ryanjames.lunar.platform.LilyPondLiveRenderResult
+import com.ryanjames.lunar.platform.LilyPondLiveRenderer
 import com.ryanjames.lunar.platform.LilyPondSourceSnapshot
 import com.ryanjames.lunar.platform.PdfDocumentInfo
 import com.ryanjames.lunar.platform.PdfPageRenderer
 import com.ryanjames.lunar.platform.RenderedPdfPage
-import com.ryanjames.lunar.settings.AppColorTheme
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.AppSettingsStore
+import com.ryanjames.lunar.settings.AppSkin
+import com.ryanjames.lunar.settings.JsonAppSettingsStore
 import com.ryanjames.lunar.settings.ViewerKeybindings
 import com.ryanjames.lunar.sync.CloudSyncState
 import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.ComposeScreen
-import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.ImportScreen
+import com.ryanjames.lunar.ui.LibraryBrowseMode
 import com.ryanjames.lunar.ui.LibraryScreen
-import com.ryanjames.lunar.ui.LunarTooltip
 import com.ryanjames.lunar.ui.LunarTheme
+import com.ryanjames.lunar.ui.LunarTooltip
 import com.ryanjames.lunar.ui.SettingsScreen
+import com.ryanjames.lunar.ui.ViewerTarget
+import com.ryanjames.lunar.ui.design.LunarTestTags
+import java.nio.file.Files
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,10 +75,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.runBlocking
+import okio.FileSystem
+import okio.Path.Companion.toPath
 import org.junit.Rule
 import org.junit.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 class ScreenSmokeTest {
 
@@ -81,7 +91,7 @@ class ScreenSmokeTest {
             val settingsGate = CompletableDeferred<Unit>()
             val repositoryGate = CompletableDeferred<Unit>()
             val loadedSettings = AppSettings(
-                theme = AppColorTheme.DARCULA,
+                skin = AppSkin.MOONLIGHT,
                 refreshOnLaunch = false,
             )
             val baseRuntime = createTestPlatformRuntime(
@@ -102,27 +112,29 @@ class ScreenSmokeTest {
                 LunarApp(runtime)
             }
 
+            rule.onNodeWithTag(LunarTestTags.STARTUP_SCREEN).assertIsDisplayed()
             rule.onNodeWithContentDescription("Lunar is starting").assertIsDisplayed()
-            assertTrue(rule.onAllNodesWithText("Moon River").fetchSemanticsNodes().isEmpty())
+            assertTrue(rule.onAllNodesWithTag(LunarTestTags.libraryRow("moon_river")).fetchSemanticsNodes().isEmpty())
 
             settingsGate.complete(Unit)
             rule.waitForIdle()
-            rule.onNodeWithContentDescription("Lunar is starting").assertIsDisplayed()
-            assertTrue(rule.onAllNodesWithText("Moon River").fetchSemanticsNodes().isEmpty())
+            rule.onNodeWithTag(LunarTestTags.STARTUP_SCREEN).assertIsDisplayed()
+            assertTrue(rule.onAllNodesWithTag(LunarTestTags.libraryRow("moon_river")).fetchSemanticsNodes().isEmpty())
 
             repositoryGate.complete(Unit)
             rule.waitUntil(timeoutMillis = 5_000) {
-                rule.onAllNodesWithText("Moon River").fetchSemanticsNodes().isNotEmpty()
+                rule.onAllNodesWithTag(LunarTestTags.libraryRow("moon_river")).fetchSemanticsNodes().isNotEmpty()
             }
-            assertTrue(rule.onAllNodesWithText("Loading Lunar").fetchSemanticsNodes().isEmpty())
-            rule.onNodeWithText("Moon River").assertIsDisplayed()
+            assertTrue(rule.onAllNodesWithTag(LunarTestTags.STARTUP_SCREEN).fetchSemanticsNodes().isEmpty())
+            rule.onNodeWithTag(LunarTestTags.libraryRow("moon_river")).assertIsDisplayed()
+            rule.onNodeWithTag(LunarTestTags.NAVIGATION).assertIsDisplayed()
         }
     }
 
     @Test
     fun lunarTooltipShowsFromLongClickSemantics() {
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 LunarTooltip("Open this score") {
                     Button(onClick = {}) {
                         Text("Open")
@@ -152,7 +164,7 @@ class ScreenSmokeTest {
             )
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.DARCULA) {
+                LunarTheme(skin = AppSkin.MOONLIGHT) {
                     LibraryScreen(
                         runtime = runtime,
                         snapshot = runtime.repository.library.value,
@@ -162,15 +174,15 @@ class ScreenSmokeTest {
                 }
             }
 
-            rule.onNodeWithContentDescription("Library search").performClick()
-            rule.onNodeWithContentDescription("Library search").performKeyInput {
+            rule.onNodeWithTag(LunarTestTags.LIBRARY_SEARCH).performClick()
+            rule.onNodeWithTag(LunarTestTags.LIBRARY_SEARCH).performKeyInput {
                 pressKey(Key.R)
             }
 
             rule.runOnIdle {
                 assertEquals(null, appState.previewTarget)
             }
-            rule.onNodeWithContentDescription("Library search").performTextReplacement("R")
+            rule.onNodeWithTag(LunarTestTags.LIBRARY_SEARCH).performTextReplacement("R")
             rule.runOnIdle {
                 assertEquals("R", appState.query.searchText)
                 assertEquals(null, appState.previewTarget)
@@ -219,7 +231,7 @@ class ScreenSmokeTest {
             val snapshot = runtime.repository.library.value
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.DARCULA) {
+                LunarTheme(skin = AppSkin.MOONLIGHT) {
                     LibraryScreen(
                         runtime = runtime,
                         snapshot = snapshot,
@@ -249,7 +261,7 @@ class ScreenSmokeTest {
             rule.onNodeWithText("Filename").assertIsDisplayed()
             rule.onNodeWithText("Moon River.pdf").assertIsDisplayed()
             rule.onNodeWithText("Close").performClick()
-            rule.onNodeWithContentDescription("Library search").assertIsDisplayed()
+            rule.onNodeWithTag(LunarTestTags.LIBRARY_SEARCH).assertIsDisplayed()
             rule.runOnIdle {
                 assertTrue(
                     rule.onAllNodesWithText("Browsing 2 scores. Filter by collection or tag when you need it.")
@@ -276,7 +288,7 @@ class ScreenSmokeTest {
             rule.onNodeWithText("Create a random setlist").assertIsDisplayed()
             rule.onNodeWithText("Cancel").performClick()
 
-            rule.onNodeWithText("Setlists").performClick()
+            rule.onNodeWithTag(LunarTestTags.libraryBrowseTab(LibraryBrowseMode.SETLISTS)).performClick()
             rule.onNodeWithText("Morning rehearsal").assertIsDisplayed()
             rule.onNodeWithText("Open").performClick()
             rule.onNodeWithText("Saved automatically. Delete it whenever you no longer need it.").assertIsDisplayed()
@@ -309,7 +321,7 @@ class ScreenSmokeTest {
             val snapshot = runtime.repository.library.value
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     LibraryScreen(
                         runtime = runtime,
                         snapshot = snapshot,
@@ -371,7 +383,7 @@ class ScreenSmokeTest {
             val snapshot = runtime.repository.library.value
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     LibraryScreen(
                         runtime = runtime,
                         snapshot = snapshot,
@@ -387,7 +399,7 @@ class ScreenSmokeTest {
             rule.onNodeWithText("Choose cover").assertIsDisplayed()
             rule.onNodeWithText("Cancel").performClick()
 
-            rule.onNodeWithText("Songbooks").performClick()
+            rule.onNodeWithTag(LunarTestTags.libraryBrowseTab(LibraryBrowseMode.SONGBOOKS)).performClick()
             rule.onNodeWithText("Standards Book").assertIsDisplayed()
             rule.onNodeWithText("Standards Book").performClick()
             rule.runOnIdle {
@@ -425,7 +437,7 @@ class ScreenSmokeTest {
             )
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     ImportScreen(
                         runtime = runtime,
                         importerState = ImporterState(statusMessage = "Ready to import PDFs."),
@@ -452,11 +464,17 @@ class ScreenSmokeTest {
     }
 
     @Test
-    fun settingsScreenResetsThemeAndReturnsToLibrary() {
+    fun settingsScreenPicksMoonlightSkinAndPersistsIt() {
         runBlocking {
-            val runtime = createTestPlatformRuntime(
-                initialSettings = AppSettings(theme = AppColorTheme.DARCULA),
+            val settingsDir = Files.createTempDirectory("lunar-settings-test").toString().toPath()
+            val settingsPath = settingsDir / "app_settings.json"
+            val runtime = createTestPlatformRuntime().copy(
+                settingsStore = JsonAppSettingsStore(
+                    fileSystem = FileSystem.SYSTEM,
+                    settingsPath = settingsPath,
+                ),
             )
+            runtime.settingsStore.initialize()
             val appState = createTestLunarAppState(
                 scope = backgroundScope(),
                 runtime = runtime,
@@ -465,7 +483,7 @@ class ScreenSmokeTest {
 
             rule.setContent {
                 val settings by runtime.settingsStore.settings.collectAsState()
-                LunarTheme(theme = settings.theme) {
+                LunarTheme(skin = settings.resolvedSkin) {
                     SettingsScreen(
                         settings = settings,
                         appState = appState,
@@ -473,9 +491,24 @@ class ScreenSmokeTest {
                 }
             }
 
-            rule.onNodeWithText("Appearance").assertIsDisplayed()
-            rule.onNodeWithText("Color theme").assertIsDisplayed()
-            rule.onNodeWithText("Darcula").assertIsDisplayed()
+            rule.onNodeWithTag(LunarTestTags.SETTINGS_APPEARANCE_PANEL).assertIsDisplayed()
+            rule.onNodeWithTag(LunarTestTags.skinOption(AppSkin.PAPER)).assertIsSelected()
+            rule.onNodeWithTag(LunarTestTags.skinOption(AppSkin.MOONLIGHT)).assertIsNotSelected()
+
+            rule.onNodeWithTag(LunarTestTags.skinOption(AppSkin.MOONLIGHT)).performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.settingsStore.settings.value.skin == AppSkin.MOONLIGHT
+            }
+            rule.onNodeWithTag(LunarTestTags.skinOption(AppSkin.MOONLIGHT)).assertIsSelected()
+            rule.onNodeWithTag(LunarTestTags.skinOption(AppSkin.PAPER)).assertIsNotSelected()
+
+            val reloaded = JsonAppSettingsStore(
+                fileSystem = FileSystem.SYSTEM,
+                settingsPath = settingsPath,
+            )
+            reloaded.initialize()
+            assertEquals(AppSkin.MOONLIGHT, reloaded.settings.value.skin)
+
             rule.onNodeWithText("Keybindings").performClick()
             rule.onNodeWithText("Viewer keybindings").assertIsDisplayed()
             rule.onNodeWithText("Toggle fullscreen").assertIsDisplayed()
@@ -485,7 +518,7 @@ class ScreenSmokeTest {
                 appState.resetGlobalSettings()
             }
             rule.waitUntil(timeoutMillis = 5_000) {
-                runtime.settingsStore.settings.value.theme == AppColorTheme.OCEAN
+                runtime.settingsStore.settings.value.skin == AppSkin.PAPER
             }
             rule.runOnIdle {
                 appState.selectSection(AppSection.LIBRARY)
@@ -493,6 +526,7 @@ class ScreenSmokeTest {
             rule.runOnIdle {
                 assertEquals(AppSection.LIBRARY, appState.selectedSection)
             }
+            FileSystem.SYSTEM.deleteRecursively(settingsDir)
         }
     }
 
@@ -526,7 +560,7 @@ class ScreenSmokeTest {
             )
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     ImportScreen(
                         runtime = runtime,
                         importerState = ImporterState(statusMessage = "Ready to import PDFs."),
@@ -559,7 +593,7 @@ class ScreenSmokeTest {
             val editedSource = "\\version \"2.24.0\"\n{ g'4 a' b' c'' }"
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     ComposeScreen(runtime = runtime)
                 }
             }
@@ -597,7 +631,7 @@ class ScreenSmokeTest {
             val editedSource = "\\version \"2.24.0\"\n{ e'4 fis' gis' a' }"
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     ComposeScreen(runtime = runtime)
                 }
             }
@@ -639,7 +673,7 @@ class ScreenSmokeTest {
     @Test
     fun bottomNavigationShowsComposeSection() {
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 BottomNavigationPanel(
                     selectedSection = AppSection.LIBRARY,
                     onSelectSection = {},
@@ -647,10 +681,9 @@ class ScreenSmokeTest {
             }
         }
 
-        rule.onDisplayedNodeWithText("Sources").assertIsDisplayed()
-        rule.onDisplayedNodeWithText("Library").assertIsDisplayed()
-        rule.onDisplayedNodeWithText("Compose").assertIsDisplayed()
-        rule.onDisplayedNodeWithText("Settings").assertIsDisplayed()
+        AppSection.entries.forEach { section ->
+            rule.onNodeWithTag(LunarTestTags.navigationItem(section)).assertIsDisplayed()
+        }
     }
 }
 
