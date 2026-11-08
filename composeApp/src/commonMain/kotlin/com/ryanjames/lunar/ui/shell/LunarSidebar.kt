@@ -9,13 +9,19 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -66,6 +72,13 @@ import kotlin.time.Clock
 internal val ExpandedSidebarWidth = 232.dp
 internal val SidebarRailWidth = 64.dp
 private val CompactDrawerWidth = 280.dp
+
+/**
+ * Safe-area insets (status bar, navigation bar, cutouts) each navigation control pads for.
+ * Side navigation hugs the start edge for the full height; the compact top bar spans the top.
+ */
+private val SideNavigationInsetSides = WindowInsetsSides.Start + WindowInsetsSides.Vertical
+private val TopBarInsetSides = WindowInsetsSides.Top + WindowInsetsSides.Horizontal
 
 /** Ctrl+B (Cmd+B on macOS) toggles the sidebar between expanded and rail. */
 fun isSidebarToggleShortcut(event: KeyEvent): Boolean =
@@ -143,6 +156,11 @@ internal fun LunarAppShell(
 
                 SidebarForm.DRAWER -> Unit
             }
+            // The navigation controls pad for the insets on their edges, so consume those here
+            // and the content's own Scaffold does not apply them a second time.
+            val navigationInsets = WindowInsets.safeDrawing.only(
+                if (form == SidebarForm.DRAWER) WindowInsetsSides.Top else WindowInsetsSides.Start,
+            )
             Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
                 if (form == SidebarForm.DRAWER) {
                     CompactTopBar(
@@ -151,7 +169,12 @@ internal fun LunarAppShell(
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
-                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .consumeWindowInsets(navigationInsets),
+                ) {
                     content(form != SidebarForm.RAIL && sidebarShowsLibraryContext(appState.selectedSection))
                 }
             }
@@ -216,6 +239,7 @@ private fun CompactTopBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag(LunarTestTags.NAVIGATION)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(TopBarInsetSides))
                 .height(52.dp)
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -254,6 +278,7 @@ internal fun LunarSidebar(
     Column(
         modifier = modifier
             .background(MaterialTheme.colorScheme.surface)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(SideNavigationInsetSides))
             .padding(horizontal = 12.dp, vertical = 14.dp),
     ) {
         Row(
@@ -448,6 +473,7 @@ internal fun LunarSidebarRail(
     Column(
         modifier = modifier
             .background(MaterialTheme.colorScheme.surface)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(SideNavigationInsetSides))
             .padding(vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
