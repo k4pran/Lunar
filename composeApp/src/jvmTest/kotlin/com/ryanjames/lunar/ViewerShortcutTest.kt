@@ -19,7 +19,7 @@ import com.ryanjames.lunar.platform.LilyPondSourceSnapshot
 import com.ryanjames.lunar.platform.PdfDocumentInfo
 import com.ryanjames.lunar.platform.PdfPageRenderer
 import com.ryanjames.lunar.platform.RenderedPdfPage
-import com.ryanjames.lunar.settings.AppColorTheme
+import com.ryanjames.lunar.settings.AppSkin
 import com.ryanjames.lunar.settings.ViewerKeybindings
 import com.ryanjames.lunar.ui.LunarTheme
 import com.ryanjames.lunar.ui.ViewerDocumentState
@@ -61,7 +61,7 @@ class ViewerShortcutTest {
         var openedRandomCount = 0
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
@@ -106,7 +106,7 @@ class ViewerShortcutTest {
         )
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
@@ -134,7 +134,7 @@ class ViewerShortcutTest {
         )
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
@@ -164,7 +164,7 @@ class ViewerShortcutTest {
         var hiddenScores = 0
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
@@ -211,7 +211,7 @@ class ViewerShortcutTest {
         )
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
@@ -249,7 +249,7 @@ class ViewerShortcutTest {
         )
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
@@ -294,7 +294,7 @@ class ViewerShortcutTest {
         val editedSource = "\\version \"2.24.0\"\n{ g'4 a' b' c'' }"
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
@@ -349,7 +349,7 @@ class ViewerShortcutTest {
         val editedSource = "\\version \"2.24.0\"\n{ b'4 a' g' f' }"
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,

@@ -64,6 +64,7 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -72,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import com.ryanjames.lunar.composeapp.generated.resources.Res
 import com.ryanjames.lunar.composeapp.generated.resources.lilypond_logo
 import com.ryanjames.lunar.composeapp.generated.resources.pdf_logo
+import com.ryanjames.lunar.ui.design.LunarTestTags
 import com.ryanjames.lunar.library.data.LibrarySnapshot
 import com.ryanjames.lunar.library.data.SyncStatus
 import com.ryanjames.lunar.library.model.HiddenScoreFilter
@@ -117,6 +119,7 @@ fun LibraryScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .testTag(LunarTestTags.LIBRARY_PANEL)
             .focusRequester(focusRequester)
             .focusable()
             .onKeyEvent { event ->
@@ -500,29 +503,29 @@ private fun BrowseModeSwitcher(appState: LunarAppState) {
             .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        BrowseModeTab("All", appState.browseMode == LibraryBrowseMode.ALL) {
+        BrowseModeTab("All", LibraryBrowseMode.ALL, appState.browseMode == LibraryBrowseMode.ALL) {
             appState.updateBrowseMode(LibraryBrowseMode.ALL)
         }
-        BrowseModeTab("Collections", appState.browseMode == LibraryBrowseMode.BY_COLLECTION) {
+        BrowseModeTab("Collections", LibraryBrowseMode.BY_COLLECTION, appState.browseMode == LibraryBrowseMode.BY_COLLECTION) {
             appState.updateBrowseMode(LibraryBrowseMode.BY_COLLECTION)
         }
-        BrowseModeTab("Composers", appState.browseMode == LibraryBrowseMode.BY_COMPOSER) {
+        BrowseModeTab("Composers", LibraryBrowseMode.BY_COMPOSER, appState.browseMode == LibraryBrowseMode.BY_COMPOSER) {
             appState.updateBrowseMode(LibraryBrowseMode.BY_COMPOSER)
         }
-        BrowseModeTab("Setlists", appState.browseMode == LibraryBrowseMode.SETLISTS) {
+        BrowseModeTab("Setlists", LibraryBrowseMode.SETLISTS, appState.browseMode == LibraryBrowseMode.SETLISTS) {
             appState.updateBrowseMode(LibraryBrowseMode.SETLISTS)
         }
-        BrowseModeTab("Songbooks", appState.browseMode == LibraryBrowseMode.SONGBOOKS) {
+        BrowseModeTab("Songbooks", LibraryBrowseMode.SONGBOOKS, appState.browseMode == LibraryBrowseMode.SONGBOOKS) {
             appState.updateBrowseMode(LibraryBrowseMode.SONGBOOKS)
         }
-        BrowseModeTab("Hidden", appState.browseMode == LibraryBrowseMode.HIDDEN) {
+        BrowseModeTab("Hidden", LibraryBrowseMode.HIDDEN, appState.browseMode == LibraryBrowseMode.HIDDEN) {
             appState.updateBrowseMode(LibraryBrowseMode.HIDDEN)
         }
     }
 }
 
 @Composable
-private fun BrowseModeTab(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun BrowseModeTab(label: String, mode: LibraryBrowseMode, selected: Boolean, onClick: () -> Unit) {
     val bg = if (selected) {
         MaterialTheme.colorScheme.primary
     } else {
@@ -532,7 +535,9 @@ private fun BrowseModeTab(label: String, selected: Boolean, onClick: () -> Unit)
     Surface(
         color = bg,
         shape = MaterialTheme.shapes.large,
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier
+            .testTag(LunarTestTags.libraryBrowseTab(mode))
+            .clickable(onClick = onClick),
     ) {
         Text(
             text = label,
@@ -1157,6 +1162,7 @@ private fun SetlistCard(
         ),
         containerColor = MaterialTheme.colorScheme.surface,
         onClick = onOpen,
+        modifier = Modifier.testTag(LunarTestTags.setlistRow(setlist.id)),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1231,6 +1237,7 @@ private fun SongbookCard(
         ),
         containerColor = MaterialTheme.colorScheme.surface,
         onClick = onOpen,
+        modifier = Modifier.testTag(LunarTestTags.songbookRow(songbook.id)),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1396,6 +1403,7 @@ private fun LibrarySearchField(
         onValueChange = onValueChange,
         modifier = modifier
             .onFocusChanged { onFocusChanged(it.hasFocus) }
+            .testTag(LunarTestTags.LIBRARY_SEARCH)
             .semantics {
                 contentDescription = "Library search"
             },
@@ -2203,6 +2211,7 @@ private fun LibraryCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .testTag(LunarTestTags.libraryRow(item.id))
             .clickable { appState.openPreview(item) },
         shape = MaterialTheme.shapes.large,
         colors = androidx.compose.material3.CardDefaults.cardColors(
@@ -3615,10 +3624,11 @@ private fun SetlistCardFrame(
     accentBrush: Brush,
     containerColor: Color,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = MaterialTheme.shapes.large,

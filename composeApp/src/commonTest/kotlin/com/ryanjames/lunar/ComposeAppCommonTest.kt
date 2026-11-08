@@ -13,7 +13,7 @@ import com.ryanjames.lunar.platform.PdfPageRenderer
 import com.ryanjames.lunar.platform.RenderedPdfPage
 import com.ryanjames.lunar.platform.SelectedCoverImage
 import com.ryanjames.lunar.platform.SongbookBuildResult
-import com.ryanjames.lunar.settings.AppColorTheme
+import com.ryanjames.lunar.settings.AppSkin
 import com.ryanjames.lunar.settings.AutoRefreshSchedule
 import com.ryanjames.lunar.settings.InMemoryAppSettingsStore
 import com.ryanjames.lunar.settings.ViewerShortcutAction
@@ -46,19 +46,19 @@ class ComposeAppCommonTest {
 
         store.updateSettings {
             it.copy(
-                theme = AppColorTheme.FOREST,
+                skin = AppSkin.MOONLIGHT,
                 autoRefreshSchedule = AutoRefreshSchedule.HOURLY,
                 cloudConnectTimeoutSeconds = 30,
             )
         }
 
-        assertEquals(AppColorTheme.FOREST, store.settings.value.theme)
+        assertEquals(AppSkin.MOONLIGHT, store.settings.value.skin)
         assertEquals(AutoRefreshSchedule.HOURLY, store.settings.value.autoRefreshSchedule)
         assertEquals(30, store.settings.value.cloudConnectTimeoutSeconds)
 
         store.reset()
 
-        assertEquals(AppColorTheme.OCEAN, store.settings.value.theme)
+        assertEquals(AppSkin.PAPER, store.settings.value.resolvedSkin)
         assertEquals(AutoRefreshSchedule.MINUTES_15, store.settings.value.autoRefreshSchedule)
         assertEquals(15, store.settings.value.cloudConnectTimeoutSeconds)
     }

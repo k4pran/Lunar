@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 internal fun LunarTooltip(
     text: String,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val state = rememberTooltipState()
@@ -28,6 +29,7 @@ internal fun LunarTooltip(
         },
         state = state,
         modifier = modifier,
+        enableUserInput = enabled,
         content = content,
     )
 }
