@@ -17,7 +17,7 @@ import com.ryanjames.lunar.library.model.SortDirection
 import com.ryanjames.lunar.platform.PdfDocumentInfo
 import com.ryanjames.lunar.platform.PdfPageRenderer
 import com.ryanjames.lunar.platform.RenderedPdfPage
-import com.ryanjames.lunar.settings.AppColorTheme
+import com.ryanjames.lunar.settings.AppSkin
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.LibraryLayoutPreference
 import com.ryanjames.lunar.ui.LibraryLayoutMode
@@ -170,7 +170,7 @@ class LibraryGalleryUiTest {
             runtime = runtime,
         )
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 LibraryScreen(
                     runtime = runtime,
                     snapshot = runtime.repository.library.value,
