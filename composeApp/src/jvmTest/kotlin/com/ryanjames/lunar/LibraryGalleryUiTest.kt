@@ -6,7 +6,12 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import com.ryanjames.lunar.library.model.LibrarySortOption
 import com.ryanjames.lunar.library.model.SortDirection
 import com.ryanjames.lunar.platform.PdfDocumentInfo
@@ -89,6 +94,49 @@ class LibraryGalleryUiTest {
             rule.runOnIdle {
                 assertEquals(ViewerTarget.Score("nocturne"), appState.fullscreenTarget)
             }
+        }
+    }
+
+    @Test
+    fun tappingSelectionCheckboxesAddsScoresToANewSetlist() {
+        runBlocking {
+            val (runtime, appState) = setUpLibrary(layout = LibraryLayoutPreference.GRID)
+
+            rule.onNodeWithContentDescription("Select Gavotte").assertIsOff()
+            rule.onNodeWithContentDescription("Select Gavotte").performClick()
+            rule.onNodeWithContentDescription("Select Nocturne").performClick()
+            rule.onNodeWithContentDescription("Select Gavotte").assertIsOn()
+            rule.runOnIdle {
+                assertEquals(setOf("gavotte", "nocturne"), appState.selectedScoreIds)
+            }
+
+            rule.onNodeWithText("Add to setlist").performClick()
+            rule.onNodeWithText("Add 2 scores to a setlist").assertIsDisplayed()
+            rule.onNodeWithText("New setlist name").performTextInput("Recital run")
+            rule.onNodeWithText("Save").performClick()
+
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.library.value.setlists.any { it.name == "Recital run" }
+            }
+            val setlist = runtime.repository.library.value.setlists.single { it.name == "Recital run" }
+            assertEquals(setOf("gavotte", "nocturne"), setlist.itemIds.toSet())
+        }
+    }
+
+    @Test
+    fun longPressingACardTogglesItsSelection() {
+        runBlocking {
+            val (_, appState) = setUpLibrary(layout = LibraryLayoutPreference.GRID)
+
+            rule.onNodeWithContentDescription("Nocturne").performTouchInput { longClick() }
+            rule.runOnIdle {
+                assertEquals(setOf("nocturne"), appState.selectedScoreIds)
+                assertEquals("nocturne", appState.focusedScoreId)
+            }
+            rule.onNodeWithContentDescription("Select Nocturne").assertIsOn()
+
+            rule.onNodeWithContentDescription("Nocturne").performTouchInput { longClick() }
+            rule.runOnIdle { assertTrue(appState.selectedScoreIds.isEmpty()) }
         }
     }
 
