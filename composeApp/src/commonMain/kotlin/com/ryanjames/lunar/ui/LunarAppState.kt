@@ -14,6 +14,7 @@ import com.ryanjames.lunar.library.data.LocalFolderSource
 import com.ryanjames.lunar.library.data.SheetMusicMetadataInput
 import com.ryanjames.lunar.library.data.SkippedImportDocument
 import com.ryanjames.lunar.library.data.generateSourceId
+import com.ryanjames.lunar.library.model.HiddenScoreFilter
 import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.library.model.LibrarySetlist
 import com.ryanjames.lunar.library.model.LibraryQuery
@@ -22,6 +23,7 @@ import com.ryanjames.lunar.library.model.ScoreMetadata
 import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.library.model.SortDirection
 import com.ryanjames.lunar.library.model.ViewerSupportFilter
+import com.ryanjames.lunar.library.model.applyLibraryQuery
 import com.ryanjames.lunar.platform.ImportRequestResult
 import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.SelectedCoverImage
@@ -1151,7 +1153,21 @@ class LunarAppState(
         }
         fullscreenTarget = null
         viewerStartPage = null
+        if (selectedSection == AppSection.LIBRARY) {
+            revealScoreThroughFilters(itemId)
+        }
         focusScore(itemId)
+    }
+
+    /** Clears filters that would hide [itemId] so its detail panel and anchored pickers can render. */
+    private fun revealScoreThroughFilters(itemId: String) {
+        val item = runtime.repository.getItem(itemId) ?: return
+        val itemQuery = query.copy(
+            hiddenFilter = if (item.isHidden) HiddenScoreFilter.HIDDEN else HiddenScoreFilter.VISIBLE,
+        )
+        if (listOf(item).applyLibraryQuery(itemQuery).isEmpty()) {
+            clearFilters()
+        }
     }
 
     private fun dismissFocusedScoreExtras() {
