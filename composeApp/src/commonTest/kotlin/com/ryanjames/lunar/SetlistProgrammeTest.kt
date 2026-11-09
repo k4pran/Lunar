@@ -55,7 +55,7 @@ class SetlistProgrammeTest {
     fun setlistSummaryCountsPiecesAndKnownPages() {
         assertEquals("0 pieces", setlistSummaryLabel(emptyList()))
         assertEquals(
-            "2 pieces · 6 pages",
+            "2 pieces \u00B7 6 pages",
             setlistSummaryLabel(
                 listOf(
                     testSheetMusicItem(id = "a", pageCount = 2),
@@ -64,7 +64,7 @@ class SetlistProgrammeTest {
             ),
         )
         assertEquals(
-            "2 pieces · 2+ pages",
+            "2 pieces \u00B7 2+ pages",
             setlistSummaryLabel(
                 listOf(
                     testSheetMusicItem(id = "a", pageCount = 2),

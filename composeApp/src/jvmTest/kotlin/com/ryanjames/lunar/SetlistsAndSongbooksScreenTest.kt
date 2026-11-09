@@ -74,7 +74,7 @@ class SetlistsAndSongbooksScreenTest {
             rule.onNodeWithText("Morning rehearsal").performClick()
             rule.onNodeWithText("Start the set").assertIsDisplayed()
             assertTrue(
-                rule.onAllNodesWithText("3 pieces · 6+ pages").fetchSemanticsNodes().isNotEmpty()
+                rule.onAllNodesWithText("3 pieces \u00B7 6+ pages").fetchSemanticsNodes().isNotEmpty()
             )
 
             // Drag Moon River down by its handle (the row merges semantics, so look in the unmerged tree).

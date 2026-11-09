@@ -46,12 +46,12 @@ internal fun <T> List<T>.moved(fromIndex: Int, toIndex: Int): List<T> {
     return toMutableList().apply { add(toIndex, removeAt(fromIndex)) }
 }
 
-/** "3 pieces · 12 pages"; pages read "12+ pages" when some counts are unknown. */
+/** "3 pieces / 12 pages" (middle dot); pages read "12+ pages" when some counts are unknown. */
 internal fun setlistSummaryLabel(items: List<SheetMusicItem>): String {
     val pieces = "${items.size} piece${if (items.size == 1) "" else "s"}"
     val knownPages = items.mapNotNull { it.pageCount }
     if (knownPages.isEmpty()) return pieces
     val pages = knownPages.sum()
     val suffix = if (knownPages.size < items.size) "+" else ""
-    return "$pieces · $pages$suffix page${if (pages == 1 && suffix.isEmpty()) "" else "s"}"
+    return "$pieces \u00B7 $pages$suffix page${if (pages == 1 && suffix.isEmpty()) "" else "s"}"
 }

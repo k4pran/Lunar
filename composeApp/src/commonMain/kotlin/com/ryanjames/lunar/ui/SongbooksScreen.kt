@@ -243,7 +243,7 @@ private fun SongbookDetailPane(
                         .padding(vertical = 4.dp),
                     trailing = {
                         Text(
-                            text = entry.startPage?.toString() ?: "—",
+                            text = entry.startPage?.toString() ?: "\u2014",
                             style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Serif),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.semantics {
