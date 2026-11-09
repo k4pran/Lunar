@@ -54,6 +54,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
@@ -1161,7 +1162,7 @@ class ScreenSmokeTest {
                 }
             }
 
-            rule.onNodeWithTag(LunarTestTags.SETTINGS_APPEARANCE_PANEL).assertIsDisplayed()
+            rule.onNodeWithTag(LunarTestTags.SETTINGS_APPEARANCE_PANEL).performScrollTo().assertIsDisplayed()
             rule.onNodeWithTag(LunarTestTags.skinOption(AppSkin.PAPER)).assertIsSelected()
             rule.onNodeWithTag(LunarTestTags.skinOption(AppSkin.MOONLIGHT)).assertIsNotSelected()
 

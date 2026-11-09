@@ -694,6 +694,10 @@ class LunarAppState(
         bannerMessage = "Viewer keybindings reset to defaults."
     }
 
+    fun updateViewerChromeAutoHideSeconds(seconds: Int?) {
+        updateStoredSettings { settings -> settings.copy(viewerChromeAutoHideSeconds = seconds) }
+    }
+
     fun updateSkin(skin: AppSkin) {
         updateStoredSettings { settings -> settings.copy(skin = skin) }
     }
