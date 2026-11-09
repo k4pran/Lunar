@@ -596,9 +596,8 @@ class LunarAppState(
     }
 
     fun startEditing(itemId: String) {
-        if (focusedScoreId != itemId) {
-            focusScore(itemId)
-        }
+        // Always route through focusScore so an active multi-selection (which hides the detail panel) is cleared.
+        focusScore(itemId)
         dismissScoreInfo()
         editingItemId = itemId
     }
@@ -613,9 +612,7 @@ class LunarAppState(
             return
         }
 
-        if (focusedScoreId != itemId) {
-            focusScore(itemId)
-        }
+        focusScore(itemId)
         editingItemId = null
         infoItemId = itemId
         infoMetadata = null
