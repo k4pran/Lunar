@@ -1,5 +1,6 @@
 package com.ryanjames.lunar.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,11 +19,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -44,8 +42,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -58,6 +56,13 @@ import com.ryanjames.lunar.platform.LilyPondLiveRenderResult
 import com.ryanjames.lunar.platform.LilyPondSourceSnapshot
 import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.RenderedPdfPage
+import com.ryanjames.lunar.ui.design.LunarButton
+import com.ryanjames.lunar.ui.design.LunarButtonStyle
+import com.ryanjames.lunar.ui.design.LunarIcon
+import com.ryanjames.lunar.ui.design.LunarIconKind
+import com.ryanjames.lunar.ui.design.LunarTestTags
+import com.ryanjames.lunar.ui.design.SmallCapsLabel
+import com.ryanjames.lunar.ui.design.lunarTokens
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.time.Clock
@@ -138,7 +143,6 @@ fun ComposeScreen(
     var compositionStatus by remember { mutableStateOf<String?>(null) }
     var compositionError by remember { mutableStateOf<String?>(null) }
 
-    val themePalette = lunarThemePalette()
     val previewText = when {
         autoRefresh -> sourceText
         else -> manualPreviewText
@@ -423,7 +427,7 @@ fun ComposeScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+            .background(lunarTokens().colors.bg),
     ) {
         ComposeScreenHeader(
             selectedMode = notationMode,
@@ -447,7 +451,7 @@ fun ComposeScreen(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .background(themePalette.viewerBackdrop),
+                .background(lunarTokens().colors.bg),
         ) {
             val useStackedLayout = maxWidth < 960.dp
             val expandedSidebarWidth = if (maxWidth < 720.dp) 184.dp else 252.dp
@@ -512,79 +516,78 @@ private fun ComposeScreenHeader(
     onNew: () -> Unit,
     onModeSelected: (ComposeNotationMode) -> Unit,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-        tonalElevation = 4.dp,
-    ) {
+    val tokens = lunarTokens()
+    Column(modifier = Modifier.background(tokens.colors.panel)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(horizontal = tokens.spacing.xl, vertical = tokens.spacing.md),
+            horizontalArrangement = Arrangement.spacedBy(tokens.spacing.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = "Compose",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.SemiBold,
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
+                style = tokens.typography.heading,
+                color = tokens.colors.ink,
             )
             ComposeNotationMode.entries.forEach { mode ->
-                FilterChip(
-                    selected = selectedMode == mode,
-                    onClick = { onModeSelected(mode) },
-                    label = { Text(mode.label) },
+                Text(
+                    text = mode.label,
+                    style = tokens.typography.bodySmall,
+                    color = if (selectedMode == mode) tokens.colors.ink else tokens.colors.muted,
+                    modifier = Modifier
+                        .clickable { onModeSelected(mode) }
+                        .padding(horizontal = tokens.spacing.xs, vertical = tokens.spacing.xxs),
                 )
-            }
-            TextButton(
-                onClick = onClear,
-                modifier = Modifier.semantics {
-                    contentDescription = "Clear LilyPond source"
-                },
-            ) {
-                Text("Clear")
-            }
-            TextButton(
-                onClick = onLoadTemplate,
-                modifier = Modifier.semantics {
-                    contentDescription = "Load LilyPond template"
-                },
-            ) {
-                Text("Load template")
-            }
-            OutlinedButton(
-                onClick = onNew,
-                enabled = !isSaving,
-                modifier = Modifier.semantics {
-                    contentDescription = "New composition"
-                },
-            ) {
-                Text("New")
-            }
-            Button(
-                onClick = onSave,
-                enabled = !isSaving,
-                modifier = Modifier.semantics {
-                    contentDescription = "Save composition"
-                },
-            ) {
-                Text(if (isSaving) "Saving" else "Save")
             }
             statusMessage?.let { message ->
                 Text(
                     text = message,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (statusIsError) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
+                    style = tokens.typography.bodySmall,
+                    color = if (statusIsError) tokens.colors.danger else tokens.colors.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
+            Box(modifier = Modifier.width(tokens.spacing.lg))
+            LunarButton(
+                text = "Clear",
+                onClick = onClear,
+                style = LunarButtonStyle.TEXT,
+                modifier = Modifier.semantics {
+                    contentDescription = "Clear LilyPond source"
+                },
+            )
+            LunarButton(
+                text = "Load template",
+                onClick = onLoadTemplate,
+                style = LunarButtonStyle.TEXT,
+                modifier = Modifier.semantics {
+                    contentDescription = "Load LilyPond template"
+                },
+            )
+            LunarButton(
+                text = "New draft",
+                onClick = onNew,
+                style = LunarButtonStyle.SECONDARY,
+                enabled = !isSaving,
+                modifier = Modifier.semantics {
+                    contentDescription = "New composition"
+                },
+            )
+            LunarButton(
+                text = if (isSaving) "Saving..." else "Save to library",
+                onClick = onSave,
+                enabled = !isSaving,
+                modifier = Modifier
+                    .testTag(LunarTestTags.COMPOSE_SAVE_TO_LIBRARY)
+                    .semantics {
+                        contentDescription = "Save composition"
+                    },
+            )
         }
+        HorizontalDivider(color = tokens.colors.rule)
     }
 }
 
@@ -598,79 +601,86 @@ private fun CompositionDraftSidebar(
     onSelectDraft: (CompositionDraft) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val tokens = lunarTokens()
     val width = if (expanded) expandedWidth else 56.dp
-    Surface(
-        modifier = modifier.width(width),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-        tonalElevation = 5.dp,
-    ) {
-        if (!expanded) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(vertical = 10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                TextButton(
-                    onClick = onToggleExpanded,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .semantics {
-                            contentDescription = "Expand composition list"
-                        },
-                ) {
-                    Text(">")
-                }
-                Text(
-                    text = drafts.size.toString(),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            return@Surface
-        }
-
-        Column(
+    Row(modifier = modifier.width(width)) {
+        Box(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .weight(1f)
+                .fillMaxHeight()
+                .background(tokens.colors.panel),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Compositions",
-                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Serif),
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                TextButton(
-                    onClick = onToggleExpanded,
-                    modifier = Modifier.semantics {
-                        contentDescription = "Collapse composition list"
-                    },
+            if (!expanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(vertical = tokens.spacing.md),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(tokens.spacing.sm),
                 ) {
-                    Text("<")
-                }
-            }
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                drafts.forEach { draft ->
-                    CompositionDraftRow(
-                        draft = draft,
-                        selected = draft.id == selectedDraftId,
-                        onClick = { onSelectDraft(draft) },
+                    TextButton(
+                        onClick = onToggleExpanded,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .semantics {
+                                contentDescription = "Expand composition list"
+                            },
+                    ) {
+                        LunarIcon(kind = LunarIconKind.CHEVRON_RIGHT, contentDescription = null, tint = tokens.colors.ink2)
+                    }
+                    Text(
+                        text = drafts.size.toString(),
+                        style = tokens.typography.bodySmall,
+                        color = tokens.colors.muted,
                     )
                 }
+                return@Box
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(tokens.spacing.md),
+                verticalArrangement = Arrangement.spacedBy(tokens.spacing.sm),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SmallCapsLabel(text = "Drafts")
+                    TextButton(
+                        onClick = onToggleExpanded,
+                        modifier = Modifier.semantics {
+                            contentDescription = "Collapse composition list"
+                        },
+                    ) {
+                        LunarIcon(kind = LunarIconKind.CHEVRON_LEFT, contentDescription = null, tint = tokens.colors.ink2)
+                    }
+                }
+                HorizontalDivider(color = tokens.colors.rule)
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    drafts.forEach { draft ->
+                        CompositionDraftRow(
+                            draft = draft,
+                            selected = draft.id == selectedDraftId,
+                            onClick = { onSelectDraft(draft) },
+                        )
+                        HorizontalDivider(color = tokens.colors.rule)
+                    }
+                }
             }
         }
+        Box(
+            modifier = Modifier
+                .width(1.dp)
+                .fillMaxHeight()
+                .background(tokens.colors.rule),
+        )
     }
 }
 
@@ -680,48 +690,33 @@ private fun CompositionDraftRow(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    val tokens = lunarTokens()
     val title = draft.displayTitle()
-    Surface(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
+            .background(if (selected) tokens.colors.selection else tokens.colors.panel)
             .clickable(onClick = onClick)
             .semantics {
                 contentDescription = "Open composition $title"
-            },
-        color = if (selected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.62f)
-        },
-        shape = MaterialTheme.shapes.medium,
+            }
+            .padding(horizontal = tokens.spacing.sm, vertical = tokens.spacing.sm),
+        verticalArrangement = Arrangement.spacedBy(tokens.spacing.xxs),
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.labelLarge,
-                color = if (selected) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = draft.composer.ifBlank { "Composer needed" },
-                style = MaterialTheme.typography.labelSmall,
-                color = if (selected) {
-                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f)
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        Text(
+            text = title,
+            style = tokens.typography.body,
+            color = tokens.colors.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = draft.composer.ifBlank { "Composer needed" },
+            style = tokens.typography.subtitle,
+            color = tokens.colors.muted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -839,28 +834,25 @@ private fun FreeformSourcePane(
     onRefreshPreview: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val tokens = lunarTokens()
     Surface(
-        modifier = modifier.padding(12.dp),
-        color = MaterialTheme.colorScheme.surface,
-        shape = MaterialTheme.shapes.large,
-        tonalElevation = 6.dp,
+        modifier = modifier.padding(tokens.spacing.md),
+        color = tokens.colors.panel,
+        shape = tokens.shapes.large,
+        border = BorderStroke(1.dp, tokens.colors.rule),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(tokens.spacing.md),
+            verticalArrangement = Arrangement.spacedBy(tokens.spacing.sm),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "${mode.label} source",
-                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Serif),
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+                SmallCapsLabel(text = "${mode.label} source")
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -868,8 +860,8 @@ private fun FreeformSourcePane(
                 ) {
                     Text(
                         text = "Auto refresh",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = tokens.typography.bodySmall,
+                        color = tokens.colors.muted,
                     )
                     Switch(
                         checked = autoRefresh,
@@ -878,15 +870,15 @@ private fun FreeformSourcePane(
                             contentDescription = "Toggle compose auto refresh"
                         },
                     )
-                    TextButton(
+                    LunarButton(
+                        text = "Refresh",
                         onClick = onRefreshPreview,
+                        style = LunarButtonStyle.TEXT,
                         enabled = refreshPending,
                         modifier = Modifier.semantics {
                             contentDescription = "Refresh composition preview"
                         },
-                    ) {
-                        Text("Refresh")
-                    }
+                    )
                 }
             }
             Column(
@@ -919,7 +911,7 @@ private fun FreeformSourcePane(
             OutlinedTextField(
                 value = sourceText,
                 onValueChange = onSourceTextChange,
-                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                textStyle = tokens.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 modifier = Modifier
                     .fillMaxSize()
                     .semantics {
@@ -947,24 +939,23 @@ private fun CompositionPreviewPane(
     onNextPage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val tokens = lunarTokens()
     Surface(
-        modifier = modifier.padding(12.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-        shape = MaterialTheme.shapes.large,
-        tonalElevation = 6.dp,
+        modifier = modifier.padding(tokens.spacing.md),
+        color = tokens.colors.panel,
+        shape = tokens.shapes.large,
+        border = BorderStroke(1.dp, tokens.colors.rule),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    .padding(horizontal = tokens.spacing.md, vertical = tokens.spacing.sm),
+                horizontalArrangement = Arrangement.spacedBy(tokens.spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
+                SmallCapsLabel(
                     text = "${mode.label} preview",
-                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Serif),
-                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
                 )
                 Text(
@@ -974,26 +965,26 @@ private fun CompositionPreviewPane(
                         renderError == null && renderedPages.isNotEmpty() -> "Ready"
                         else -> "Preview"
                     },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = tokens.typography.bodySmall,
+                    color = tokens.colors.muted,
                 )
-                TextButton(
+                LunarButton(
+                    text = "Prev",
                     onClick = onPreviousPage,
+                    style = LunarButtonStyle.TEXT,
                     enabled = canGoPrevious,
-                ) {
-                    Text("Prev")
-                }
+                )
                 Text(
                     text = buildComposePageLabel(currentPage, pageCount),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = tokens.typography.bodySmall,
+                    color = tokens.colors.muted,
                 )
-                TextButton(
+                LunarButton(
+                    text = "Next",
                     onClick = onNextPage,
+                    style = LunarButtonStyle.TEXT,
                     enabled = canGoNext,
-                ) {
-                    Text("Next")
-                }
+                )
             }
             Box(
                 modifier = Modifier
@@ -1003,7 +994,7 @@ private fun CompositionPreviewPane(
                 contentAlignment = Alignment.Center,
             ) {
                 when {
-                    isBusy -> CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    isBusy -> CircularProgressIndicator(color = tokens.colors.accent)
                     renderedPages.isNotEmpty() -> CompositionPdfCanvas(renderedPages)
                     else -> CompositionMessage(
                         title = if (renderError != null) "Render failed" else "Preview unavailable",
@@ -1077,15 +1068,12 @@ private fun CompositionMessage(
     ) {
         Text(
             text = title,
-            style = MaterialTheme.typography.headlineSmall.copy(
-                fontFamily = FontFamily.Serif,
-                fontWeight = FontWeight.SemiBold,
-            ),
+            style = lunarTokens().typography.heading,
             color = lunarThemePalette().viewerForeground,
         )
         Text(
             text = body,
-            style = MaterialTheme.typography.bodyLarge,
+            style = lunarTokens().typography.body,
             color = lunarThemePalette().viewerForeground.copy(alpha = 0.7f),
         )
     }

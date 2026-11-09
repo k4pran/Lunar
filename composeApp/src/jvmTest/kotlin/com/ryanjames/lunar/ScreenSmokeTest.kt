@@ -38,6 +38,7 @@ import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
@@ -56,6 +57,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
@@ -63,22 +65,27 @@ import androidx.compose.ui.test.runDesktopComposeUiTest
 import com.ryanjames.lunar.composition.InMemoryCompositionDraftStore
 import com.ryanjames.lunar.library.data.CloudGoogleDriveSource
 import com.ryanjames.lunar.library.data.CloudPathStrategy
+import com.ryanjames.lunar.library.data.CloudSupabaseSource
 import com.ryanjames.lunar.library.data.GoogleDriveImportRoot
 import com.ryanjames.lunar.library.data.GoogleDriveStorageSettings
 import com.ryanjames.lunar.library.data.LibrarySnapshot
 import com.ryanjames.lunar.library.data.SheetMusicRepository
+import com.ryanjames.lunar.library.data.SupabasePublicStorageSettings
+import com.ryanjames.lunar.library.data.SyncProviderIds
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.library.model.ScoreMetadata
 import com.ryanjames.lunar.library.model.ScoreMetadataComposer
 import com.ryanjames.lunar.library.model.ScoreMetadataSource
 import com.ryanjames.lunar.platform.CompositionPdfImportRequest
 import com.ryanjames.lunar.platform.CompositionPdfImporter
+import com.ryanjames.lunar.platform.ImportRequestResult
 import com.ryanjames.lunar.platform.ImporterState
 import com.ryanjames.lunar.platform.LibraryCacheSnapshot
 import com.ryanjames.lunar.platform.LilyPondLiveRenderResult
 import com.ryanjames.lunar.platform.LilyPondLiveRenderer
 import com.ryanjames.lunar.platform.LilyPondSourceSnapshot
 import com.ryanjames.lunar.platform.PdfDocumentInfo
+import com.ryanjames.lunar.platform.PdfImporter
 import com.ryanjames.lunar.platform.PdfPageRenderer
 import com.ryanjames.lunar.platform.RenderedPdfPage
 import com.ryanjames.lunar.settings.AppSettings
@@ -87,6 +94,7 @@ import com.ryanjames.lunar.settings.AppSkin
 import com.ryanjames.lunar.settings.JsonAppSettingsStore
 import com.ryanjames.lunar.settings.ViewerKeybindings
 import com.ryanjames.lunar.sync.CloudSyncState
+import com.ryanjames.lunar.sync.SourceSyncStatus
 import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.ComposeScreen
 import com.ryanjames.lunar.ui.ImportScreen
@@ -1080,7 +1088,7 @@ class ScreenSmokeTest {
     }
 
     @Test
-    fun importScreenShowsSourceActionsAndCacheSummary() {
+    fun importScreenShowsSourceRowsAndCacheSidePanel() {
         runBlocking {
             val runtime = createTestPlatformRuntime(
                 initialSources = listOf(
@@ -1121,16 +1129,121 @@ class ScreenSmokeTest {
             }
 
             rule.onNodeWithText("Sources").assertIsDisplayed()
-            rule.onDisplayedNodeWithText("Add local source").assertIsDisplayed()
-            rule.onDisplayedNodeWithText("Add cloud source").assertIsDisplayed()
-            rule.onDisplayedNodeWithText("Add local source").performClick()
-            rule.onNodeWithText("Choose how to import local PDFs, LilyPond files, MuseScore files, or image files into your library. Matching .json metadata sidecars are imported automatically.").assertIsDisplayed()
+            rule.onNodeWithTag(LunarTestTags.sourceRow("source_local_files")).assertIsDisplayed()
+            rule.onNode(hasText("Desktop folder") and hasAnyAncestor(hasTestTag(LunarTestTags.sourceRow("source_local_files"))))
+                .assertIsDisplayed()
+            rule.onNodeWithText("Individual files on this device").assertIsDisplayed()
+
+            rule.onNodeWithTag(LunarTestTags.SOURCES_ADD_MENU).performClick()
             rule.onNodeWithText("Pick PDFs, LY/ILY/LYI LilyPond files, MSCZ/MSCX MuseScore files, or PNG/JPG/JPEG images. Matching .json sidecars are detected automatically.").assertIsDisplayed()
+            rule.onNodeWithText("Folder import not supported on this platform").assertIsDisplayed()
+
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithText("On-device cache", ignoreCase = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            rule.onNodeWithText("Library metadata cached locally").assertExists()
+            rule.onNodeWithText("Copy cache details").assertExists()
+        }
+    }
+
+    @Test
+    fun addSourceMenuRoutesLocalTypesToPickerAndCloudTypesToForm() {
+        runBlocking {
+            val importer = RecordingPdfImporter()
+            val baseRuntime = createTestPlatformRuntime()
+            val runtime = baseRuntime.copy(
+                importer = importer,
+                capabilities = baseRuntime.capabilities.copy(folderImportSupported = true),
+            )
+            val appState = createTestLunarAppState(
+                scope = backgroundScope(),
+                runtime = runtime,
+            )
+
+            rule.setContent {
+                LunarTheme(skin = AppSkin.PAPER) {
+                    ImportScreen(
+                        runtime = runtime,
+                        importerState = ImporterState(),
+                        syncState = CloudSyncState(),
+                        settings = runtime.settingsStore.settings.value,
+                        libraryCount = 0,
+                        appState = appState,
+                    )
+                }
+            }
+
+            rule.onNodeWithTag(LunarTestTags.SOURCES_ADD_MENU).performClick()
+            rule.onNodeWithTag(LunarTestTags.addSourceOption("files")).performClick()
+            rule.waitUntil(timeoutMillis = 5_000) { importer.fileRequests == 1 && !appState.importInProgress }
+            assertEquals(0, importer.folderRequests)
+            assertTrue(rule.onAllNodesWithText("Add cloud source").fetchSemanticsNodes().isEmpty())
+
+            rule.onNodeWithTag(LunarTestTags.SOURCES_ADD_MENU).performClick()
+            rule.onNodeWithTag(LunarTestTags.addSourceOption("folder")).performClick()
+            rule.waitUntil(timeoutMillis = 5_000) { importer.folderRequests == 1 && !appState.importInProgress }
+            assertEquals(1, importer.fileRequests)
+
+            rule.onNodeWithTag(LunarTestTags.SOURCES_ADD_MENU).performClick()
+            rule.onNodeWithTag(LunarTestTags.addSourceOption(SyncProviderIds.SUPABASE_PUBLIC_STORAGE)).performClick()
+            rule.onNodeWithText("Add cloud source").assertIsDisplayed()
+            rule.onNodeWithText("Project URL").assertIsDisplayed()
             rule.onNodeWithText("Cancel").performClick()
             rule.waitUntil(timeoutMillis = 5_000) {
-                rule.onAllNodesWithText("On-device cache").fetchSemanticsNodes().isNotEmpty()
+                rule.onAllNodesWithText("Add cloud source").fetchSemanticsNodes().isEmpty()
             }
-            rule.onNodeWithText("Copy cache details").assertIsDisplayed()
+
+            rule.onNodeWithTag(LunarTestTags.SOURCES_ADD_MENU).performClick()
+            rule.onNodeWithTag(LunarTestTags.addSourceOption(SyncProviderIds.GOOGLE_DRIVE)).performClick()
+            rule.onNodeWithText("Add cloud source").assertIsDisplayed()
+            rule.onNodeWithText("OAuth client ID").assertIsDisplayed()
+            assertEquals(1, importer.fileRequests)
+            assertEquals(1, importer.folderRequests)
+        }
+    }
+
+    @Test
+    fun failingSourceShowsItsErrorOnItsOwnRow() {
+        runBlocking {
+            val healthy = testSupabaseSource("healthy")
+            val broken = testSupabaseSource("broken")
+            val runtime = createTestPlatformRuntime(initialSources = listOf(healthy, broken))
+            val appState = createTestLunarAppState(
+                scope = backgroundScope(),
+                runtime = runtime,
+            )
+            val now = System.currentTimeMillis()
+            val syncState = CloudSyncState(
+                lastMessage = "Synced 0 scores with 1 issue.",
+                syncErrors = listOf("${broken.label}: HTTP 503 from Supabase"),
+                sourceStatuses = mapOf(
+                    healthy.id to SourceSyncStatus(lastSyncedEpochMillis = now - 2 * 60_000L),
+                    broken.id to SourceSyncStatus(lastError = "HTTP 503 from Supabase"),
+                ),
+            )
+
+            rule.setContent {
+                LunarTheme(skin = AppSkin.PAPER) {
+                    ImportScreen(
+                        runtime = runtime,
+                        importerState = ImporterState(),
+                        syncState = syncState,
+                        settings = runtime.settingsStore.settings.value,
+                        libraryCount = 0,
+                        appState = appState,
+                    )
+                }
+            }
+
+            rule.onNodeWithTag(LunarTestTags.sourceStatus(broken.id)).assertTextEquals("HTTP 503 from Supabase")
+            rule.onNodeWithTag(LunarTestTags.sourceStatus(healthy.id)).assertTextEquals("Synced 2 minutes ago")
+            assertTrue(
+                rule.onAllNodes(
+                    hasText("HTTP 503 from Supabase") and
+                        hasAnyAncestor(hasTestTag(LunarTestTags.sourceRow(healthy.id)))
+                ).fetchSemanticsNodes().isEmpty(),
+                "The healthy source should not show the other source's error.",
+            )
         }
     }
 
@@ -1180,8 +1293,27 @@ class ScreenSmokeTest {
             reloaded.initialize()
             assertEquals(AppSkin.MOONLIGHT, reloaded.settings.value.skin)
 
-            rule.onNodeWithText("Keybindings").performClick()
-            rule.onNodeWithText("Viewer keybindings").assertIsDisplayed()
+            rule.onNode(settingsOption("start_sidebar_collapsed", "On")).performScrollTo().performClick()
+            rule.onNode(settingsOption("viewer_toolbar_auto_hide", "Never")).performScrollTo().performClick()
+            rule.onNode(settingsOption("refresh_on_launch", "Off")).performScrollTo().performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                val current = runtime.settingsStore.settings.value
+                current.sidebarCollapsed && current.viewerChromeAutoHideSeconds == null && !current.refreshOnLaunch
+            }
+            rule.onNode(settingsOption("start_sidebar_collapsed", "On")).assertIsSelected()
+            rule.onNode(settingsOption("viewer_toolbar_auto_hide", "Never")).assertIsSelected()
+            val reloadedRows = JsonAppSettingsStore(
+                fileSystem = FileSystem.SYSTEM,
+                settingsPath = settingsPath,
+            )
+            reloadedRows.initialize()
+            assertTrue(reloadedRows.settings.value.sidebarCollapsed)
+            assertEquals(null, reloadedRows.settings.value.viewerChromeAutoHideSeconds)
+            assertEquals(false, reloadedRows.settings.value.refreshOnLaunch)
+            assertTrue(rule.onAllNodesWithText("Save").fetchSemanticsNodes().isEmpty())
+
+            rule.onNodeWithTag(LunarTestTags.settingsTab("KEYBINDINGS")).performScrollTo().performClick()
+            rule.onNodeWithText("Viewer keybindings", ignoreCase = true).assertIsDisplayed()
             rule.onNodeWithText("Toggle fullscreen").assertIsDisplayed()
             rule.onNodeWithText("F11").assertIsDisplayed()
 
@@ -1499,6 +1631,40 @@ private fun backgroundScope(): CoroutineScope = CoroutineScope(SupervisorJob() +
 
 private fun ComposeContentTestRule.onDisplayedNodeWithText(text: String) =
     onNode(hasText(text) and !hasAnyAncestor(isPopup()))
+
+private fun settingsOption(rowKey: String, option: String) =
+    hasText(option) and hasAnyAncestor(hasTestTag(LunarTestTags.settingsRow(rowKey)))
+
+private fun testSupabaseSource(bucket: String) = CloudSupabaseSource(
+    id = "supabase_$bucket",
+    label = "Supabase $bucket",
+    addedAtEpochMillis = 1L,
+    settings = SupabasePublicStorageSettings(
+        projectUrl = "https://example.supabase.co",
+        bucketName = bucket,
+    ),
+)
+
+/** Counts picker requests; returns nothing so no files are imported. */
+private class RecordingPdfImporter : PdfImporter {
+    @Volatile
+    var fileRequests = 0
+
+    @Volatile
+    var folderRequests = 0
+
+    override val state: StateFlow<ImporterState> = MutableStateFlow(ImporterState()).asStateFlow()
+
+    override suspend fun importPdfFiles(): ImportRequestResult {
+        fileRequests += 1
+        return ImportRequestResult(documents = emptyList())
+    }
+
+    override suspend fun importPdfFolder(): ImportRequestResult {
+        folderRequests += 1
+        return ImportRequestResult(documents = emptyList())
+    }
+}
 
 private class RecordingComposeLilyPondRenderer : LilyPondLiveRenderer {
     val renderedSources = mutableListOf<LilyPondSourceSnapshot>()
