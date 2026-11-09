@@ -830,7 +830,7 @@ class LunarAppState(
     fun removeSource(sourceId: String) {
         scope.launch {
             runtime.repository.removeItemsBySource(sourceId)
-            runtime.syncManager.clearGoogleAccessToken(sourceId)
+            runtime.syncManager.forgetSource(sourceId)
             runtime.sourceRegistry.removeSource(sourceId)
             bannerMessage = "Source removed."
         }
