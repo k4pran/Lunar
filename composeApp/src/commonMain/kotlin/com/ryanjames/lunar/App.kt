@@ -27,6 +27,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -159,6 +160,10 @@ internal fun LunarApp(
     }
 
     LunarTheme(skin = appSettings.resolvedSkin) {
+        // The viewer replaces the main screens, so keep their saveable state (e.g. lazy scroll positions)
+        // while it is open and restore it on return.
+        val mainScreensStateHolder = rememberSaveableStateHolder()
+
         if (fullscreenDocument != null) {
             FullscreenViewerScreen(
                 runtime = runtime,
@@ -175,56 +180,58 @@ internal fun LunarApp(
                 viewerKeybindings = appSettings.viewerKeybindings,
             )
         } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .externalScoreDropTarget(
-                        enabled = runtime.capabilities.fileImportSupported,
-                        onDroppedPaths = appState::importDroppedPaths,
-                    ),
-            ) {
-                LunarAppShell(
-                    appState = appState,
-                    snapshot = snapshot,
-                    syncState = syncState,
-                    settings = appSettings,
-                ) { sidebarContextVisible ->
-                    Scaffold(
-                        containerColor = Color.Transparent,
-                        snackbarHost = { SnackbarHost(snackbarHostState) },
-                    ) { innerPadding ->
-                        when (appState.selectedSection) {
-                            AppSection.IMPORT -> ImportScreen(
-                                runtime = runtime,
-                                importerState = importerState,
-                                syncState = syncState,
-                                settings = appSettings,
-                                libraryCount = snapshot.items.size,
-                                appState = appState,
-                                modifier = Modifier.padding(innerPadding),
-                            )
+            mainScreensStateHolder.SaveableStateProvider(MainScreensStateKey) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .externalScoreDropTarget(
+                            enabled = runtime.capabilities.fileImportSupported,
+                            onDroppedPaths = appState::importDroppedPaths,
+                        ),
+                ) {
+                    LunarAppShell(
+                        appState = appState,
+                        snapshot = snapshot,
+                        syncState = syncState,
+                        settings = appSettings,
+                    ) { sidebarContextVisible ->
+                        Scaffold(
+                            containerColor = Color.Transparent,
+                            snackbarHost = { SnackbarHost(snackbarHostState) },
+                        ) { innerPadding ->
+                            when (appState.selectedSection) {
+                                AppSection.IMPORT -> ImportScreen(
+                                    runtime = runtime,
+                                    importerState = importerState,
+                                    syncState = syncState,
+                                    settings = appSettings,
+                                    libraryCount = snapshot.items.size,
+                                    appState = appState,
+                                    modifier = Modifier.padding(innerPadding),
+                                )
 
-                            AppSection.LIBRARY,
-                            AppSection.SETLISTS,
-                            AppSection.SONGBOOKS -> LibraryScreen(
-                                runtime = runtime,
-                                snapshot = snapshot,
-                                appState = appState,
-                                viewerKeybindings = appSettings.viewerKeybindings,
-                                showArrangementSwitcher = !sidebarContextVisible,
-                                modifier = Modifier.padding(innerPadding),
-                            )
+                                AppSection.LIBRARY,
+                                AppSection.SETLISTS,
+                                AppSection.SONGBOOKS -> LibraryScreen(
+                                    runtime = runtime,
+                                    snapshot = snapshot,
+                                    appState = appState,
+                                    viewerKeybindings = appSettings.viewerKeybindings,
+                                    showArrangementSwitcher = !sidebarContextVisible,
+                                    modifier = Modifier.padding(innerPadding),
+                                )
 
-                            AppSection.COMPOSE -> ComposeScreen(
-                                runtime = runtime,
-                                modifier = Modifier.padding(innerPadding),
-                            )
+                                AppSection.COMPOSE -> ComposeScreen(
+                                    runtime = runtime,
+                                    modifier = Modifier.padding(innerPadding),
+                                )
 
-                            AppSection.SETTINGS -> SettingsScreen(
-                                settings = appSettings,
-                                appState = appState,
-                                modifier = Modifier.padding(innerPadding),
-                            )
+                                AppSection.SETTINGS -> SettingsScreen(
+                                    settings = appSettings,
+                                    appState = appState,
+                                    modifier = Modifier.padding(innerPadding),
+                                )
+                            }
                         }
                     }
                 }
@@ -232,6 +239,8 @@ internal fun LunarApp(
         }
     }
 }
+
+private const val MainScreensStateKey = "main-screens"
 
 @Composable
 private fun StartupLoadingScreen(

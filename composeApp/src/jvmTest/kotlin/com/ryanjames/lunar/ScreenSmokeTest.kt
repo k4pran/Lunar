@@ -15,6 +15,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
@@ -34,6 +39,7 @@ import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.isPopup
@@ -671,6 +677,131 @@ class ScreenSmokeTest {
                     assertTrue(panel.top >= catalogue.bottom, "Expected the panel below the catalogue at $width px")
                 }
             }
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun detailEditorKeepsItsDraftWhenThePanelMovesAcrossTheBreakpoint() = runBlocking {
+        val item = testSheetMusicItem(id = "moon_river", title = "Moon River", composer = "Mancini")
+        val runtime = createTestPlatformRuntime(initialItems = listOf(item))
+        val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+        appState.focusScore(item.id)
+        var screenWidth by mutableStateOf(1400.dp)
+        runDesktopComposeUiTest(width = 1400, height = 900) {
+            setContent {
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(
+                        runtime = runtime,
+                        snapshot = runtime.repository.library.value,
+                        appState = appState,
+                        modifier = Modifier.width(screenWidth),
+                    )
+                }
+            }
+            fun panelIsBesideCatalogue(): Boolean {
+                val panel = onNodeWithTag(LibraryTestTags.DetailPanel).fetchSemanticsNode().boundsInRoot
+                val catalogue = onNodeWithTag(LibraryTestTags.Catalogue).fetchSemanticsNode().boundsInRoot
+                return panel.left >= catalogue.right
+            }
+
+            onNodeWithContentDescription("Edit Moon River").performScrollTo().performClick()
+            onNode(hasSetTextAction() and hasText("Mancini")).performScrollTo().performTextReplacement("Henry Mancini")
+            assertTrue(panelIsBesideCatalogue())
+
+            screenWidth = 900.dp
+            waitForIdle()
+            assertTrue(!panelIsBesideCatalogue())
+            assertEquals("moon_river", appState.editingItemId)
+            onNode(hasSetTextAction() and hasText("Henry Mancini")).assertExists()
+
+            screenWidth = 1400.dp
+            waitForIdle()
+            assertTrue(panelIsBesideCatalogue())
+            onNode(hasSetTextAction() and hasText("Henry Mancini")).performScrollTo()
+            onNodeWithText("Save").performScrollTo().performClick()
+            waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.library.value.items.single().composer == "Henry Mancini"
+            }
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun galleryKeepsItsScrollPositionAcrossAViewerVisit() {
+        runBlocking {
+            val items = (0 until 40).map { index ->
+                val label = index.toString().padStart(2, '0')
+                // Newest first under the default sort, so score_00 leads the list.
+                testSheetMusicItem(id = "score_$label", title = "Score $label", dateAddedEpochMillis = 100L - index)
+            }
+            val runtime = createTestPlatformRuntime(
+                initialItems = items,
+                initialSettings = AppSettings(
+                    defaultLibraryLayout = com.ryanjames.lunar.settings.LibraryLayoutPreference.GRID,
+                    refreshOnLaunch = false,
+                ),
+            )
+
+            rule.setContent {
+                LunarApp(runtime)
+            }
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithTag(LibraryTestTags.row("score_00")).fetchSemanticsNodes().isNotEmpty()
+            }
+
+            rule.onNode(hasScrollToIndexAction()).performScrollToIndex(30)
+            rule.onNodeWithTag(LibraryTestTags.row("score_30")).performClick()
+            rule.onNode(hasText("Open") and hasAnyAncestor(hasTestTag(LibraryTestTags.DetailPanel)))
+                .performScrollTo()
+                .performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithTag(LunarTestTags.LIBRARY_PANEL).fetchSemanticsNodes().isEmpty()
+            }
+            rule.onRoot().performKeyInput { pressKey(Key.F11) }
+
+            rule.onNodeWithTag(LibraryTestTags.row("score_30")).assertIsDisplayed()
+            assertTrue(rule.onAllNodesWithTag(LibraryTestTags.row("score_00")).fetchSemanticsNodes().isEmpty())
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun setlistKeepsItsScrollPositionAcrossAViewerVisit() {
+        runBlocking {
+            val items = (0 until 40).map { index ->
+                val label = index.toString().padStart(2, '0')
+                // Newest first under the default sort, so score_00 leads the list.
+                testSheetMusicItem(id = "score_$label", title = "Score $label", dateAddedEpochMillis = 100L - index)
+            }
+            val setlist = testLibrarySetlist(id = "set_long", name = "Long recital", itemIds = items.map { it.id })
+            val runtime = createTestPlatformRuntime(
+                initialItems = items,
+                initialSetlists = listOf(setlist),
+                initialSettings = AppSettings(refreshOnLaunch = false),
+            )
+
+            rule.setContent {
+                LunarApp(runtime)
+            }
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithTag(LunarTestTags.navigationItem(AppSection.SETLISTS)).fetchSemanticsNodes().isNotEmpty()
+            }
+            rule.onNodeWithTag(LunarTestTags.navigationItem(AppSection.SETLISTS)).performClick()
+            rule.onNodeWithTag(LunarTestTags.setlistRow("set_long")).performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithTag(LibraryTestTags.row("score_00")).fetchSemanticsNodes().isNotEmpty()
+            }
+
+            rule.onNode(hasScrollToIndexAction()).performScrollToIndex(30)
+            rule.onNodeWithTag(LibraryTestTags.row("score_30")).performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithTag(LunarTestTags.LIBRARY_PANEL).fetchSemanticsNodes().isEmpty()
+            }
+            rule.onRoot().performKeyInput { pressKey(Key.F11) }
+
+            rule.onNodeWithTag(LibraryTestTags.row("score_30")).assertIsDisplayed()
+            assertTrue(rule.onAllNodesWithTag(LibraryTestTags.row("score_00")).fetchSemanticsNodes().isEmpty())
         }
     }
 
