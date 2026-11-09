@@ -439,7 +439,7 @@ class ScreenSmokeTest {
 
             rule.setContent {
                 val snapshot by runtime.repository.library.collectAsState()
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
                 }
             }
@@ -478,7 +478,7 @@ class ScreenSmokeTest {
 
             rule.setContent {
                 val snapshot by runtime.repository.library.collectAsState()
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
                 }
             }
@@ -513,7 +513,7 @@ class ScreenSmokeTest {
 
             rule.setContent {
                 val snapshot by runtime.repository.library.collectAsState()
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
                 }
             }
@@ -554,7 +554,7 @@ class ScreenSmokeTest {
 
             rule.setContent {
                 val snapshot by runtime.repository.library.collectAsState()
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
                 }
             }
@@ -592,7 +592,7 @@ class ScreenSmokeTest {
 
             rule.setContent {
                 val snapshot by runtime.repository.library.collectAsState()
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
                 }
             }
@@ -733,7 +733,7 @@ class ScreenSmokeTest {
             appState.updateLayoutMode(com.ryanjames.lunar.ui.LibraryLayoutMode.GRID)
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     LibraryScreen(runtime = runtime, snapshot = runtime.repository.library.value, appState = appState)
                 }
             }
@@ -768,7 +768,7 @@ class ScreenSmokeTest {
             appState.updateLayoutMode(com.ryanjames.lunar.ui.LibraryLayoutMode.GRID)
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     LibraryScreen(runtime = runtime, snapshot = runtime.repository.library.value, appState = appState)
                 }
             }
@@ -814,7 +814,7 @@ class ScreenSmokeTest {
             appState.updateBrowseMode(com.ryanjames.lunar.ui.LibraryBrowseMode.BY_COLLECTION)
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     LibraryScreen(runtime = runtime, snapshot = runtime.repository.library.value, appState = appState)
                 }
             }
