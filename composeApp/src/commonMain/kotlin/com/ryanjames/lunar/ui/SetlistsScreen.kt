@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -225,6 +227,7 @@ private fun SetlistIndexPane(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ProgrammePane(
     snapshot: LibrarySnapshot,
@@ -279,9 +282,9 @@ private fun ProgrammePane(
                 )
             }
         }
-        Row(
+        FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Button(
                 onClick = { appState.startSetlist(setlistId) },
@@ -383,7 +386,9 @@ private fun ProgrammeList(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier
                                     .semantics { contentDescription = "Reorder ${item.title}" }
-                                    .pointerInput(item.id) {
+                                    // Restart when the programme or its persisted order changes so the
+                                    // gesture never captures a stale `order` state or `finishDrag`.
+                                    .pointerInput(setlistId, itemIds, item.id) {
                                         detectVerticalDragGestures(
                                             onDragStart = {
                                                 draggingId = item.id

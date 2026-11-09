@@ -1,8 +1,15 @@
 package com.ryanjames.lunar
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.width
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
@@ -110,6 +117,75 @@ class SetlistsAndSongbooksScreenTest {
                 rule.onAllNodesWithText("Next in setlist").fetchSemanticsNodes().isEmpty()
             }
             rule.onNodeWithText("Start the set").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun consecutiveProgrammeDragsPersistAgainstTheCurrentOrder() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(id = "moon_river", title = "Moon River"),
+                testSheetMusicItem(id = "clair_de_lune", title = "Clair de Lune"),
+                testSheetMusicItem(id = "autumn_leaves", title = "Autumn Leaves"),
+            )
+            val originalOrder = items.map { it.id }
+            val setlist = testLibrarySetlist(id = "set_drag", name = "Drag rehearsal", itemIds = originalOrder)
+            val runtime = createTestPlatformRuntime(initialItems = items, initialSetlists = listOf(setlist))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateBrowseMode(LibraryBrowseMode.SETLISTS)
+            appState.openSetlist(setlist.id)
+            rule.setLibraryContent(runtime, appState)
+
+            fun dragMoonRiver(stepPx: Float) {
+                rule.onNodeWithContentDescription("Reorder Moon River", useUnmergedTree = true).performMouseInput {
+                    moveTo(center)
+                    press()
+                    repeat(20) { moveBy(Offset(0f, stepPx)) }
+                    release()
+                }
+            }
+
+            dragMoonRiver(12f)
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.getSetlist(setlist.id)?.itemIds?.first() != "moon_river"
+            }
+            rule.waitForIdle()
+
+            // Dragging back to the original order must still persist: the handler has to see
+            // the reordered programme, not the order it was first composed with.
+            dragMoonRiver(-12f)
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.getSetlist(setlist.id)?.itemIds == originalOrder
+            }
+        }
+    }
+
+    @Test
+    fun programmeActionsWrapOnPhoneWidth() {
+        runBlocking {
+            val items = listOf(testSheetMusicItem(id = "moon_river", title = "Moon River"))
+            val setlist = testLibrarySetlist(
+                id = "set_narrow",
+                name = "Narrow rehearsal",
+                itemIds = items.map { it.id },
+            )
+            val runtime = createTestPlatformRuntime(initialItems = items, initialSetlists = listOf(setlist))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateBrowseMode(LibraryBrowseMode.SETLISTS)
+            appState.openSetlist(setlist.id)
+            val paneWidth = 320.dp
+            rule.setLibraryContent(runtime, appState, Modifier.width(paneWidth))
+
+            val paneRight = rule.onRoot().getUnclippedBoundsInRoot().right
+            listOf("Start the set", "Add scores", "Rename", "Delete").forEach { label ->
+                val bounds = rule.onNodeWithText(label).assertIsDisplayed().getUnclippedBoundsInRoot()
+                assertTrue(bounds.right <= paneRight, "$label overflows the pane")
+                assertTrue(bounds.width >= 40.dp, "$label is squeezed to ${bounds.width}")
+            }
+
+            rule.onNodeWithText("Delete").performClick()
+            rule.onNodeWithText("Delete setlist?").assertIsDisplayed()
         }
     }
 
@@ -229,15 +305,21 @@ class SetlistsAndSongbooksScreenTest {
     }
 }
 
-private fun ComposeContentTestRule.setLibraryContent(runtime: PlatformRuntime, appState: LunarAppState) {
+private fun ComposeContentTestRule.setLibraryContent(
+    runtime: PlatformRuntime,
+    appState: LunarAppState,
+    modifier: Modifier = Modifier,
+) {
     setContent {
         LunarTheme(theme = AppColorTheme.OCEAN) {
-            val snapshot by runtime.repository.library.collectAsState()
-            LibraryScreen(
-                runtime = runtime,
-                snapshot = snapshot,
-                appState = appState,
-            )
+            Box(modifier = modifier) {
+                val snapshot by runtime.repository.library.collectAsState()
+                LibraryScreen(
+                    runtime = runtime,
+                    snapshot = snapshot,
+                    appState = appState,
+                )
+            }
         }
     }
 }
