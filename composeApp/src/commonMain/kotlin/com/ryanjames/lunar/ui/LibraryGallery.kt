@@ -1,5 +1,6 @@
 package com.ryanjames.lunar.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,6 +21,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -40,6 +42,7 @@ import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isMetaPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -268,6 +271,8 @@ private fun GalleryCard(
                     rangeOnClick = false
                 },
                 onDoubleClick = { appState.openScore(item) },
+                // Touch has no Ctrl/Cmd: long-press toggles selection instead.
+                onLongClick = { appState.toggleScoreSelectionAndFocus(item.id) },
             )
             .semantics { selected = isSelected }
             .padding(8.dp),
@@ -284,13 +289,14 @@ private fun GalleryCard(
                 cache = appState.thumbnailCache,
                 modifier = Modifier.fillMaxSize(),
             )
-            if (isSelected) {
-                SelectedBadge(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(6.dp),
-                )
-            }
+            GallerySelectToggle(
+                title = item.title,
+                selected = isSelected,
+                onToggle = { appState.toggleScoreSelection(item.id) },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp),
+            )
             if (isFocused) {
                 GalleryOpenBar(
                     label = galleryOpenLabel(item),
@@ -379,19 +385,37 @@ private fun collectionSwatches(): List<Color> {
     )
 }
 
+/**
+ * Always-visible selection checkbox so touch users can build a multi-selection
+ * without Ctrl/Cmd or Shift.
+ */
 @Composable
-private fun SelectedBadge(modifier: Modifier = Modifier) {
+private fun GallerySelectToggle(
+    title: String,
+    selected: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MaterialTheme.colorScheme
     Surface(
-        modifier = modifier.semantics { contentDescription = "Selected" },
+        modifier = modifier
+            .size(28.dp)
+            .clip(CircleShape)
+            .toggleable(value = selected, role = Role.Checkbox, onValueChange = { onToggle() })
+            .semantics { contentDescription = "Select $title" },
         shape = CircleShape,
-        color = MaterialTheme.colorScheme.primary,
+        color = if (selected) scheme.primary else scheme.surface.copy(alpha = 0.85f),
+        border = if (selected) null else BorderStroke(1.5.dp, scheme.outline),
     ) {
-        Text(
-            text = "✓",
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onPrimary,
-        )
+        if (selected) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = "✓",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = scheme.onPrimary,
+                )
+            }
+        }
     }
 }
 
