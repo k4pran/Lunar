@@ -118,6 +118,7 @@ fun LibraryScreen(
     val nowEpochMillis = remember(snapshot) { Clock.System.now().toEpochMilliseconds() }
     val catalogueMode = hostedSection == AppSection.LIBRARY
     val focusedItem = screenModel.focusedItem
+    val detailsDraft = rememberScoreDetailsDraft(focusedItem, appState.editingItemId)
     val showSelectionBar = screenModel.selectedItems.isNotEmpty()
     val showToolbar = catalogueMode && !showSelectionBar
 
@@ -188,7 +189,7 @@ fun LibraryScreen(
             .padding(horizontal = 20.dp, vertical = 16.dp),
     ) {
         val wide = maxWidth >= DetailPanelSideBreakpoint
-        val showDetailPanel = focusedItem != null && screenModel.selectedItems.isEmpty()
+        val showDetailPanel = focusedItem != null && detailsDraft != null && screenModel.selectedItems.isEmpty()
 
         Row(
             modifier = Modifier.fillMaxSize(),
@@ -253,6 +254,7 @@ fun LibraryScreen(
                         layout = DetailPanelLayout.BOTTOM,
                         nowEpochMillis = nowEpochMillis,
                         onTextInputFocusChanged = { isTextInputFocused = it },
+                        draft = detailsDraft,
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = this@BoxWithConstraints.maxHeight * 0.45f),
@@ -268,6 +270,7 @@ fun LibraryScreen(
                     layout = DetailPanelLayout.SIDE,
                     nowEpochMillis = nowEpochMillis,
                     onTextInputFocusChanged = { isTextInputFocused = it },
+                    draft = detailsDraft,
                     modifier = Modifier
                         .width(DetailPanelSideWidth)
                         .fillMaxHeight(),
