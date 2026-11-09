@@ -162,6 +162,37 @@ class SetlistsAndSongbooksScreenTest {
     }
 
     @Test
+    fun programmeRowsShowPageCountsResolvedByTheViewer() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(id = "moon_river", title = "Moon River", pageCount = 2),
+                testSheetMusicItem(id = "autumn_leaves", title = "Autumn Leaves"),
+            )
+            val setlist = testLibrarySetlist(id = "set_pages", name = "Page rehearsal", itemIds = items.map { it.id })
+            val runtime = createTestPlatformRuntime(initialItems = items, initialSetlists = listOf(setlist))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateBrowseMode(LibraryBrowseMode.SETLISTS)
+            appState.openSetlist(setlist.id)
+            rule.setLibraryContent(runtime, appState)
+            rule.onNodeWithText("Start the set").assertIsDisplayed()
+            assertEquals(0, rule.onAllNodesWithText("7 pp.").fetchSemanticsNodes().size)
+
+            // Play Autumn Leaves, let the viewer report its page count, then return to the programme.
+            rule.runOnIdle { appState.startSetlist(setlist.id, index = 1) }
+            rule.runOnIdle { appState.updateViewerPageCount("autumn_leaves", 7) }
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.getItem("autumn_leaves")?.pageCount == 7
+            }
+            rule.runOnIdle { appState.closePreview() }
+
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithText("7 pp.", substring = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            assertTrue(rule.onAllNodesWithText("2 pieces · 9 pages").fetchSemanticsNodes().isNotEmpty())
+        }
+    }
+
+    @Test
     fun programmeActionsWrapOnPhoneWidth() {
         runBlocking {
             val items = listOf(testSheetMusicItem(id = "moon_river", title = "Moon River"))

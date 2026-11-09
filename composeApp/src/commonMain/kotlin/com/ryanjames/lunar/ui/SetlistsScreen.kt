@@ -342,7 +342,10 @@ private fun ProgrammeList(
     onRemove: (String) -> Unit,
 ) {
     val itemIds = items.map { it.id }
-    var order by remember(setlistId, itemIds) { mutableStateOf(items) }
+    val itemsById = items.associateBy { it.id }
+    // Only the locally dragged order is held here; row data always comes from the current
+    // `items` so metadata updates (e.g. a resolved page count) show without a reorder.
+    var order by remember(setlistId, itemIds) { mutableStateOf(itemIds) }
     var draggingId by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var rowHeightPx by remember { mutableIntStateOf(1) }
@@ -350,14 +353,14 @@ private fun ProgrammeList(
     fun finishDrag() {
         draggingId = null
         dragOffset = 0f
-        val reorderedIds = order.map { it.id }
-        if (reorderedIds != itemIds) {
-            onReorder(reorderedIds)
+        if (order != itemIds) {
+            onReorder(order)
         }
     }
 
     Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-        order.forEachIndexed { index, item ->
+        order.forEachIndexed { index, orderedId ->
+            val item = itemsById[orderedId] ?: return@forEachIndexed
             key(item.id) {
                 val isDragging = draggingId == item.id
                 Row(
@@ -399,7 +402,7 @@ private fun ProgrammeList(
                                         ) { change, dragAmount ->
                                             change.consume()
                                             dragOffset += dragAmount
-                                            val currentIndex = order.indexOfFirst { it.id == item.id }
+                                            val currentIndex = order.indexOf(item.id)
                                             val step = rowHeightPx.toFloat()
                                             if (dragOffset > step / 2f && currentIndex < order.lastIndex) {
                                                 order = order.moved(currentIndex, currentIndex + 1)
