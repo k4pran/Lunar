@@ -3,6 +3,7 @@ package com.ryanjames.lunar.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -465,10 +466,13 @@ private fun <T> SettingsChoiceRow(
         label = label,
         supportingText = supportingText,
     ) {
+        // Long option lists (auto refresh, cache budget) can outgrow a phone-width row, so
+        // keep every option reachable by scrolling the toggle sideways.
         TextToggle(
             options = options,
             selected = selected,
             onSelect = { value -> if (value != selected) onSelect(value) },
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
         )
     }
 }

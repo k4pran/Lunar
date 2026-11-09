@@ -64,6 +64,7 @@ import kotlin.time.Clock
 /** The side column sits beside the source list once there is room for both. */
 private val SourcesSideColumnMinWindow = 900.dp
 private val SourcesSideColumnWidth = 320.dp
+private val SourceRowStackWidth = 560.dp
 
 @Composable
 fun ImportScreen(
@@ -414,7 +415,10 @@ private fun AddSourceMenuItem(
     }
 }
 
-/** One ruled row per source: type, location, score count, its own status line, and actions. */
+/**
+ * One ruled row per source: type, location, score count, its own status line, and actions. On a
+ * narrow row the actions drop below the details so the name, location and errors keep their width.
+ */
 @Composable
 private fun SourceRow(
     source: LibrarySource,
@@ -426,82 +430,138 @@ private fun SourceRow(
     onRemove: () -> Unit,
 ) {
     val tokens = lunarTokens()
-    Row(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(LunarTestTags.sourceRow(source.id))
             .padding(vertical = tokens.spacing.md),
-        horizontalArrangement = Arrangement.spacedBy(tokens.spacing.md),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        LunarIcon(
-            kind = source.iconKind(),
-            contentDescription = null,
-            tint = tokens.colors.muted,
-        )
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(tokens.spacing.xxs),
-        ) {
+        val stacked = maxWidth < SourceRowStackWidth
+        val summary: @Composable (Modifier) -> Unit = { summaryModifier ->
             Row(
-                horizontalArrangement = Arrangement.spacedBy(tokens.spacing.sm),
+                modifier = summaryModifier,
+                horizontalArrangement = Arrangement.spacedBy(tokens.spacing.md),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TruncatedText(
-                    text = source.label,
-                    style = tokens.typography.body.copy(fontWeight = FontWeight.SemiBold),
-                    modifier = Modifier.weight(1f, fill = false),
+                LunarIcon(
+                    kind = source.iconKind(),
+                    contentDescription = null,
+                    tint = tokens.colors.muted,
                 )
-                SmallCapsLabel(text = source.typeLabel())
+                SourceRowDetails(
+                    source = source,
+                    status = status,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "$itemCount ${plural(itemCount, "score")}",
+                    style = tokens.typography.bodySmall,
+                    color = tokens.colors.ink2,
+                )
             }
-            TruncatedText(
-                text = source.locationLabel(),
-                style = tokens.typography.bodySmall,
-                color = tokens.colors.ink2,
-            )
-            Text(
-                text = status.text,
-                style = tokens.typography.bodySmall,
-                color = when (status.tone) {
-                    SourceStatusTone.NEUTRAL -> tokens.colors.muted
-                    SourceStatusTone.ACTIVE -> tokens.colors.accent
-                    SourceStatusTone.ERROR -> tokens.colors.danger
-                },
-                modifier = Modifier.testTag(LunarTestTags.sourceStatus(source.id)),
+        }
+        val actions: @Composable (Modifier) -> Unit = { actionsModifier ->
+            SourceRowActions(
+                actionsEnabled = actionsEnabled,
+                onRefresh = onRefresh,
+                onEdit = onEdit,
+                onRemove = onRemove,
+                modifier = actionsModifier,
             )
         }
-        Text(
-            text = "$itemCount ${plural(itemCount, "score")}",
+        if (stacked) {
+            Column(verticalArrangement = Arrangement.spacedBy(tokens.spacing.xs)) {
+                summary(Modifier.fillMaxWidth())
+                actions(Modifier.testTag(LunarTestTags.sourceRowActions(source.id)))
+            }
+        } else {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(tokens.spacing.md),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                summary(Modifier.weight(1f))
+                actions(Modifier.testTag(LunarTestTags.sourceRowActions(source.id)))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SourceRowDetails(
+    source: LibrarySource,
+    status: SourceStatusLine,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = lunarTokens()
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(tokens.spacing.xxs),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(tokens.spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TruncatedText(
+                text = source.label,
+                style = tokens.typography.body.copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            SmallCapsLabel(text = source.typeLabel())
+        }
+        TruncatedText(
+            text = source.locationLabel(),
             style = tokens.typography.bodySmall,
             color = tokens.colors.ink2,
         )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(tokens.spacing.xxs),
-            verticalAlignment = Alignment.CenterVertically,
+        Text(
+            text = status.text,
+            style = tokens.typography.bodySmall,
+            color = when (status.tone) {
+                SourceStatusTone.NEUTRAL -> tokens.colors.muted
+                SourceStatusTone.ACTIVE -> tokens.colors.accent
+                SourceStatusTone.ERROR -> tokens.colors.danger
+            },
+            modifier = Modifier.testTag(LunarTestTags.sourceStatus(source.id)),
+        )
+    }
+}
+
+@Composable
+private fun SourceRowActions(
+    actionsEnabled: Boolean,
+    onRefresh: (() -> Unit)?,
+    onEdit: (() -> Unit)?,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = lunarTokens()
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(tokens.spacing.xxs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        onRefresh?.let {
+            LunarButton(
+                text = "Refresh",
+                onClick = it,
+                style = LunarButtonStyle.TEXT,
+                enabled = actionsEnabled,
+            )
+        }
+        onEdit?.let {
+            LunarButton(
+                text = "Edit",
+                onClick = it,
+                style = LunarButtonStyle.TEXT,
+                enabled = actionsEnabled,
+            )
+        }
+        TextButton(
+            onClick = onRemove,
+            shape = tokens.shapes.medium,
+            colors = ButtonDefaults.textButtonColors(contentColor = tokens.colors.danger),
         ) {
-            onRefresh?.let {
-                LunarButton(
-                    text = "Refresh",
-                    onClick = it,
-                    style = LunarButtonStyle.TEXT,
-                    enabled = actionsEnabled,
-                )
-            }
-            onEdit?.let {
-                LunarButton(
-                    text = "Edit",
-                    onClick = it,
-                    style = LunarButtonStyle.TEXT,
-                    enabled = actionsEnabled,
-                )
-            }
-            TextButton(
-                onClick = onRemove,
-                shape = tokens.shapes.medium,
-                colors = ButtonDefaults.textButtonColors(contentColor = tokens.colors.danger),
-            ) {
-                Text(text = "Remove", style = tokens.typography.button)
-            }
+            Text(text = "Remove", style = tokens.typography.button)
         }
     }
 }

@@ -39,6 +39,8 @@ object LunarTestTags {
 
     fun sourceStatus(sourceId: String): String = "source_status_$sourceId"
 
+    fun sourceRowActions(sourceId: String): String = "source_row_actions_$sourceId"
+
     fun settingsTab(tab: String): String = "settings_tab_${tab.lowercase()}"
 
     fun settingsRow(key: String): String = "settings_row_$key"

@@ -38,7 +38,7 @@ import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
-import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
@@ -57,11 +57,11 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performKeyInput
-import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.unit.width
 import com.ryanjames.lunar.composition.InMemoryCompositionDraftStore
 import com.ryanjames.lunar.library.data.CloudGoogleDriveSource
 import com.ryanjames.lunar.library.data.CloudPathStrategy
@@ -91,6 +91,8 @@ import com.ryanjames.lunar.platform.RenderedPdfPage
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.AppSettingsStore
 import com.ryanjames.lunar.settings.AppSkin
+import com.ryanjames.lunar.settings.AutoRefreshSchedule
+import com.ryanjames.lunar.settings.CacheLimitPreset
 import com.ryanjames.lunar.settings.JsonAppSettingsStore
 import com.ryanjames.lunar.settings.ViewerKeybindings
 import com.ryanjames.lunar.sync.CloudSyncState
@@ -1244,6 +1246,85 @@ class ScreenSmokeTest {
                 ).fetchSemanticsNodes().isEmpty(),
                 "The healthy source should not show the other source's error.",
             )
+        }
+    }
+
+    @Test
+    fun narrowSourceRowStacksActionsBelowDetails() {
+        runBlocking {
+            val broken = testSupabaseSource("broken")
+            val runtime = createTestPlatformRuntime(initialSources = listOf(broken))
+            val appState = createTestLunarAppState(
+                scope = backgroundScope(),
+                runtime = runtime,
+            )
+            val error = "HTTP 503 from Supabase while listing the bucket"
+            val syncState = CloudSyncState(
+                sourceStatuses = mapOf(broken.id to SourceSyncStatus(lastError = error)),
+            )
+
+            rule.setContent {
+                LunarTheme(skin = AppSkin.PAPER) {
+                    Box(modifier = Modifier.width(320.dp)) {
+                        ImportScreen(
+                            runtime = runtime,
+                            importerState = ImporterState(),
+                            syncState = syncState,
+                            settings = runtime.settingsStore.settings.value,
+                            libraryCount = 0,
+                            appState = appState,
+                        )
+                    }
+                }
+            }
+
+            val row = rule.onNodeWithTag(LunarTestTags.sourceRow(broken.id)).getUnclippedBoundsInRoot()
+            val status = rule.onNodeWithTag(LunarTestTags.sourceStatus(broken.id))
+                .assertTextEquals(error)
+                .getUnclippedBoundsInRoot()
+            val actions = rule.onNodeWithTag(LunarTestTags.sourceRowActions(broken.id)).getUnclippedBoundsInRoot()
+            assertTrue(actions.top >= status.bottom, "Actions should sit below the source details on a narrow row.")
+            assertTrue(
+                status.width >= (row.width - 120.dp),
+                "The status line should keep most of the row width, was ${status.width} of ${row.width}.",
+            )
+            rule.onNode(hasText("Remove") and hasAnyAncestor(hasTestTag(LunarTestTags.sourceRow(broken.id))))
+                .assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun narrowSettingsKeepTrailingChoicesReachable() {
+        runBlocking {
+            val runtime = createTestPlatformRuntime()
+            val appState = createTestLunarAppState(
+                scope = backgroundScope(),
+                runtime = runtime,
+            )
+
+            rule.setContent {
+                val settings by runtime.settingsStore.settings.collectAsState()
+                LunarTheme(skin = AppSkin.PAPER) {
+                    Box(modifier = Modifier.width(320.dp)) {
+                        SettingsScreen(
+                            settings = settings,
+                            appState = appState,
+                        )
+                    }
+                }
+            }
+
+            listOf("auto_refresh" to "Daily", "cache_budget" to "Unlimited").forEach { (rowKey, option) ->
+                rule.onNodeWithTag(LunarTestTags.settingsRow(rowKey)).performScrollTo()
+                rule.onNode(settingsOption(rowKey, option)).performScrollTo().assertIsDisplayed().performClick()
+            }
+            rule.waitUntil(timeoutMillis = 5_000) {
+                val current = runtime.settingsStore.settings.value
+                current.autoRefreshSchedule == AutoRefreshSchedule.DAILY &&
+                    current.cacheLimit == CacheLimitPreset.UNLIMITED
+            }
+            rule.onNode(settingsOption("auto_refresh", "Daily")).assertIsSelected()
+            rule.onNode(settingsOption("cache_budget", "Unlimited")).assertIsSelected()
         }
     }
 
