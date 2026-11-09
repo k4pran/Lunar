@@ -153,6 +153,16 @@ class LunarAppState(
     var selectedScoreIds: Set<String> by mutableStateOf(emptySet())
         private set
 
+    /** The single score driving the library detail panel, separate from multi-select. */
+    var focusedScoreId: String? by mutableStateOf(null)
+        private set
+
+    /** Page the viewer should start on for the score being opened, overriding its saved page. */
+    var viewerStartPage: Int? by mutableStateOf(null)
+        private set
+
+    private var selectionAnchorId: String? = null
+
     var editingItemId: String? by mutableStateOf(null)
         private set
 
@@ -166,9 +176,6 @@ class LunarAppState(
         private set
 
     var infoMetadataError: String? by mutableStateOf(null)
-        private set
-
-    var previewTarget: ViewerTarget? by mutableStateOf(null)
         private set
 
     var fullscreenTarget: ViewerTarget? by mutableStateOf(null)
@@ -187,6 +194,10 @@ class LunarAppState(
         private set
 
     var songbookPickerVisible: Boolean by mutableStateOf(false)
+        private set
+
+    /** The "bind a new songbook" dialog (name and cover) for the current picker targets. */
+    var newSongbookDialogVisible: Boolean by mutableStateOf(false)
         private set
 
     var randomSetlistBuilderVisible: Boolean by mutableStateOf(false)
@@ -341,15 +352,63 @@ class LunarAppState(
         }
     }
 
+    /** A plain click: make [itemId] the focused score and drop any multi-selection. */
+    fun focusScore(itemId: String) {
+        if (focusedScoreId != itemId) {
+            dismissFocusedScoreExtras()
+        }
+        focusedScoreId = itemId
+        selectionAnchorId = itemId
+        if (selectedScoreIds.isNotEmpty()) {
+            clearScoreSelection()
+        }
+    }
+
+    fun clearFocus() {
+        focusedScoreId = null
+        dismissFocusedScoreExtras()
+    }
+
+    /** Clears focus when the focused score is no longer among [availableItemIds], e.g. after filtering. */
+    fun reconcileFocus(availableItemIds: Set<String>) {
+        val focused = focusedScoreId ?: return
+        if (focused !in availableItemIds) {
+            clearFocus()
+        }
+    }
+
+    /** Moves focus [delta] rows through [orderedItemIds], starting at the first row when nothing is focused. */
+    fun moveFocus(orderedItemIds: List<String>, delta: Int) {
+        val nextId = nextFocusedItemId(orderedItemIds, focusedScoreId, delta) ?: return
+        focusScore(nextId)
+    }
+
+    /** Ctrl/Cmd-click or the row checkbox. */
     fun toggleScoreSelection(itemId: String) {
         selectedScoreIds = selectedScoreIds.toMutableSet().apply {
             if (!add(itemId)) {
                 remove(itemId)
             }
         }.toSet()
+        selectionAnchorId = itemId
         if (selectedScoreIds.isEmpty()) {
             setlistPickerVisible = false
+            songbookPickerVisible = false
         }
+    }
+
+    /** Shift-click: select every score between the anchor (last clicked score) and [itemId]. */
+    fun extendScoreSelection(itemId: String, orderedItemIds: List<String>) {
+        val range = selectionRange(
+            orderedItemIds = orderedItemIds,
+            anchorId = selectionAnchorId ?: focusedScoreId,
+            targetId = itemId,
+        )
+        if (range.isEmpty()) {
+            toggleScoreSelection(itemId)
+            return
+        }
+        selectedScoreIds = selectedScoreIds + range
     }
 
     fun clearScoreSelection() {
@@ -358,8 +417,13 @@ class LunarAppState(
         songbookPickerVisible = false
     }
 
+    /** Scores the setlist and songbook pickers act on: the multi-selection, else the focused score. */
+    val pickerTargetIds: Set<String>
+        get() = selectedScoreIds.ifEmpty { setOfNotNull(focusedScoreId) }
+
     fun showSetlistPicker() {
-        if (selectedScoreIds.isNotEmpty()) {
+        if (pickerTargetIds.isNotEmpty()) {
+            songbookPickerVisible = false
             setlistPickerVisible = true
         }
     }
@@ -370,10 +434,7 @@ class LunarAppState(
             return
         }
 
-        focusLibrarySection()
-        previewTarget = null
-        fullscreenTarget = null
-        selectedScoreIds = setOf(itemId)
+        focusScoreFromViewer(itemId)
         songbookPickerVisible = false
         setlistPickerVisible = true
     }
@@ -383,7 +444,8 @@ class LunarAppState(
     }
 
     fun showSongbookPicker() {
-        if (selectedScoreIds.isNotEmpty()) {
+        if (pickerTargetIds.isNotEmpty()) {
+            setlistPickerVisible = false
             songbookPickerVisible = true
         }
     }
@@ -398,16 +460,23 @@ class LunarAppState(
             return
         }
 
-        focusLibrarySection()
-        previewTarget = null
-        fullscreenTarget = null
-        selectedScoreIds = setOf(itemId)
+        focusScoreFromViewer(itemId)
         setlistPickerVisible = false
         songbookPickerVisible = true
     }
 
     fun dismissSongbookPicker() {
         songbookPickerVisible = false
+    }
+
+    fun showNewSongbookDialog() {
+        if (!runtime.capabilities.songbookCreationSupported || pickerTargetIds.isEmpty()) return
+        songbookPickerVisible = false
+        newSongbookDialogVisible = true
+    }
+
+    fun dismissNewSongbookDialog() {
+        newSongbookDialogVisible = false
     }
 
     fun openSetlist(setlistId: String) {
@@ -463,7 +532,7 @@ class LunarAppState(
             return
         }
 
-        openPreview(randomItem)
+        openScore(randomItem)
         bannerMessage = "Opening a random sheet."
     }
 
@@ -478,15 +547,7 @@ class LunarAppState(
             return
         }
 
-        val target = ViewerTarget.Score(randomItem.id)
-        focusLibrarySection()
-        previewTarget = target
-        if (fullscreenTarget != null) {
-            fullscreenTarget = target
-        }
-        scope.launch {
-            runtime.repository.recordOpened(randomItem.id, randomItem.lastViewedPage)
-        }
+        openScore(randomItem)
         bannerMessage = "Opening a random sheet."
     }
 
@@ -533,6 +594,10 @@ class LunarAppState(
     }
 
     fun startEditing(itemId: String) {
+        if (focusedScoreId != itemId) {
+            focusScore(itemId)
+        }
+        dismissScoreInfo()
         editingItemId = itemId
     }
 
@@ -546,6 +611,10 @@ class LunarAppState(
             return
         }
 
+        if (focusedScoreId != itemId) {
+            focusScore(itemId)
+        }
+        editingItemId = null
         infoItemId = itemId
         infoMetadata = null
         infoMetadataError = null
@@ -785,35 +854,36 @@ class LunarAppState(
         }
     }
 
-    fun openPreview(item: SheetMusicItem) {
+    /**
+     * Opens [item] straight in the viewer, at its saved page or, with [fromTop], at page 1.
+     * In the catalogue the score also becomes focused, so the library shows it when the viewer closes.
+     */
+    fun openScore(item: SheetMusicItem, fromTop: Boolean = false) {
+        val startPage = if (fromTop) 0 else item.lastViewedPage.coerceAtLeast(0)
         focusLibrarySection()
-        previewTarget = ViewerTarget.Score(item.id)
+        if (selectedSection == AppSection.LIBRARY) {
+            if (focusedScoreId != item.id) {
+                dismissFocusedScoreExtras()
+            }
+            focusedScoreId = item.id
+            selectionAnchorId = item.id
+        }
+        viewerStartPage = startPage
+        fullscreenTarget = ViewerTarget.Score(item.id)
         scope.launch {
-            runtime.repository.recordOpened(item.id, item.lastViewedPage)
+            runtime.repository.recordOpened(item.id, startPage)
         }
     }
 
     fun openSongbook(songbookId: String) {
         focusLibrarySection()
-        previewTarget = ViewerTarget.Songbook(songbookId)
-    }
-
-    fun closePreview() {
-        previewTarget = null
-    }
-
-    fun openFullscreen(itemId: String) {
-        focusLibrarySection()
-        fullscreenTarget = ViewerTarget.Score(itemId)
-    }
-
-    fun openSongbookFullscreen(songbookId: String) {
-        focusLibrarySection()
+        viewerStartPage = null
         fullscreenTarget = ViewerTarget.Songbook(songbookId)
     }
 
     fun closeFullscreen() {
         fullscreenTarget = null
+        viewerStartPage = null
         focusLibrarySection()
     }
 
@@ -826,23 +896,7 @@ class LunarAppState(
     fun hideScore(itemId: String) {
         scope.launch {
             runtime.repository.updateHidden(itemId, isHidden = true)
-            selectedScoreIds = selectedScoreIds - itemId
-            if (selectedScoreIds.isEmpty()) {
-                setlistPickerVisible = false
-                songbookPickerVisible = false
-            }
-            if (previewTarget == ViewerTarget.Score(itemId)) {
-                previewTarget = null
-            }
-            if (fullscreenTarget == ViewerTarget.Score(itemId)) {
-                fullscreenTarget = null
-            }
-            if (editingItemId == itemId) {
-                editingItemId = null
-            }
-            if (infoItemId == itemId) {
-                dismissScoreInfo()
-            }
+            forgetScore(itemId)
             bannerMessage = "Score hidden. You can restore it from Hidden."
         }
     }
@@ -850,11 +904,7 @@ class LunarAppState(
     fun restoreScore(itemId: String) {
         scope.launch {
             runtime.repository.updateHidden(itemId, isHidden = false)
-            selectedScoreIds = selectedScoreIds - itemId
-            if (selectedScoreIds.isEmpty()) {
-                setlistPickerVisible = false
-                songbookPickerVisible = false
-            }
+            forgetScore(itemId)
             bannerMessage = "Score restored to your library."
         }
     }
@@ -907,23 +957,7 @@ class LunarAppState(
         scope.launch {
             runtime.repository.deleteItem(itemId)
             thumbnailCache.clearKey(itemId)
-            selectedScoreIds = selectedScoreIds - itemId
-            if (selectedScoreIds.isEmpty()) {
-                setlistPickerVisible = false
-                songbookPickerVisible = false
-            }
-            if (previewTarget == ViewerTarget.Score(itemId)) {
-                previewTarget = null
-            }
-            if (fullscreenTarget == ViewerTarget.Score(itemId)) {
-                fullscreenTarget = null
-            }
-            if (editingItemId == itemId) {
-                editingItemId = null
-            }
-            if (infoItemId == itemId) {
-                dismissScoreInfo()
-            }
+            forgetScore(itemId)
             deleteCandidateItemId = null
             focusLibrarySection()
             bannerMessage = "Score removed from your library."
@@ -934,10 +968,7 @@ class LunarAppState(
         scope.launch {
             try {
                 val setlist = runtime.repository.createSetlist(name, itemIds)
-                showSavedSetlist(
-                    setlist = setlist,
-                    banner = "Saved \"${setlist.name}\".",
-                )
+                bannerMessage = "Saved \"${setlist.name}\"."
             } catch (error: Throwable) {
                 bannerMessage = error.message ?: "Could not save the setlist."
             }
@@ -948,10 +979,7 @@ class LunarAppState(
         scope.launch {
             try {
                 val setlist = runtime.repository.addItemsToSetlist(setlistId, itemIds)
-                showSavedSetlist(
-                    setlist = setlist,
-                    banner = "Updated \"${setlist.name}\".",
-                )
+                bannerMessage = "Added to \"${setlist.name}\"."
             } catch (error: Throwable) {
                 bannerMessage = error.message ?: "Could not update the setlist."
             }
@@ -987,8 +1015,8 @@ class LunarAppState(
                     document = buildResult.document,
                     pageCount = buildResult.pageCount,
                 )
-                showSongbooksOverview()
-                previewTarget = ViewerTarget.Songbook(songbook.id)
+                songbookPickerVisible = false
+                newSongbookDialogVisible = false
                 bannerMessage = "Saved \"${songbook.name}\"."
             } catch (error: Throwable) {
                 bannerMessage = error.message ?: "Could not create the songbook."
@@ -1030,9 +1058,7 @@ class LunarAppState(
                     document = buildResult.document,
                     pageCount = buildResult.pageCount,
                 )
-                showSongbooksOverview()
-                previewTarget = ViewerTarget.Songbook(updatedSongbook.id)
-                bannerMessage = "Updated \"${updatedSongbook.name}\"."
+                bannerMessage = "Added to \"${updatedSongbook.name}\"."
             } catch (error: Throwable) {
                 bannerMessage = error.message ?: "Could not update the songbook."
             }
@@ -1055,9 +1081,6 @@ class LunarAppState(
         val songbookId = deleteCandidateSongbookId ?: return
         scope.launch {
             runtime.repository.deleteSongbook(songbookId)
-            if (previewTarget == ViewerTarget.Songbook(songbookId)) {
-                previewTarget = null
-            }
             if (fullscreenTarget == ViewerTarget.Songbook(songbookId)) {
                 fullscreenTarget = null
             }
@@ -1112,15 +1135,58 @@ class LunarAppState(
     private fun enterSection(section: AppSection) {
         if (selectedSection == section) return
         clearScoreSelection()
+        if (section != AppSection.LIBRARY) {
+            clearFocus()
+        }
         dismissLibraryTransientUi()
         closeSetlistDetail()
         selectedSection = section
         temporarySidebarCollapsed = if (section == AppSection.COMPOSE) true else null
     }
 
+    /** Setlists can show the focused score's detail panel, so stay there; anywhere else lands in Library. */
+    private fun focusScoreFromViewer(itemId: String) {
+        if (selectedSection != AppSection.SETLISTS) {
+            enterSection(AppSection.LIBRARY)
+        }
+        fullscreenTarget = null
+        viewerStartPage = null
+        focusScore(itemId)
+    }
+
+    private fun dismissFocusedScoreExtras() {
+        editingItemId = null
+        dismissScoreInfo()
+        setlistPickerVisible = false
+        songbookPickerVisible = false
+    }
+
+    /** Drops every reference to a score that just left the current view (hidden, restored or deleted). */
+    private fun forgetScore(itemId: String) {
+        selectedScoreIds = selectedScoreIds - itemId
+        if (selectedScoreIds.isEmpty()) {
+            setlistPickerVisible = false
+            songbookPickerVisible = false
+        }
+        if (focusedScoreId == itemId) {
+            clearFocus()
+        }
+        if (fullscreenTarget == ViewerTarget.Score(itemId)) {
+            fullscreenTarget = null
+            viewerStartPage = null
+        }
+        if (editingItemId == itemId) {
+            editingItemId = null
+        }
+        if (infoItemId == itemId) {
+            dismissScoreInfo()
+        }
+    }
+
     private fun dismissLibraryTransientUi() {
         setlistPickerVisible = false
         songbookPickerVisible = false
+        newSongbookDialogVisible = false
         randomSetlistBuilderVisible = false
         saveTemporarySetlistDialogVisible = false
         dismissScoreInfo()
@@ -1163,12 +1229,6 @@ class LunarAppState(
         clearScoreSelection()
         selectedSetlistId = null
         temporarySetlistOpen = true
-    }
-
-    private fun showSongbooksOverview() {
-        enterSection(AppSection.SONGBOOKS)
-        clearScoreSelection()
-        closeSetlistDetail()
     }
 
     private fun runImport(
@@ -1450,6 +1510,31 @@ fun rememberLunarAppState(runtime: PlatformRuntime): LunarAppState {
 }
 
 private const val MAX_IMPORT_ACTIVITY_ENTRIES = 150
+
+/** Ids from [anchorId] to [targetId] inclusive, in list order; empty when either is not listed. */
+internal fun selectionRange(
+    orderedItemIds: List<String>,
+    anchorId: String?,
+    targetId: String,
+): List<String> {
+    val anchorIndex = anchorId?.let(orderedItemIds::indexOf) ?: -1
+    val targetIndex = orderedItemIds.indexOf(targetId)
+    if (anchorIndex < 0 || targetIndex < 0) return emptyList()
+    val range = if (anchorIndex <= targetIndex) anchorIndex..targetIndex else targetIndex..anchorIndex
+    return orderedItemIds.slice(range)
+}
+
+/** The id [delta] rows away from [currentId], clamped to the list; the first row when nothing matches. */
+internal fun nextFocusedItemId(
+    orderedItemIds: List<String>,
+    currentId: String?,
+    delta: Int,
+): String? {
+    if (orderedItemIds.isEmpty()) return null
+    val currentIndex = currentId?.let(orderedItemIds::indexOf) ?: -1
+    if (currentIndex < 0) return orderedItemIds.first()
+    return orderedItemIds[(currentIndex + delta).coerceIn(0, orderedItemIds.lastIndex)]
+}
 
 private fun LibraryLayoutPreference.toLayoutMode(): LibraryLayoutMode = when (this) {
     LibraryLayoutPreference.LIST -> LibraryLayoutMode.LIST
