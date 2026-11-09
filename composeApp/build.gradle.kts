@@ -132,7 +132,6 @@ compose.desktop {
 
         nativeDistributions {
             targetFormats(
-                TargetFormat.AppImage,
                 TargetFormat.Deb,
                 TargetFormat.Dmg,
                 TargetFormat.Exe,
