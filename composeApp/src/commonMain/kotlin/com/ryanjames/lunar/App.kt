@@ -9,15 +9,12 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -42,8 +39,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.ryanjames.lunar.library.data.LibrarySnapshot
 import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.platform.externalScoreDropTarget
@@ -53,11 +48,9 @@ import com.ryanjames.lunar.ui.ComposeScreen
 import com.ryanjames.lunar.ui.FullscreenViewerScreen
 import com.ryanjames.lunar.ui.ImportScreen
 import com.ryanjames.lunar.ui.LibraryScreen
-import com.ryanjames.lunar.ui.LunarTooltip
 import com.ryanjames.lunar.ui.LunarTheme
 import com.ryanjames.lunar.ui.SettingsScreen
 import com.ryanjames.lunar.ui.ViewerDocumentState
-import com.ryanjames.lunar.ui.ViewerScreen
 import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.design.LunarTestTags
 import com.ryanjames.lunar.ui.design.lunarTokens
@@ -94,8 +87,10 @@ internal fun LunarApp(
     val snackbarHostState = remember { SnackbarHostState() }
     var appReady by remember(runtime) { mutableStateOf(false) }
     var startupError by remember(runtime) { mutableStateOf<String?>(null) }
-    val previewDocument = snapshot.resolveViewerDocument(appState.previewTarget)
     val fullscreenDocument = snapshot.resolveViewerDocument(appState.fullscreenTarget)
+        ?.let { document ->
+            appState.viewerStartPage?.let { document.copy(lastViewedPage = it) } ?: document
+        }
     val defaultTwoPageMode = appSettings.defaultViewerPageMode == ViewerPageModePreference.TWO_PAGE
     val libraryScopeItems = currentLibraryScopeItems(snapshot = snapshot, appState = appState)
 
@@ -230,104 +225,6 @@ internal fun LunarApp(
                                 appState = appState,
                                 modifier = Modifier.padding(innerPadding),
                             )
-                        }
-                    }
-                }
-
-                if (previewDocument != null) {
-                    Dialog(
-                        onDismissRequest = appState::closePreview,
-                        properties = DialogProperties(
-                            usePlatformDefaultWidth = false,
-                        ),
-                    ) {
-                        BoxWithConstraints(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            val horizontalMargin = if (maxWidth < 720.dp) 12.dp else 28.dp
-                            val verticalMargin = if (maxHeight < 720.dp) 12.dp else 24.dp
-                            val dialogWidth = ((maxHeight - verticalMargin * 2) * 1.32f)
-                                .coerceAtMost(maxWidth - horizontalMargin * 2)
-                                .coerceAtLeast(320.dp)
-                            val dialogHeight = (maxHeight - verticalMargin * 2).coerceAtLeast(360.dp)
-
-                            Surface(
-                                modifier = Modifier
-                                    .width(dialogWidth)
-                                    .height(dialogHeight),
-                                shape = MaterialTheme.shapes.extraLarge,
-                                tonalElevation = 10.dp,
-                                color = MaterialTheme.colorScheme.surface,
-                            ) {
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        ViewerScreen(
-                                            runtime = runtime,
-                                            documentState = previewDocument,
-                                            onBack = appState::closePreview,
-                                            onToggleFavorite = appState.previewTarget.favoriteToggle(appState),
-                                            onHideScore = appState.previewTarget.hideScore(appState),
-                                            onAddToSetlist = appState.previewTarget.addToSetlist(appState),
-                                            onAddToSongbook = appState.previewTarget.addToSongbook(appState),
-                                            onOpenRandomScore = { appState.openRandomSheetInCurrentViewer(libraryScopeItems) },
-                                            onPageChanged = appState.previewTarget.pageChanged(appState),
-                                            onPageCountResolved = appState.previewTarget.pageCountResolved(appState),
-                                            defaultTwoPageMode = defaultTwoPageMode,
-                                            viewerKeybindings = appSettings.viewerKeybindings,
-                                            onEnterFullscreen = {
-                                                when (val target = appState.previewTarget) {
-                                                    is ViewerTarget.Score ->
-                                                        appState.openFullscreen(target.itemId)
-
-                                                    is ViewerTarget.Songbook ->
-                                                        appState.openSongbookFullscreen(target.songbookId)
-
-                                                    null -> Unit
-                                                }
-                                            },
-                                            backButtonLabel = "Close",
-                                        )
-                                    }
-                                    Surface(
-                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-                                        shape = MaterialTheme.shapes.extraLarge,
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 16.dp, vertical = 10.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            androidx.compose.material3.OutlinedButton(
-                                                onClick = appState::closePreview,
-                                            ) {
-                                                Text("Close")
-                                            }
-                                            androidx.compose.material3.Button(
-                                                onClick = {
-                                                    when (val target = appState.previewTarget) {
-                                                        is ViewerTarget.Score ->
-                                                            appState.openFullscreen(target.itemId)
-
-                                                        is ViewerTarget.Songbook ->
-                                                            appState.openSongbookFullscreen(target.songbookId)
-
-                                                        null -> Unit
-                                                    }
-                                                },
-                                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                                                    containerColor = MaterialTheme.colorScheme.primary,
-                                                ),
-                                            ) {
-                                                Text("View Fullscreen", color = MaterialTheme.colorScheme.onPrimary)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                 }

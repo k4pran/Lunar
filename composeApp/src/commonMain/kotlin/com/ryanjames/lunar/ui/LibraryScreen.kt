@@ -1,6 +1,5 @@
 package com.ryanjames.lunar.ui
 
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -26,14 +25,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -50,14 +45,20 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.platform.testTag
+import com.ryanjames.lunar.library.model.jumpBackInItems
+import kotlin.time.Clock
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
@@ -75,19 +76,15 @@ import com.ryanjames.lunar.composeapp.generated.resources.lilypond_logo
 import com.ryanjames.lunar.composeapp.generated.resources.pdf_logo
 import com.ryanjames.lunar.ui.design.LunarTestTags
 import com.ryanjames.lunar.library.data.LibrarySnapshot
-import com.ryanjames.lunar.library.data.SyncStatus
 import com.ryanjames.lunar.library.model.HiddenScoreFilter
 import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.library.model.LibrarySetlist
 import com.ryanjames.lunar.library.model.LibrarySortOption
-import com.ryanjames.lunar.library.model.ScoreMetadata
 import com.ryanjames.lunar.library.model.ScoreViewerSupport
 import com.ryanjames.lunar.library.model.SheetMusicItem
-import com.ryanjames.lunar.library.model.SortDirection
 import com.ryanjames.lunar.library.model.ViewerSupportFilter
 import com.ryanjames.lunar.library.model.applyLibraryQuery
 import com.ryanjames.lunar.library.model.availableCollections
-import com.ryanjames.lunar.library.model.availableComposers
 import com.ryanjames.lunar.library.model.availableTags
 import com.ryanjames.lunar.library.model.viewerSupport
 import com.ryanjames.lunar.platform.PlatformRuntime
@@ -100,6 +97,7 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
 import kotlin.time.Instant
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun LibraryScreen(
     runtime: PlatformRuntime,
@@ -111,256 +109,157 @@ fun LibraryScreen(
 ) {
     val screenModel = buildLibraryScreenModel(snapshot = snapshot, appState = appState)
     val hostedSection = appState.hostedSection
-    val showingHiddenScores = appState.showingHiddenScores
     val focusRequester = remember { FocusRequester() }
+    val searchFocusRequester = remember { FocusRequester() }
     var isTextInputFocused by remember { mutableStateOf(false) }
+    var alphabetIndexVisible by rememberSaveable { mutableStateOf(true) }
+    val nowEpochMillis = remember(snapshot) { Clock.System.now().toEpochMilliseconds() }
+    val catalogueMode = hostedSection == AppSection.LIBRARY
+    val focusedItem = screenModel.focusedItem
 
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
     }
+    LaunchedEffect(screenModel.focusableItemIds) {
+        appState.reconcileFocus(screenModel.focusableItemIds)
+    }
 
-    Column(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .testTag(LunarTestTags.LIBRARY_PANEL)
             .focusRequester(focusRequester)
             .focusable()
             .onKeyEvent { event ->
-                if (isTextInputFocused) {
+                if (isTextInputFocused || event.type != KeyEventType.KeyDown) {
                     return@onKeyEvent false
                 }
-                if (event.type != KeyEventType.KeyDown) {
-                    return@onKeyEvent false
+                when {
+                    event.key == Key.K && (event.isCtrlPressed || event.isMetaPressed) && catalogueMode -> {
+                        searchFocusRequester.requestFocus()
+                        true
+                    }
+
+                    event.key == Key.Enter && focusedItem != null -> {
+                        appState.openScore(focusedItem)
+                        true
+                    }
+
+                    (event.key == Key.DirectionDown || event.key == Key.DirectionUp) && catalogueMode -> {
+                        appState.moveFocus(
+                            orderedItemIds = screenModel.visibleItems.map { it.id },
+                            delta = if (event.key == Key.DirectionDown) 1 else -1,
+                        )
+                        true
+                    }
+
+                    event.key == Key.Escape && (appState.selectedScoreIds.isNotEmpty() || focusedItem != null) -> {
+                        if (appState.selectedScoreIds.isNotEmpty()) {
+                            appState.clearScoreSelection()
+                        } else {
+                            appState.clearFocus()
+                        }
+                        true
+                    }
+
+                    viewerKeybindings.actionForKeyId(viewerShortcutKeyId(event.key)) ==
+                        ViewerShortcutAction.OPEN_RANDOM_SCORE -> {
+                        appState.openRandomSheet(screenModel.currentScopeItems)
+                        true
+                    }
+
+                    else -> false
                 }
-                if (viewerKeybindings.actionForKeyId(viewerShortcutKeyId(event.key)) != ViewerShortcutAction.OPEN_RANDOM_SCORE) {
-                    return@onKeyEvent false
-                }
-                appState.openRandomSheet(screenModel.currentScopeItems)
-                true
             }
             .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        HeaderPanel(
-            visibleCount = screenModel.headerVisibleCount,
-            headerTotalCount = screenModel.headerTotalCount,
-            visibleScoreCount = screenModel.visibleScoreCount,
-            hiddenScoreCount = screenModel.hiddenScoreCount,
-        )
-        if (showArrangementSwitcher && hostedSection == AppSection.LIBRARY) {
-            ArrangementSwitcher(appState = appState)
-        }
-        if (
-            screenModel.visibleScoreCount > 0 &&
-            hostedSection != AppSection.SONGBOOKS &&
-            !showingHiddenScores
+        val wide = maxWidth >= DetailPanelSideBreakpoint
+        val showDetailPanel = focusedItem != null && screenModel.selectedItems.isEmpty()
+
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            RandomLibraryActionsRow(
-                availableCount = screenModel.currentScopeItems.size,
-                onOpenRandomSheet = { appState.openRandomSheet(screenModel.currentScopeItems) },
-                onCreateRandomSetlist = appState::showRandomSetlistBuilder,
-            )
-        }
-        if (hostedSection == AppSection.LIBRARY) {
-            SearchAndSortBar(
-                appState = appState,
-                onTextInputFocusChanged = { isTextInputFocused = it },
-            )
-            RefineLibraryPanel(
-                availableCollections = screenModel.filterCollections,
-                availableTags = screenModel.filterTags,
-                visibleCount = screenModel.visibleItems.size,
-                totalCount = screenModel.refinementTotalCount,
-                appState = appState,
-            )
-        }
-        if (screenModel.selectedItems.isNotEmpty() && !showingHiddenScores) {
-            SelectionActionBar(
-                selectedCount = screenModel.selectedItems.size,
-                onAddToSetlist = appState::showSetlistPicker,
-                onAddToSongbook = appState::showSongbookPicker,
-                canCreateSongbooks = appState.canCreateSongbooks,
-                onClear = appState::clearScoreSelection,
-            )
-        }
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                LibraryHeading(
+                    visibleScoreCount = screenModel.visibleScoreCount,
+                    hiddenScoreCount = screenModel.hiddenScoreCount,
+                    shownCount = screenModel.visibleItems.size.takeIf { catalogueMode },
+                    totalInView = screenModel.refinementTotalCount,
+                )
+                if (showArrangementSwitcher && hostedSection == AppSection.LIBRARY) {
+                    ArrangementSwitcher(appState = appState)
+                }
+                if (catalogueMode) {
+                    if (screenModel.selectedItems.isNotEmpty()) {
+                        LibrarySelectionBar(
+                            selectedItems = screenModel.selectedItems,
+                            setlists = snapshot.setlists,
+                            songbooks = snapshot.songbooks,
+                            appState = appState,
+                        )
+                    } else {
+                        LibraryToolbar(
+                            appState = appState,
+                            searchFocusRequester = searchFocusRequester,
+                            onTextInputFocusChanged = { isTextInputFocused = it },
+                            alphabetIndexAvailable = appState.layoutMode == LibraryLayoutMode.LIST &&
+                                screenModel.catalogueIndexAvailable,
+                            alphabetIndexVisible = alphabetIndexVisible,
+                            onToggleAlphabetIndex = { alphabetIndexVisible = !alphabetIndexVisible },
+                            filterCollections = screenModel.filterCollections,
+                            filterTags = screenModel.filterTags,
+                            randomScoreAvailable = screenModel.currentScopeItems.isNotEmpty(),
+                            onOpenRandomScore = { appState.openRandomSheet(screenModel.currentScopeItems) },
+                        )
+                    }
+                    ActiveFilterChips(appState = appState)
+                }
 
-        // Main content area
-        Box(modifier = Modifier.weight(1f)) {
-            when (hostedSection) {
-                AppSection.SETLISTS -> SetlistsContent(
+                Box(modifier = Modifier.weight(1f)) {
+                    LibraryContent(
+                        snapshot = snapshot,
+                        screenModel = screenModel,
+                        appState = appState,
+                        showAlphabetIndex = alphabetIndexVisible,
+                        nowEpochMillis = nowEpochMillis,
+                    )
+                }
+
+                if (showDetailPanel && !wide) {
+                    ScoreDetailPanel(
+                        item = focusedItem,
+                        snapshot = snapshot,
+                        appState = appState,
+                        layout = DetailPanelLayout.BOTTOM,
+                        nowEpochMillis = nowEpochMillis,
+                        onTextInputFocusChanged = { isTextInputFocused = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = this@BoxWithConstraints.maxHeight * 0.45f),
+                    )
+                }
+            }
+
+            if (showDetailPanel && wide) {
+                ScoreDetailPanel(
+                    item = focusedItem,
                     snapshot = snapshot,
-                    screenModel = screenModel,
                     appState = appState,
-                )
-
-                AppSection.SONGBOOKS -> SongbooksOverview(
-                    songbooks = snapshot.songbooks,
-                    itemsById = screenModel.itemsById,
-                    onOpenSongbook = appState::openSongbook,
-                    onDeleteSongbook = appState::requestDeleteSongbook,
-                    onOpenLibrary = { appState.selectSection(AppSection.LIBRARY) },
-                )
-
-                else -> LibraryBrowseContent(
-                    screenModel = screenModel,
-                    appState = appState,
+                    layout = DetailPanelLayout.SIDE,
+                    nowEpochMillis = nowEpochMillis,
+                    onTextInputFocusChanged = { isTextInputFocused = it },
+                    modifier = Modifier
+                        .width(DetailPanelSideWidth)
+                        .fillMaxHeight(),
                 )
             }
         }
-    }
-
-    LibraryScreenDialogs(
-        runtime = runtime,
-        snapshot = snapshot,
-        screenModel = screenModel,
-        appState = appState,
-    )
-}
-
-@Composable
-private fun LibraryBrowseContent(
-    screenModel: LibraryScreenModel,
-    appState: LunarAppState,
-) {
-    when (appState.browseMode) {
-        LibraryBrowseMode.ALL -> {
-            if (screenModel.visibleItems.isEmpty()) {
-                EmptyLibraryState(
-                    totalItemCount = screenModel.visibleScoreCount,
-                    onOpenImport = { appState.selectSection(AppSection.IMPORT) },
-                    onClearFilters = appState::clearFilters,
-                )
-            } else {
-                FlatScoreList(items = screenModel.visibleItems, appState = appState)
-            }
-        }
-
-        LibraryBrowseMode.HIDDEN -> {
-            if (screenModel.visibleItems.isEmpty()) {
-                HiddenScoresEmptyState(
-                    hiddenCount = screenModel.hiddenScoreCount,
-                    onClearFilters = appState::clearFilters,
-                )
-            } else {
-                FlatScoreList(
-                    items = screenModel.visibleItems,
-                    appState = appState,
-                    mode = ScoreListMode.HIDDEN,
-                )
-            }
-        }
-
-        LibraryBrowseMode.BY_COLLECTION -> {
-            val group = appState.selectedGroup
-            if (group == null) {
-                GroupList(
-                    groups = screenModel.collections,
-                    itemsByGroup = screenModel.collectionGroups,
-                    emptyLabel = "No collections found. Import PDFs with a collection folder strategy.",
-                    onSelectGroup = appState::selectGroup,
-                )
-            } else {
-                DrillDownScoreList(
-                    groupName = group,
-                    items = screenModel.visibleItems.itemsInBrowseGroup(
-                        browseMode = LibraryBrowseMode.BY_COLLECTION,
-                        groupName = group,
-                    ),
-                    appState = appState,
-                    onBack = appState::clearGroupSelection,
-                )
-            }
-        }
-
-        LibraryBrowseMode.BY_COMPOSER -> {
-            val group = appState.selectedGroup
-            if (group == null) {
-                GroupList(
-                    groups = screenModel.composers,
-                    itemsByGroup = screenModel.composerGroups,
-                    emptyLabel = "No composers found. Import PDFs with a composer folder strategy.",
-                    onSelectGroup = appState::selectGroup,
-                )
-            } else {
-                DrillDownScoreList(
-                    groupName = group,
-                    items = screenModel.visibleItems.itemsInBrowseGroup(
-                        browseMode = LibraryBrowseMode.BY_COMPOSER,
-                        groupName = group,
-                    ),
-                    appState = appState,
-                    onBack = appState::clearGroupSelection,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SetlistsContent(
-    snapshot: LibrarySnapshot,
-    screenModel: LibraryScreenModel,
-    appState: LunarAppState,
-) {
-    val activeTemporarySetlist = screenModel.activeTemporarySetlist
-    val activeSetlist = screenModel.activeSetlist
-    if (activeTemporarySetlist != null) {
-        TemporarySetlistDetailView(
-            session = activeTemporarySetlist,
-            items = screenModel.activeTemporarySetlistItems,
-            appState = appState,
-            onBack = appState::closeSetlist,
-            onSave = appState::showSaveTemporarySetlistDialog,
-            onDiscard = appState::discardTemporarySetlist,
-        )
-    } else if (activeSetlist == null) {
-        SetlistsOverview(
-            temporarySetlist = screenModel.temporarySetlist,
-            setlists = snapshot.setlists,
-            itemsById = screenModel.itemsById,
-            onOpenTemporarySetlist = appState::openTemporarySetlist,
-            onSaveTemporarySetlist = appState::showSaveTemporarySetlistDialog,
-            onDiscardTemporarySetlist = appState::discardTemporarySetlist,
-            onOpenSetlist = appState::openSetlist,
-            onDeleteSetlist = appState::requestDeleteSetlist,
-            onOpenLibrary = { appState.selectSection(AppSection.LIBRARY) },
-        )
-    } else {
-        SetlistDetailView(
-            setlist = activeSetlist,
-            items = screenModel.activeSetlistItems,
-            appState = appState,
-            onBack = appState::closeSetlist,
-            onDeleteSetlist = {
-                appState.requestDeleteSetlist(activeSetlist.id)
-            },
-        )
-    }
-}
-
-@Composable
-private fun LibraryScreenDialogs(
-    runtime: PlatformRuntime,
-    snapshot: LibrarySnapshot,
-    screenModel: LibraryScreenModel,
-    appState: LunarAppState,
-) {
-    val editingItem = screenModel.editingItem
-    if (editingItem != null) {
-        MetadataEditorDialog(
-            item = editingItem,
-            onDismiss = appState::dismissEditor,
-            onSave = { title, composer, tags, collection, isFavorite ->
-                appState.saveMetadata(
-                    itemId = editingItem.id,
-                    title = title,
-                    composer = composer,
-                    tags = tags,
-                    collection = collection,
-                    isFavorite = isFavorite,
-                )
-            },
-        )
     }
 
     if (screenModel.deleteCandidate != null) {
@@ -371,44 +270,18 @@ private fun LibraryScreenDialogs(
         )
     }
 
-    if (appState.setlistPickerVisible && screenModel.selectedItems.isNotEmpty()) {
-        AddToSetlistDialog(
-            selectedCount = screenModel.selectedItems.size,
-            setlists = snapshot.setlists,
-            onDismiss = appState::dismissSetlistPicker,
-            onCreateSetlist = { name ->
-                appState.createSetlist(
-                    name = name,
-                    itemIds = screenModel.selectedItems.map { it.id },
-                )
-            },
-            onAddToSetlist = { setlistId ->
-                appState.addSelectionToSetlist(
-                    setlistId = setlistId,
-                    itemIds = screenModel.selectedItems.map { it.id },
-                )
-            },
-        )
-    }
-
-    if (appState.songbookPickerVisible && screenModel.selectedItems.isNotEmpty()) {
-        AddToSongbookDialog(
+    val songbookTargets = screenModel.pickerTargetItems
+    if (appState.newSongbookDialogVisible && songbookTargets.isNotEmpty()) {
+        NewSongbookDialog(
             runtime = runtime,
-            selectedCount = screenModel.selectedItems.size,
-            songbooks = snapshot.songbooks,
+            selectedCount = songbookTargets.size,
             coverImageSupported = appState.canPickSongbookCover,
-            onDismiss = appState::dismissSongbookPicker,
+            onDismiss = appState::dismissNewSongbookDialog,
             onCreateSongbook = { name, coverImage ->
                 appState.createSongbook(
                     name = name,
-                    items = screenModel.selectedItems,
+                    items = songbookTargets,
                     coverImage = coverImage,
-                )
-            },
-            onAddToSongbook = { songbookId ->
-                appState.addSelectionToSongbook(
-                    songbookId = songbookId,
-                    items = screenModel.selectedItems,
                 )
             },
         )
@@ -451,79 +324,163 @@ private fun LibraryScreenDialogs(
             onConfirm = appState::confirmDeleteSongbook,
         )
     }
+}
 
-    if (screenModel.infoItem != null) {
-        ScoreInfoDialog(
-            item = screenModel.infoItem,
-            metadata = screenModel.infoMetadata,
-            loading = appState.infoMetadataLoading,
-            errorMessage = appState.infoMetadataError,
-            onDismiss = appState::dismissScoreInfo,
+private val DetailPanelSideWidth = 360.dp
+
+@Composable
+private fun LibraryContent(
+    snapshot: LibrarySnapshot,
+    screenModel: LibraryScreenModel,
+    appState: LunarAppState,
+    showAlphabetIndex: Boolean,
+    nowEpochMillis: Long,
+) {
+    when (appState.hostedSection) {
+        AppSection.SETLISTS -> {
+            val activeTemporarySetlist = screenModel.activeTemporarySetlist
+            val activeSetlist = screenModel.activeSetlist
+            if (activeTemporarySetlist != null) {
+                TemporarySetlistDetailView(
+                    session = activeTemporarySetlist,
+                    items = screenModel.activeTemporarySetlistItems,
+                    appState = appState,
+                    onBack = appState::closeSetlist,
+                    onSave = appState::showSaveTemporarySetlistDialog,
+                    onDiscard = appState::discardTemporarySetlist,
+                )
+            } else if (activeSetlist == null) {
+                SetlistsOverview(
+                    temporarySetlist = screenModel.temporarySetlist,
+                    setlists = snapshot.setlists,
+                    itemsById = screenModel.itemsById,
+                    randomSetlistAvailable = screenModel.currentScopeItems.isNotEmpty(),
+                    onCreateRandomSetlist = appState::showRandomSetlistBuilder,
+                    onOpenTemporarySetlist = appState::openTemporarySetlist,
+                    onSaveTemporarySetlist = appState::showSaveTemporarySetlistDialog,
+                    onDiscardTemporarySetlist = appState::discardTemporarySetlist,
+                    onOpenSetlist = appState::openSetlist,
+                    onDeleteSetlist = appState::requestDeleteSetlist,
+                    onOpenLibrary = { appState.selectSection(AppSection.LIBRARY) },
+                )
+            } else {
+                SetlistDetailView(
+                    setlist = activeSetlist,
+                    items = screenModel.activeSetlistItems,
+                    appState = appState,
+                    onBack = appState::closeSetlist,
+                    onDeleteSetlist = {
+                        appState.requestDeleteSetlist(activeSetlist.id)
+                    },
+                )
+            }
+        }
+
+        AppSection.SONGBOOKS -> {
+            SongbooksOverview(
+                songbooks = snapshot.songbooks,
+                itemsById = screenModel.itemsById,
+                onOpenSongbook = appState::openSongbook,
+                onDeleteSongbook = appState::requestDeleteSongbook,
+                onOpenLibrary = { appState.selectSection(AppSection.LIBRARY) },
+            )
+        }
+
+        else -> {
+            if (screenModel.visibleItems.isEmpty()) {
+                if (appState.showingHiddenScores) {
+                    HiddenScoresEmptyState(
+                        hiddenCount = screenModel.hiddenScoreCount,
+                        onClearFilters = appState::clearFilters,
+                    )
+                } else {
+                    EmptyLibraryState(
+                        totalItemCount = screenModel.visibleScoreCount,
+                        onOpenImport = { appState.selectSection(AppSection.IMPORT) },
+                        onClearFilters = appState::clearFilters,
+                    )
+                }
+            } else {
+                ScoreCatalogue(
+                    screenModel = screenModel,
+                    appState = appState,
+                    showAlphabetIndex = showAlphabetIndex,
+                    nowEpochMillis = nowEpochMillis,
+                )
+            }
+        }
+
+    }
+}
+
+@Composable
+private fun ScoreCatalogue(
+    screenModel: LibraryScreenModel,
+    appState: LunarAppState,
+    showAlphabetIndex: Boolean,
+    nowEpochMillis: Long,
+) {
+    val mode = if (appState.showingHiddenScores) ScoreListMode.HIDDEN else ScoreListMode.NORMAL
+    val orderedIds = screenModel.visibleItems.map { it.id }
+    when (appState.layoutMode) {
+        LibraryLayoutMode.GRID -> LibraryGrid(
+            items = screenModel.visibleItems,
+            appState = appState,
+            mode = mode,
+            onCardClick = { item -> appState.focusScore(item.id) },
+        )
+
+        LibraryLayoutMode.LIST -> LibraryCatalogue(
+            groups = screenModel.catalogueGroups,
+            sortOption = appState.query.sortOption,
+            jumpBackInItems = screenModel.jumpBackInItems,
+            focusedItemId = appState.focusedScoreId,
+            selectedItemIds = appState.selectedScoreIds,
+            showAlphabetIndex = showAlphabetIndex,
+            nowEpochMillis = nowEpochMillis,
+            selectionEnabled = mode == ScoreListMode.NORMAL,
+            onRowClick = { item, kind ->
+                when (kind) {
+                    CatalogueClickKind.FOCUS -> appState.focusScore(item.id)
+                    CatalogueClickKind.TOGGLE -> appState.toggleScoreSelection(item.id)
+                    CatalogueClickKind.RANGE -> appState.extendScoreSelection(item.id, orderedIds)
+                }
+            },
+            onRowOpen = { item -> appState.openScore(item) },
+            onToggleSelection = { item -> appState.toggleScoreSelection(item.id) },
         )
     }
 }
 
 @Composable
-private fun HeaderPanel(
-    visibleCount: Int,
-    headerTotalCount: Int,
+private fun LibraryHeading(
     visibleScoreCount: Int,
     hiddenScoreCount: Int,
+    shownCount: Int?,
+    totalInView: Int,
 ) {
-    val themePalette = lunarThemePalette()
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                Brush.linearGradient(
-                    listOf(
-                        themePalette.headerGradientStart,
-                        themePalette.headerGradientEnd,
-                    )
-                ),
-                shape = MaterialTheme.shapes.extraLarge,
-            )
-            .padding(horizontal = 18.dp, vertical = 12.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "🎵  Lunar",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.SemiBold,
-                ),
-                color = themePalette.headerForeground,
-                modifier = Modifier.weight(1f),
-            )
-            SummaryPill("${visibleScoreCount.scoreLabel()}")
-            if (hiddenScoreCount > 0) {
-                SummaryPill("$hiddenScoreCount hidden")
-            }
-            if (visibleCount != headerTotalCount) {
-                SummaryPill("$visibleCount shown")
-            }
-        }
-    }
-}
-
-@Composable
-private fun SummaryPill(text: String) {
-    val themePalette = lunarThemePalette()
-
-    Surface(
-        color = themePalette.headerForeground.copy(alpha = 0.18f),
-        shape = MaterialTheme.shapes.large,
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Bottom,
     ) {
         Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.labelLarge,
-            color = themePalette.headerForeground,
+            text = "Library",
+            style = MaterialTheme.typography.headlineSmall.copy(
+                fontFamily = FontFamily.Serif,
+                fontWeight = FontWeight.SemiBold,
+            ),
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = buildList {
+                add(visibleScoreCount.scoreLabel())
+                if (hiddenScoreCount > 0) add("$hiddenScoreCount hidden")
+                if (shownCount != null && shownCount != totalInView) add("$shownCount shown")
+            }.joinToString(", "),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 3.dp),
         )
     }
 }
@@ -570,7 +527,7 @@ private fun BrowseModeTab(arrangement: LibraryArrangement, selected: Boolean, on
     }
 }
 
-// ─── Flat score list (All view) ──────────────────────────────────────────────
+// ─── Flat score list (setlist detail) ──────────────────────────────────────────────
 
 private enum class ScoreListMode {
     NORMAL,
@@ -586,160 +543,6 @@ private fun FlatScoreList(
     when (appState.layoutMode) {
         LibraryLayoutMode.GRID -> LibraryGrid(items = items, appState = appState, mode = mode)
         LibraryLayoutMode.LIST -> LibraryList(items = items, appState = appState, mode = mode)
-    }
-}
-
-// ─── Group list (Collection / Composer root view) ────────────────────────────
-
-@Composable
-private fun GroupList(
-    groups: List<String>,
-    itemsByGroup: Map<String, List<SheetMusicItem>>,
-    emptyLabel: String,
-    onSelectGroup: (String) -> Unit,
-) {
-    if (groups.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = emptyLabel,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            items(
-                count = groups.size,
-                key = { index -> groups[index] },
-            ) { index ->
-                val name = groups[index]
-                val count = itemsByGroup[name]?.size ?: 0
-                GroupCard(name = name, scoreCount = count, onClick = { onSelectGroup(name) })
-            }
-        }
-    }
-}
-
-@Composable
-private fun GroupCard(name: String, scoreCount: Int, onClick: () -> Unit) {
-    val themePalette = lunarThemePalette()
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.large,
-        colors = androidx.compose.material3.CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
-        elevation = androidx.compose.material3.CardDefaults.cardElevation(defaultElevation = 2.dp),
-    ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            // Accent bar
-            Box(
-                modifier = Modifier
-                    .width(5.dp)
-                    .heightIn(min = 64.dp)
-                    .fillMaxHeight()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                themePalette.accentGradientStart,
-                                themePalette.accentGradientEnd,
-                            )
-                        )
-                    ),
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = "📁  $name",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontFamily = FontFamily.Serif,
-                            fontWeight = FontWeight.SemiBold,
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "$scoreCount score${if (scoreCount == 1) "" else "s"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Text(
-                    text = "▸",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.secondary,
-                )
-            }
-        }
-    }
-}
-
-// ─── Drill-down score list (inside a group) ──────────────────────────────────
-
-@Composable
-private fun DrillDownScoreList(
-    groupName: String,
-    items: List<SheetMusicItem>,
-    appState: LunarAppState,
-    onBack: () -> Unit,
-) {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        // Back bar
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Surface(
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
-                shape = MaterialTheme.shapes.large,
-                modifier = Modifier.clickable(onClick = onBack),
-            ) {
-                Text(
-                    text = "◂  Back",
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-            Text(
-                text = groupName,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.SemiBold,
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            SummaryPillDark("${items.size} scores")
-        }
-        // Score list
-        Box(modifier = Modifier.weight(1f)) {
-            if (items.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = "No scores match the current filters in this group.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else {
-                FlatScoreList(items = items, appState = appState)
-            }
-        }
     }
 }
 
@@ -759,154 +562,12 @@ private fun SummaryPillDark(text: String) {
 }
 
 @Composable
-private fun RandomLibraryActionsRow(
-    availableCount: Int,
-    onOpenRandomSheet: () -> Unit,
-    onCreateRandomSetlist: () -> Unit,
-) {
-    val hasScores = availableCount > 0
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Box(modifier = Modifier.weight(1f)) {
-            OutlinedButton(
-                modifier = Modifier.fillMaxWidth(),
-                enabled = hasScores,
-                onClick = onOpenRandomSheet,
-            ) {
-                Text("Open random sheet")
-            }
-        }
-        Box(modifier = Modifier.weight(1f)) {
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                enabled = hasScores,
-                onClick = onCreateRandomSetlist,
-            ) {
-                Text("Random setlist")
-            }
-        }
-    }
-}
-
-@Composable
-private fun SelectionActionBar(
-    selectedCount: Int,
-    onAddToSetlist: () -> Unit,
-    onAddToSongbook: () -> Unit,
-    canCreateSongbooks: Boolean,
-    onClear: () -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = androidx.compose.material3.CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f),
-        ),
-    ) {
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-        ) {
-            val stackActions = maxWidth < 620.dp
-
-            if (stackActions) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            text = "${selectedCount.scoreLabel()} selected",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontFamily = FontFamily.Serif,
-                                fontWeight = FontWeight.SemiBold,
-                            ),
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                        Text(
-                            text = if (canCreateSongbooks) {
-                                "Add the current selection to a setlist or turn it into a combined songbook."
-                            } else {
-                                "Add the current selection to a saved setlist or clear it."
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        TextButton(onClick = onClear) {
-                            Text("Clear", color = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
-                        Button(onClick = onAddToSetlist) {
-                            Text("Add to setlist")
-                        }
-                        if (canCreateSongbooks) {
-                            OutlinedButton(onClick = onAddToSongbook) {
-                                Text("Add to songbook")
-                            }
-                        }
-                    }
-                }
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            text = "${selectedCount.scoreLabel()} selected",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontFamily = FontFamily.Serif,
-                                fontWeight = FontWeight.SemiBold,
-                            ),
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                        Text(
-                            text = if (canCreateSongbooks) {
-                                "Add the current selection to a saved setlist or build a combined songbook."
-                            } else {
-                                "Add the current selection to a saved setlist or clear it."
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = onClear) {
-                            Text("Clear", color = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
-                        if (canCreateSongbooks) {
-                            OutlinedButton(onClick = onAddToSongbook) {
-                                Text("Add to songbook")
-                            }
-                        }
-                        Button(onClick = onAddToSetlist) {
-                            Text("Add to setlist")
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun SetlistsOverview(
     temporarySetlist: TemporarySetlistSession?,
     setlists: List<LibrarySetlist>,
     itemsById: Map<String, SheetMusicItem>,
+    randomSetlistAvailable: Boolean,
+    onCreateRandomSetlist: () -> Unit,
     onOpenTemporarySetlist: () -> Unit,
     onSaveTemporarySetlist: () -> Unit,
     onDiscardTemporarySetlist: () -> Unit,
@@ -917,7 +578,11 @@ private fun SetlistsOverview(
     val orderedSetlists = setlists.sortedByDescending { it.updatedAtEpochMillis }
 
     if (temporarySetlist == null && orderedSetlists.isEmpty()) {
-        EmptySetlistsState(onOpenLibrary = onOpenLibrary)
+        EmptySetlistsState(
+            randomSetlistAvailable = randomSetlistAvailable,
+            onCreateRandomSetlist = onCreateRandomSetlist,
+            onOpenLibrary = onOpenLibrary,
+        )
         return
     }
 
@@ -925,6 +590,13 @@ private fun SetlistsOverview(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        item(key = "random_setlist") {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                OutlinedButton(enabled = randomSetlistAvailable, onClick = onCreateRandomSetlist) {
+                    Text("Random setlist")
+                }
+            }
+        }
         if (temporarySetlist != null) {
             item(key = "temporary_setlist") {
                 TemporarySetlistCard(
@@ -984,7 +656,11 @@ private fun SongbooksOverview(
 }
 
 @Composable
-private fun EmptySetlistsState(onOpenLibrary: () -> Unit) {
+private fun EmptySetlistsState(
+    randomSetlistAvailable: Boolean,
+    onCreateRandomSetlist: () -> Unit,
+    onOpenLibrary: () -> Unit,
+) {
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = Color.Transparent,
@@ -1021,11 +697,16 @@ private fun EmptySetlistsState(onOpenLibrary: () -> Unit) {
                     .padding(top = 12.dp)
                     .widthIn(max = 560.dp),
             )
-            Button(
-                onClick = onOpenLibrary,
+            Row(
                 modifier = Modifier.padding(top = 18.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("Browse scores")
+                OutlinedButton(enabled = randomSetlistAvailable, onClick = onCreateRandomSetlist) {
+                    Text("Random setlist")
+                }
+                Button(onClick = onOpenLibrary) {
+                    Text("Browse scores")
+                }
             }
         }
     }
@@ -1368,429 +1049,6 @@ private fun SetlistDetailView(
 }
 
 @Composable
-private fun SearchAndSortBar(
-    appState: LunarAppState,
-    onTextInputFocusChanged: (Boolean) -> Unit,
-) {
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val stackControls = maxWidth < 680.dp
-
-        if (stackControls) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                LibrarySearchField(
-                    searchText = appState.query.searchText,
-                    onValueChange = appState::updateSearchText,
-                    onFocusChanged = onTextInputFocusChanged,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                SearchAndSortControlsRow(
-                    appState = appState,
-                    modifier = Modifier.fillMaxWidth(),
-                    sortButtonModifier = Modifier.weight(1f),
-                )
-            }
-        } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                LibrarySearchField(
-                    searchText = appState.query.searchText,
-                    onValueChange = appState::updateSearchText,
-                    onFocusChanged = onTextInputFocusChanged,
-                    modifier = Modifier.weight(1f),
-                )
-                SearchAndSortControlsRow(
-                    appState = appState,
-                    sortButtonModifier = Modifier.widthIn(min = 144.dp, max = 164.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LibrarySearchField(
-    searchText: String,
-    onValueChange: (String) -> Unit,
-    onFocusChanged: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    OutlinedTextField(
-        value = searchText,
-        onValueChange = onValueChange,
-        modifier = modifier
-            .onFocusChanged { onFocusChanged(it.hasFocus) }
-            .testTag(LunarTestTags.LIBRARY_SEARCH)
-            .semantics {
-                contentDescription = "Library search"
-            },
-        singleLine = true,
-        label = { Text("Search title, composer, tags...") },
-    )
-}
-
-@Composable
-private fun SearchAndSortControlsRow(
-    appState: LunarAppState,
-    modifier: Modifier = Modifier,
-    sortButtonModifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        SortMenuButton(
-            current = appState.query.sortOption,
-            onSelect = appState::updateSortOption,
-            modifier = sortButtonModifier,
-        )
-        DirectionToggle(
-            sortDirection = appState.query.sortDirection,
-            onToggle = {
-                appState.updateSortDirection(
-                    if (appState.query.sortDirection == SortDirection.ASCENDING) {
-                        SortDirection.DESCENDING
-                    } else {
-                        SortDirection.ASCENDING
-                    }
-                )
-            },
-        )
-        LayoutMenuButton(
-            selected = appState.layoutMode,
-            onSelect = appState::updateLayoutMode,
-        )
-        FilterChip(
-            selected = appState.query.favoritesOnly,
-            onClick = appState::toggleFavoriteFilter,
-                label = { Text("★") },
-        )
-    }
-}
-
-@Composable
-private fun SortMenuButton(
-    current: LibrarySortOption,
-    onSelect: (LibrarySortOption) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    Box(modifier = modifier) {
-        OutlinedButton(
-            onClick = { expanded = true },
-            modifier = Modifier
-                    .fillMaxWidth()
-                    .semantics {
-                        contentDescription = "Sort by ${current.label()}"
-                    },
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(current.label())
-                ChevronDownGlyph(color = MaterialTheme.colorScheme.onSurface)
-            }
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            LibrarySortOption.entries.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(option.label()) },
-                    onClick = {
-                        expanded = false
-                        onSelect(option)
-                    },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RefineLibraryPanel(
-    availableCollections: List<String>,
-    availableTags: List<String>,
-    visibleCount: Int,
-    totalCount: Int,
-    appState: LunarAppState,
-) {
-    val hasViewerFilters = totalCount > 0
-    val hasAvailableFilters = availableCollections.isNotEmpty() || availableTags.isNotEmpty() || hasViewerFilters
-    val hasActiveRefinements = appState.query.selectedCollection != null ||
-        appState.query.selectedTags.isNotEmpty() ||
-        appState.query.viewerSupport != ViewerSupportFilter.ALL ||
-        appState.query.favoritesOnly
-
-    if (!hasAvailableFilters && !hasActiveRefinements) {
-        return
-    }
-
-    var isExpanded by rememberSaveable(hasActiveRefinements) {
-        mutableStateOf(hasActiveRefinements)
-    }
-    val selectedTags = appState.query.selectedTags
-    val activeRefinementCount = selectedTags.size +
-        (if (appState.query.selectedCollection != null) 1 else 0) +
-        (if (appState.query.viewerSupport != ViewerSupportFilter.ALL) 1 else 0) +
-        (if (appState.query.favoritesOnly) 1 else 0)
-    val orderedCollections = availableCollections.sortedWith(String.CASE_INSENSITIVE_ORDER)
-    val orderedTags = availableTags.sortedWith(
-        compareBy<String> { if (it in selectedTags) 0 else 1 }
-            .then(String.CASE_INSENSITIVE_ORDER)
-    )
-    val summaryText: String? = when {
-        hasActiveRefinements && visibleCount == totalCount ->
-            "Browsing ${totalCount.scoreLabel()} with $activeRefinementCount active filter${if (activeRefinementCount == 1) "" else "s"}."
-        hasActiveRefinements ->
-            "Showing ${visibleCount.scoreLabel()} out of ${totalCount.scoreLabel()} with $activeRefinementCount active filter${if (activeRefinementCount == 1) "" else "s"}."
-        visibleCount != totalCount ->
-            "Showing ${visibleCount.scoreLabel()} out of ${totalCount.scoreLabel()}."
-        else -> null
-    }
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize(),
-        colors = androidx.compose.material3.CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        text = "Refine library",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontFamily = FontFamily.Serif,
-                            fontWeight = FontWeight.SemiBold,
-                        ),
-                    )
-                }
-                TextButton(onClick = { isExpanded = !isExpanded }) {
-                    Text(if (isExpanded) "Hide filters" else "Show filters")
-                }
-            }
-            if (summaryText != null) {
-                Text(
-                    text = summaryText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (hasActiveRefinements) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = appState::clearRefinements) {
-                        Text("Clear filters")
-                    }
-                }
-            }
-
-            if (isExpanded && orderedCollections.isNotEmpty()) {
-                FilterChipSection(
-                    title = "Collection",
-                    supportingText = "Choose one collection at a time.",
-                ) {
-                    FilterChip(
-                        selected = appState.query.selectedCollection == null,
-                        onClick = { appState.selectCollection(null) },
-                        label = { Text("All collections") },
-                    )
-                    orderedCollections.forEach { collection ->
-                        FilterChip(
-                            selected = appState.query.selectedCollection.equals(collection, ignoreCase = true),
-                            onClick = { appState.selectCollection(collection) },
-                            label = { Text(collection) },
-                        )
-                    }
-                }
-            }
-
-            if (isExpanded && hasViewerFilters) {
-                FilterChipSection(
-                    title = "Viewer support",
-                    supportingText = "Choose which viewer a score opens with.",
-                ) {
-                    ViewerSupportFilter.entries.forEach { filter ->
-                        FilterChip(
-                            selected = appState.query.viewerSupport == filter,
-                            onClick = { appState.updateViewerSupportFilter(filter) },
-                            label = { Text(filter.label()) },
-                        )
-                    }
-                }
-            }
-
-            if (isExpanded && orderedTags.isNotEmpty()) {
-                FilterChipSection(
-                    title = "Tags",
-                    supportingText = if (selectedTags.size > 1) {
-                        "Selected tags use AND matching."
-                    } else {
-                        "Choose one or more tags to narrow the list."
-                    },
-                ) {
-                    orderedTags.forEach { tag ->
-                        FilterChip(
-                            selected = tag in selectedTags,
-                            onClick = { appState.toggleTag(tag) },
-                            label = { Text(tag) },
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun FilterChipSection(
-    title: String,
-    supportingText: String,
-    content: @Composable RowScope.() -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelLarge,
-        )
-        Text(
-            text = supportingText,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            content = content,
-        )
-    }
-}
-
-@Composable
-private fun DirectionToggle(
-    sortDirection: SortDirection,
-    onToggle: () -> Unit,
-) {
-    CompactControlButton(
-        onClick = onToggle,
-        contentDescription = if (sortDirection == SortDirection.ASCENDING) {
-            "Sort ascending"
-        } else {
-            "Sort descending"
-        },
-    ) { contentColor ->
-        SortDirectionGlyph(
-            sortDirection = sortDirection,
-            color = contentColor,
-        )
-    }
-}
-
-@Composable
-private fun LayoutMenuButton(
-    selected: LibraryLayoutMode,
-    onSelect: (LibraryLayoutMode) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    Box {
-        CompactControlButton(
-            onClick = { expanded = true },
-            contentDescription = "Layout options (${selected.label()})",
-        ) { contentColor ->
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                LayoutGlyph(
-                    mode = selected,
-                    color = contentColor,
-                )
-                ChevronDownGlyph(color = contentColor)
-            }
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            LibraryLayoutMode.entries.forEach { mode ->
-                DropdownMenuItem(
-                    text = { Text(mode.label()) },
-                    onClick = {
-                        expanded = false
-                        onSelect(mode)
-                    },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun CompactControlButton(
-    onClick: () -> Unit,
-    contentDescription: String,
-    modifier: Modifier = Modifier,
-    content: @Composable (Color) -> Unit,
-) {
-    val shape = MaterialTheme.shapes.medium
-
-    LunarTooltip(contentDescription, modifier = modifier) {
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = shape,
-            modifier = Modifier
-                .size(44.dp)
-                .border(
-                    width = 1.dp,
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                    shape = shape,
-                )
-                .semantics {
-                    this.contentDescription = contentDescription
-                }
-                .clickable(onClick = onClick),
-        ) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                content(MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-    }
-}
-
-@Composable
 private fun LibraryActionIconButton(
     onClick: () -> Unit,
     contentDescription: String,
@@ -1938,181 +1196,6 @@ private fun LibraryItemQuickActions(
 }
 
 @Composable
-private fun SortDirectionGlyph(
-    sortDirection: SortDirection,
-    color: Color,
-) {
-    val barWidths = if (sortDirection == SortDirection.ASCENDING) {
-        listOf(6.dp, 9.dp, 12.dp)
-    } else {
-        listOf(12.dp, 9.dp, 6.dp)
-    }
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            barWidths.forEach { width ->
-                Box(
-                    modifier = Modifier
-                        .width(width)
-                        .height(2.dp)
-                        .background(
-                            color = color,
-                            shape = MaterialTheme.shapes.small,
-                        ),
-                )
-            }
-        }
-        DirectionArrowGlyph(
-            sortDirection = sortDirection,
-            color = color,
-        )
-    }
-}
-
-@Composable
-private fun DirectionArrowGlyph(
-    sortDirection: SortDirection,
-    color: Color,
-) {
-    Canvas(
-        modifier = Modifier
-            .width(8.dp)
-            .height(12.dp),
-    ) {
-        val strokeWidth = size.minDimension * 0.28f
-        val centerX = size.width / 2f
-
-        if (sortDirection == SortDirection.ASCENDING) {
-            drawLine(
-                color = color,
-                start = Offset(centerX, size.height * 0.85f),
-                end = Offset(centerX, size.height * 0.2f),
-                strokeWidth = strokeWidth,
-                cap = StrokeCap.Round,
-            )
-            drawLine(
-                color = color,
-                start = Offset(centerX, size.height * 0.2f),
-                end = Offset(size.width * 0.18f, size.height * 0.42f),
-                strokeWidth = strokeWidth,
-                cap = StrokeCap.Round,
-            )
-            drawLine(
-                color = color,
-                start = Offset(centerX, size.height * 0.2f),
-                end = Offset(size.width * 0.82f, size.height * 0.42f),
-                strokeWidth = strokeWidth,
-                cap = StrokeCap.Round,
-            )
-        } else {
-            drawLine(
-                color = color,
-                start = Offset(centerX, size.height * 0.15f),
-                end = Offset(centerX, size.height * 0.8f),
-                strokeWidth = strokeWidth,
-                cap = StrokeCap.Round,
-            )
-            drawLine(
-                color = color,
-                start = Offset(centerX, size.height * 0.8f),
-                end = Offset(size.width * 0.18f, size.height * 0.58f),
-                strokeWidth = strokeWidth,
-                cap = StrokeCap.Round,
-            )
-            drawLine(
-                color = color,
-                start = Offset(centerX, size.height * 0.8f),
-                end = Offset(size.width * 0.82f, size.height * 0.58f),
-                strokeWidth = strokeWidth,
-                cap = StrokeCap.Round,
-            )
-        }
-    }
-}
-
-@Composable
-private fun LayoutGlyph(
-    mode: LibraryLayoutMode,
-    color: Color,
-) {
-    when (mode) {
-        LibraryLayoutMode.GRID -> GridLayoutGlyph(color = color)
-        LibraryLayoutMode.LIST -> ListLayoutGlyph(color = color)
-    }
-}
-
-@Composable
-private fun GridLayoutGlyph(color: Color) {
-    Column(
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        repeat(2) {
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                repeat(2) {
-                    Box(
-                        modifier = Modifier
-                            .size(5.dp)
-                            .background(
-                                color = color,
-                                shape = MaterialTheme.shapes.small,
-                            ),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ListLayoutGlyph(color: Color) {
-    Column(
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        repeat(3) { index ->
-            Box(
-                modifier = Modifier
-                    .width(if (index == 1) 12.dp else 14.dp)
-                    .height(2.dp)
-                    .background(
-                        color = color,
-                        shape = MaterialTheme.shapes.small,
-                    ),
-            )
-        }
-    }
-}
-
-@Composable
-private fun ChevronDownGlyph(color: Color) {
-    Canvas(
-        modifier = Modifier
-            .width(8.dp)
-            .height(8.dp),
-    ) {
-        val strokeWidth = size.minDimension * 0.24f
-        drawLine(
-            color = color,
-            start = Offset(size.width * 0.18f, size.height * 0.32f),
-            end = Offset(size.width / 2f, size.height * 0.68f),
-            strokeWidth = strokeWidth,
-            cap = StrokeCap.Round,
-        )
-        drawLine(
-            color = color,
-            start = Offset(size.width / 2f, size.height * 0.68f),
-            end = Offset(size.width * 0.82f, size.height * 0.32f),
-            strokeWidth = strokeWidth,
-            cap = StrokeCap.Round,
-        )
-    }
-}
-
-@Composable
 private fun DownloadGlyph(color: Color) {
     Canvas(
         modifier = Modifier.size(16.dp),
@@ -2173,6 +1256,7 @@ private fun LibraryGrid(
     items: List<SheetMusicItem>,
     appState: LunarAppState,
     mode: ScoreListMode,
+    onCardClick: (SheetMusicItem) -> Unit = appState::openScore,
 ) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 260.dp),
@@ -2188,6 +1272,7 @@ private fun LibraryGrid(
                 item = items[index],
                 appState = appState,
                 mode = mode,
+                onClick = { onCardClick(items[index]) },
             )
         }
     }
@@ -2211,6 +1296,7 @@ private fun LibraryList(
                 item = items[index],
                 appState = appState,
                 mode = mode,
+                onClick = { appState.openScore(items[index]) },
             )
         }
     }
@@ -2221,9 +1307,10 @@ private fun LibraryCard(
     item: SheetMusicItem,
     appState: LunarAppState,
     mode: ScoreListMode,
+    onClick: () -> Unit,
 ) {
     val themePalette = lunarThemePalette()
-    val isSelected = item.id in appState.selectedScoreIds
+    val isSelected = item.id in appState.selectedScoreIds || item.id == appState.focusedScoreId
     val containerColor = if (isSelected) {
         MaterialTheme.colorScheme.surfaceBright.copy(alpha = 0.96f)
     } else {
@@ -2233,8 +1320,8 @@ private fun LibraryCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .testTag(LunarTestTags.libraryRow(item.id))
-            .clickable { appState.openPreview(item) },
+            .testTag(LibraryTestTags.row(item.id))
+            .clickable(onClick = onClick),
         shape = MaterialTheme.shapes.large,
         colors = androidx.compose.material3.CardDefaults.cardColors(
             containerColor = containerColor,
@@ -2372,7 +1459,7 @@ private fun LibraryCard(
                                 includeDownload = appState.canDownloadScores,
                                 mode = mode,
                             )
-                            androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
+                            androidx.compose.material3.Button(onClick = { appState.openScore(item) }) {
                                 Text("Open")
                             }
                         }
@@ -2413,7 +1500,7 @@ private fun GridLibraryCardFooter(
                     .weight(1f)
                     .horizontalScroll(rememberScrollState()),
             )
-            androidx.compose.material3.Button(onClick = { appState.openPreview(item) }) {
+            androidx.compose.material3.Button(onClick = { appState.openScore(item) }) {
                 Text("Open")
             }
         }
@@ -2569,114 +1656,25 @@ private fun SaveTemporarySetlistDialog(
 }
 
 @Composable
-private fun AddToSetlistDialog(
-    selectedCount: Int,
-    setlists: List<LibrarySetlist>,
-    onDismiss: () -> Unit,
-    onCreateSetlist: (String) -> Unit,
-    onAddToSetlist: (String) -> Unit,
-) {
-    val orderedSetlists = setlists.sortedByDescending { it.updatedAtEpochMillis }
-    var newSetlistName by remember(selectedCount, setlists) { mutableStateOf("") }
-    var selectedSetlistId by remember(selectedCount, setlists) { mutableStateOf<String?>(null) }
-    val trimmedName = newSetlistName.trim()
-    val canConfirm = trimmedName.isNotEmpty() || selectedSetlistId != null
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add ${selectedCount.scoreLabel()} to a setlist") },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 420.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    text = if (orderedSetlists.isEmpty()) {
-                        "Name this setlist. Lunar saves setlists automatically."
-                    } else {
-                        "Create a new setlist or choose an existing one to append these scores."
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    value = newSetlistName,
-                    onValueChange = {
-                        newSetlistName = it
-                        if (it.isNotBlank()) {
-                            selectedSetlistId = null
-                        }
-                    },
-                    label = { Text("New setlist name") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-                if (orderedSetlists.isNotEmpty()) {
-                    FilterChipSection(
-                        title = "Saved setlists",
-                        supportingText = "Picking one appends only scores that are not already in that setlist.",
-                    ) {
-                        orderedSetlists.forEach { setlist ->
-                            FilterChip(
-                                selected = selectedSetlistId == setlist.id,
-                                onClick = {
-                                    selectedSetlistId = if (selectedSetlistId == setlist.id) {
-                                        null
-                                    } else {
-                                        newSetlistName = ""
-                                        setlist.id
-                                    }
-                                },
-                                label = { Text(setlist.name) },
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        },
-        confirmButton = {
-            Button(
-                enabled = canConfirm,
-                onClick = {
-                    selectedSetlistId?.let(onAddToSetlist) ?: onCreateSetlist(trimmedName)
-                },
-            ) {
-                Text(if (selectedSetlistId != null) "Add" else "Save")
-            }
-        },
-    )
-}
-
-@Composable
-private fun AddToSongbookDialog(
+private fun NewSongbookDialog(
     runtime: PlatformRuntime,
     selectedCount: Int,
-    songbooks: List<LibrarySongbook>,
     coverImageSupported: Boolean,
     onDismiss: () -> Unit,
     onCreateSongbook: (String, SelectedCoverImage?) -> Unit,
-    onAddToSongbook: (String) -> Unit,
 ) {
-    val orderedSongbooks = songbooks.sortedByDescending { it.updatedAtEpochMillis }
     val scope = rememberCoroutineScope()
-    var newSongbookName by remember(selectedCount, songbooks) { mutableStateOf("") }
-    var selectedSongbookId by remember(selectedCount, songbooks) { mutableStateOf<String?>(null) }
-    var selectedCoverImage by remember(selectedCount, songbooks) { mutableStateOf<SelectedCoverImage?>(null) }
-    var coverPickerError by remember(selectedCount, songbooks) { mutableStateOf<String?>(null) }
-    var coverPickerBusy by remember(selectedCount, songbooks) { mutableStateOf(false) }
+    var newSongbookName by remember(selectedCount) { mutableStateOf("") }
+    val selectedSongbookId: String? = null
+    var selectedCoverImage by remember(selectedCount) { mutableStateOf<SelectedCoverImage?>(null) }
+    var coverPickerError by remember(selectedCount) { mutableStateOf<String?>(null) }
+    var coverPickerBusy by remember(selectedCount) { mutableStateOf(false) }
     val trimmedName = newSongbookName.trim()
-    val canConfirm = trimmedName.isNotEmpty() || selectedSongbookId != null
+    val canConfirm = trimmedName.isNotEmpty()
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add ${selectedCount.scoreLabel()} to a songbook") },
+        title = { Text("Bind a new songbook") },
         text = {
             Column(
                 modifier = Modifier
@@ -2685,23 +1683,14 @@ private fun AddToSongbookDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
-                    text = if (orderedSongbooks.isEmpty()) {
-                        "Name this songbook and Lunar will merge the selected PDFs into one combined document."
-                    } else {
-                        "Create a new combined PDF or append these scores to an existing songbook."
-                    },
+                    text = "Name this songbook and Lunar will merge ${selectedCount.scoreLabel()} into one combined document.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
                     value = newSongbookName,
-                    onValueChange = {
-                        newSongbookName = it
-                        if (it.isNotBlank()) {
-                            selectedSongbookId = null
-                        }
-                    },
-                    label = { Text("New songbook name") },
+                    onValueChange = { newSongbookName = it },
+                    label = { Text("Songbook name") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                 )
@@ -2773,27 +1762,6 @@ private fun AddToSongbookDialog(
                         }
                     }
                 }
-                if (orderedSongbooks.isNotEmpty()) {
-                    FilterChipSection(
-                        title = "Saved songbooks",
-                        supportingText = "Picking one appends these scores to the existing merged PDF.",
-                    ) {
-                        orderedSongbooks.forEach { songbook ->
-                            FilterChip(
-                                selected = selectedSongbookId == songbook.id,
-                                onClick = {
-                                    selectedSongbookId = if (selectedSongbookId == songbook.id) {
-                                        null
-                                    } else {
-                                        newSongbookName = ""
-                                        songbook.id
-                                    }
-                                },
-                                label = { Text(songbook.name) },
-                            )
-                        }
-                    }
-                }
             }
         },
         dismissButton = {
@@ -2804,12 +1772,9 @@ private fun AddToSongbookDialog(
         confirmButton = {
             Button(
                 enabled = canConfirm,
-                onClick = {
-                    selectedSongbookId?.let(onAddToSongbook)
-                        ?: onCreateSongbook(trimmedName, selectedCoverImage)
-                },
+                onClick = { onCreateSongbook(trimmedName, selectedCoverImage) },
             ) {
-                Text(if (selectedSongbookId != null) "Add" else "Create")
+                Text("Bind")
             }
         },
     )
@@ -2882,7 +1847,7 @@ private fun DeleteSongbookDialog(
 }
 
 @Composable
-private fun ViewerSupportBadge(item: SheetMusicItem) {
+internal fun ViewerSupportBadge(item: SheetMusicItem) {
     val description = when (item.viewerSupport) {
         ScoreViewerSupport.PDF -> "PDF viewer"
         ScoreViewerSupport.LILYPOND -> "LilyPond viewer"
@@ -3106,319 +2071,14 @@ private fun HiddenScoresEmptyState(
     }
 }
 
-@Composable
-private fun MetadataEditorDialog(
-    item: SheetMusicItem,
-    onDismiss: () -> Unit,
-    onSave: (title: String, composer: String, tags: String, collection: String, isFavorite: Boolean) -> Unit,
-) {
-    var title by remember(item.id) { mutableStateOf(item.title) }
-    var composer by remember(item.id) { mutableStateOf(item.composer.orEmpty()) }
-    var tags by remember(item.id) { mutableStateOf(item.tags.joinToString(", ")) }
-    var collection by remember(item.id) { mutableStateOf(item.collection.orEmpty()) }
-    var isFavorite by remember(item.id) { mutableStateOf(item.isFavorite) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Edit score details") },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 520.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Title") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = composer,
-                    onValueChange = { composer = it },
-                    label = { Text("Composer") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = collection,
-                    onValueChange = { collection = it },
-                    label = { Text("Collection") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = tags,
-                    onValueChange = { tags = it },
-                    label = { Text("Tags (comma separated)") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                FilterChip(
-                    selected = isFavorite,
-                    onClick = { isFavorite = !isFavorite },
-                    label = { Text(if (isFavorite) "Favorite" else "Mark as favorite") },
-                )
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        },
-        confirmButton = {
-            Button(
-                enabled = title.isNotBlank(),
-                onClick = {
-                    onSave(title, composer, tags, collection, isFavorite)
-                },
-            ) {
-                Text("Save")
-            }
-        },
-    )
-}
-
-@Composable
-private fun ScoreInfoDialog(
-    item: SheetMusicItem,
-    metadata: ScoreMetadata?,
-    loading: Boolean,
-    errorMessage: String?,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Score info") },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 520.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                when {
-                    loading -> {
-                        Text(
-                            text = "Loading score info...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-
-                    !errorMessage.isNullOrBlank() -> {
-                        Text(
-                            text = errorMessage,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-
-                    metadata == null -> {
-                        Text(
-                            text = "No metadata is available for this score yet.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-
-                    else -> {
-                        val hasWorkSection = metadata.alternativeTitles.isNotEmpty() ||
-                            metadata.catalogueNumber.isNotBlank() ||
-                            metadata.opusNumber.isNotBlank() ||
-                            metadata.workNumber.isNotBlank() ||
-                            metadata.yearComposed != null ||
-                            metadata.movements.isNotEmpty()
-                        val hasMusicalDetailsSection = metadata.genre.isNotBlank() ||
-                            metadata.form.isNotBlank() ||
-                            metadata.stylePeriod.isNotBlank() ||
-                            metadata.instrumentation.isNotEmpty() ||
-                            metadata.key.isNotBlank() ||
-                            metadata.timeSignature.isNotBlank() ||
-                            metadata.tempoMarkings.isNotEmpty() ||
-                            metadata.difficulty.isNotBlank() ||
-                            metadata.pageCount != null ||
-                            metadata.durationSeconds != null
-                        val hasPublicationSection = metadata.publisher.isNotBlank() ||
-                            metadata.editor.isNotBlank() ||
-                            metadata.arranger.isNotBlank() ||
-                            metadata.edition.isNotBlank() ||
-                            metadata.language.isNotBlank()
-
-                        Text(
-                            text = metadata.title.ifBlank { item.title },
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontFamily = FontFamily.Serif,
-                                fontWeight = FontWeight.SemiBold,
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        scoreMetadataComposerLine(metadata)?.let { composerLine ->
-                            Text(
-                                text = composerLine,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        scoreInfoValue(metadata.subtitle)?.let { ScoreInfoField("Subtitle", it) }
-
-                        if (hasWorkSection) {
-                            ScoreInfoSection("Work")
-                            scoreInfoValue(metadata.alternativeTitles.joinToString(", "))?.let {
-                                ScoreInfoField("Alternative titles", it)
-                            }
-                            scoreInfoValue(metadata.catalogueNumber)?.let { ScoreInfoField("Catalogue number", it) }
-                            scoreInfoValue(metadata.opusNumber)?.let { ScoreInfoField("Opus number", it) }
-                            scoreInfoValue(metadata.workNumber)?.let { ScoreInfoField("Work number", it) }
-                            metadata.yearComposed?.let { ScoreInfoField("Year composed", it.toString()) }
-                            scoreInfoValue(metadata.movements.joinToString(", "))?.let { ScoreInfoField("Movements", it) }
-                        }
-
-                        if (hasMusicalDetailsSection) {
-                            ScoreInfoSection("Musical details")
-                            scoreInfoValue(metadata.genre)?.let { ScoreInfoField("Genre", it) }
-                            scoreInfoValue(metadata.form)?.let { ScoreInfoField("Form", it) }
-                            scoreInfoValue(metadata.stylePeriod)?.let { ScoreInfoField("Style period", it) }
-                            scoreInfoValue(metadata.instrumentation.joinToString(", "))?.let {
-                                ScoreInfoField("Instrumentation", it)
-                            }
-                            scoreInfoValue(metadata.key)?.let { ScoreInfoField("Key", it) }
-                            scoreInfoValue(metadata.timeSignature)?.let { ScoreInfoField("Time signature", it) }
-                            scoreInfoValue(metadata.tempoMarkings.joinToString(", "))?.let {
-                                ScoreInfoField("Tempo markings", it)
-                            }
-                            scoreInfoValue(metadata.difficulty)?.let { ScoreInfoField("Difficulty", it) }
-                            metadata.pageCount?.let { ScoreInfoField("Pages", it.toString()) }
-                            metadata.durationSeconds?.let { ScoreInfoField("Duration", "${it}s") }
-                        }
-
-                        if (hasPublicationSection) {
-                            ScoreInfoSection("Publication")
-                            scoreInfoValue(metadata.publisher)?.let { ScoreInfoField("Publisher", it) }
-                            scoreInfoValue(metadata.editor)?.let { ScoreInfoField("Editor", it) }
-                            scoreInfoValue(metadata.arranger)?.let { ScoreInfoField("Arranger", it) }
-                            scoreInfoValue(metadata.edition)?.let { ScoreInfoField("Edition", it) }
-                            scoreInfoValue(metadata.language)?.let { ScoreInfoField("Language", it) }
-                        }
-
-                        ScoreInfoSection("Library")
-                        scoreInfoValue(item.collection).let { value ->
-                            if (value != null) {
-                                ScoreInfoField("Collection", value)
-                            }
-                        }
-                        if (item.isFavorite) {
-                            ScoreInfoField("Favorite", "Yes")
-                        }
-                        if (item.isHidden) {
-                            ScoreInfoField("Hidden", "Yes")
-                        }
-                        ScoreInfoField("Added", formatEpochMillis(item.dateAddedEpochMillis))
-                        item.lastOpenedEpochMillis?.let { ScoreInfoField("Last opened", formatEpochMillis(it)) }
-                        if (item.lastViewedPage > 0) {
-                            ScoreInfoField("Resume page", (item.lastViewedPage + 1).toString())
-                        }
-
-                        ScoreInfoSection("Source")
-                        scoreInfoValue(metadata.source.filename.ifBlank { item.document.originalFileName })?.let {
-                            ScoreInfoField("Filename", it)
-                        }
-                        scoreInfoValue(metadata.source.fileType)?.let { ScoreInfoField("File type", it) }
-                        scoreInfoValue(metadata.source.url.ifBlank { item.document.sourceUri.orEmpty() })?.let {
-                            ScoreInfoField("URL", it)
-                        }
-                        ScoreInfoField("Schema", "${metadata.schemaId} ${metadata.schemaVersion}")
-
-                        scoreInfoValue(metadata.tags.joinToString(", "))?.let {
-                            ScoreInfoSection("Tags")
-                            ScoreInfoField("Keywords", it)
-                        }
-                        scoreInfoValue(metadata.notes)?.let {
-                            ScoreInfoSection("Notes")
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                shape = MaterialTheme.shapes.medium,
-                            ) {
-                                Text(
-                                    text = it,
-                                    modifier = Modifier.padding(12.dp),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(onClick = onDismiss) {
-                Text("Close")
-            }
-        },
-    )
-}
-
-@Composable
-private fun ScoreInfoSection(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-        color = MaterialTheme.colorScheme.primary,
-    )
-}
-
-@Composable
-private fun ScoreInfoField(
-    label: String,
-    value: String,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-    }
-}
-
-private fun scoreMetadataComposerLine(metadata: ScoreMetadata): String? {
-    val composerName = scoreInfoValue(metadata.composer.name) ?: return null
-    val lifespan = when {
-        metadata.composer.birthYear != null && metadata.composer.deathYear != null ->
-            "${metadata.composer.birthYear}-${metadata.composer.deathYear}"
-
-        metadata.composer.birthYear != null ->
-            "born ${metadata.composer.birthYear}"
-
-        metadata.composer.deathYear != null ->
-            "died ${metadata.composer.deathYear}"
-
-        else -> null
-    }
-    return listOfNotNull(composerName, lifespan).joinToString(" ")
-}
-
-private fun scoreInfoValue(value: String?): String? = value
-    ?.trim()
-    ?.takeIf(String::isNotEmpty)
-
 private data class LibraryScreenModel(
     val visibleItems: List<SheetMusicItem>,
-    val headerVisibleCount: Int,
-    val headerTotalCount: Int,
+    val catalogueGroups: List<CatalogueGroup>,
+    val catalogueIndexAvailable: Boolean,
+    val jumpBackInItems: List<SheetMusicItem>,
     val visibleScoreCount: Int,
     val hiddenScoreCount: Int,
     val refinementTotalCount: Int,
-    val collections: List<String>,
-    val composers: List<String>,
     val filterCollections: List<String>,
     val filterTags: List<String>,
     val itemsById: Map<String, SheetMusicItem>,
@@ -3430,14 +2090,12 @@ private data class LibraryScreenModel(
     val currentScopeItems: List<SheetMusicItem>,
     val randomScopeLabel: String,
     val selectedItems: List<SheetMusicItem>,
-    val editingItem: SheetMusicItem?,
-    val infoItem: SheetMusicItem?,
-    val infoMetadata: ScoreMetadata?,
+    val focusedItem: SheetMusicItem?,
+    val focusableItemIds: Set<String>,
+    val pickerTargetItems: List<SheetMusicItem>,
     val deleteCandidate: SheetMusicItem?,
     val deleteSetlistCandidate: LibrarySetlist?,
     val deleteSongbookCandidate: LibrarySongbook?,
-    val collectionGroups: Map<String, List<SheetMusicItem>>,
-    val composerGroups: Map<String, List<SheetMusicItem>>,
 )
 
 internal fun currentLibraryScopeItems(
@@ -3481,8 +2139,17 @@ private fun buildLibraryScreenModel(
     val hiddenLibraryItems = snapshot.items.filter { it.isHidden }
     val query = appState.query.withHiddenFilterFor(appState.showingHiddenScores)
     val visibleItems = snapshot.items.applyLibraryQuery(query)
-    val collections = visibleLibraryItems.availableCollections().toList()
-    val composers = visibleLibraryItems.availableComposers().toList()
+    val catalogueGroups = buildCatalogueGroups(
+        items = visibleItems,
+        grouping = catalogueGroupingFor(appState.browseMode, query.sortOption),
+        sortOption = query.sortOption,
+        sortDirection = query.sortDirection,
+    )
+    val filtersActive = query.searchText.isNotBlank() ||
+        query.selectedTags.isNotEmpty() ||
+        query.selectedCollection != null ||
+        query.viewerSupport != ViewerSupportFilter.ALL ||
+        query.favoritesOnly
     val filterBaseItems = if (appState.showingHiddenScores) {
         hiddenLibraryItems
     } else {
@@ -3504,23 +2171,27 @@ private fun buildLibraryScreenModel(
         snapshot = snapshot,
         appState = appState,
     )
+    val focusableItemIds = when (appState.hostedSection) {
+        AppSection.SETLISTS -> itemsById.keys
+        AppSection.SONGBOOKS -> emptySet()
+        else -> visibleItems.mapTo(mutableSetOf()) { it.id }
+    }
+    val focusedItem = appState.focusedScoreId
+        ?.takeIf { it in focusableItemIds }
+        ?.let { focusedId -> snapshot.items.firstOrNull { it.id == focusedId } }
+    val pickerTargetIds = appState.pickerTargetIds
     return LibraryScreenModel(
         visibleItems = visibleItems,
-        headerVisibleCount = if (appState.hostedSection != AppSection.LIBRARY) {
-            visibleLibraryItems.size
+        catalogueGroups = catalogueGroups,
+        catalogueIndexAvailable = catalogueIndexAnchors(catalogueGroups, query.sortOption).isNotEmpty(),
+        jumpBackInItems = if (appState.browseMode == LibraryBrowseMode.ALL && !filtersActive) {
+            snapshot.items.jumpBackInItems()
         } else {
-            visibleItems.size
-        },
-        headerTotalCount = if (appState.showingHiddenScores) {
-            hiddenLibraryItems.size
-        } else {
-            visibleLibraryItems.size
+            emptyList()
         },
         visibleScoreCount = visibleLibraryItems.size,
         hiddenScoreCount = hiddenLibraryItems.size,
         refinementTotalCount = filterBaseItems.size,
-        collections = collections,
-        composers = composers,
         filterCollections = filterBaseItems.availableCollections().toList(),
         filterTags = filterBaseItems.availableTags().toList(),
         itemsById = itemsById,
@@ -3538,14 +2209,12 @@ private fun buildLibraryScreenModel(
             activeSetlist = activeSetlist,
         ),
         selectedItems = visibleLibraryItems.filter { it.id in appState.selectedScoreIds },
-        editingItem = snapshot.items.firstOrNull { it.id == appState.editingItemId },
-        infoItem = snapshot.items.firstOrNull { it.id == appState.infoItemId },
-        infoMetadata = appState.infoMetadata,
+        focusedItem = focusedItem,
+        focusableItemIds = focusableItemIds,
+        pickerTargetItems = visibleLibraryItems.filter { it.id in pickerTargetIds },
         deleteCandidate = snapshot.items.firstOrNull { it.id == appState.deleteCandidateItemId },
         deleteSetlistCandidate = snapshot.setlists.firstOrNull { it.id == appState.deleteCandidateSetlistId },
         deleteSongbookCandidate = snapshot.songbooks.firstOrNull { it.id == appState.deleteCandidateSongbookId },
-        collectionGroups = visibleItems.groupByCollectionName(),
-        composerGroups = visibleItems.groupByComposerName(),
     )
 }
 
@@ -3625,12 +2294,6 @@ private fun randomScopeLabel(
         LibraryBrowseMode.HIDDEN -> "hidden scores"
     }
 }
-
-private fun List<SheetMusicItem>.groupByCollectionName(): Map<String, List<SheetMusicItem>> =
-    groupBy { it.collection?.trim() ?: "" }
-
-private fun List<SheetMusicItem>.groupByComposerName(): Map<String, List<SheetMusicItem>> =
-    groupBy { it.composer?.trim() ?: "" }
 
 private fun List<SheetMusicItem>.itemsInBrowseGroup(
     browseMode: LibraryBrowseMode,
@@ -3785,36 +2448,30 @@ private fun buildDetailsLine(item: SheetMusicItem): String {
     return parts.joinToString("  |  ")
 }
 
-private fun Int.scoreLabel(): String = "$this score${if (this == 1) "" else "s"}"
+internal fun Int.scoreLabel(): String = "$this score${if (this == 1) "" else "s"}"
 
-private fun formatEpochMillis(value: Long): String {
+internal fun formatEpochMillis(value: Long): String {
     val date = Instant.fromEpochMilliseconds(value)
         .toLocalDateTime(TimeZone.currentSystemDefault())
         .date
     return "${date.year}-${date.monthNumber.toString().padStart(2, '0')}-${date.dayOfMonth.toString().padStart(2, '0')}"
 }
 
-private fun LibrarySortOption.label(): String = when (this) {
+internal fun LibrarySortOption.label(): String = when (this) {
     LibrarySortOption.TITLE -> "Title"
     LibrarySortOption.COMPOSER -> "Composer"
     LibrarySortOption.DATE_ADDED -> "Date added"
     LibrarySortOption.LAST_OPENED -> "Last opened"
 }
 
-private fun ViewerSupportFilter.label(): String = when (this) {
+internal fun ViewerSupportFilter.label(): String = when (this) {
     ViewerSupportFilter.ALL -> "All viewers"
     ViewerSupportFilter.PDF -> "PDF Viewer"
     ViewerSupportFilter.LILYPOND -> "LilyPond Viewer"
 }
 
-private fun LibraryLayoutMode.label(): String = when (this) {
-    LibraryLayoutMode.GRID -> "Grid"
+internal fun LibraryLayoutMode.label(): String = when (this) {
+    LibraryLayoutMode.GRID -> "Gallery"
     LibraryLayoutMode.LIST -> "List"
 }
 
-private fun syncStatusLabel(syncStatus: SyncStatus): String = when (syncStatus) {
-    SyncStatus.LocalOnly -> "Local sync stub"
-    is SyncStatus.Syncing -> "Syncing ${syncStatus.providerName}"
-    is SyncStatus.Ready -> "Sync: ${syncStatus.providerName}"
-    is SyncStatus.Error -> "Sync issue: ${syncStatus.providerName}"
-}
