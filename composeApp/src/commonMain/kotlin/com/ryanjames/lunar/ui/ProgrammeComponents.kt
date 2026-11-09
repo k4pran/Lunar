@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -94,12 +95,23 @@ internal fun LeaderRow(
         val minLeader = 24.dp.roundToPx()
         val loose = constraints.copy(minWidth = 0, minHeight = 0)
         val leading = measurables[0].measure(loose)
-        val trailing = measurables[3].measure(loose)
         val totalWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else Constraints.Infinity
-        val titleMax = if (constraints.hasBoundedWidth) {
-            (totalWidth - leading.width - trailing.width - minLeader - gap * 3).coerceAtLeast(0)
+        val trailing: Placeable
+        val titleMax: Int
+        if (constraints.hasBoundedWidth) {
+            val shared = (totalWidth - leading.width - minLeader - gap * 3).coerceAtLeast(0)
+            val titleWanted = measurables[1].maxIntrinsicWidth(constraints.maxHeight)
+            // The trailing content takes what the title leaves, but never more than its share,
+            // so a long composer or a narrow pane can't push the title out of sight.
+            val trailingMax = maxOf(
+                shared - titleWanted,
+                (shared * MAX_TRAILING_SHARE).toInt(),
+            ).coerceIn(0, shared)
+            trailing = measurables[3].measure(loose.copy(maxWidth = trailingMax))
+            titleMax = (shared - trailing.width).coerceAtLeast(0)
         } else {
-            Constraints.Infinity
+            trailing = measurables[3].measure(loose)
+            titleMax = Constraints.Infinity
         }
         val title = measurables[1].measure(loose.copy(maxWidth = titleMax))
         val width = if (constraints.hasBoundedWidth) {
@@ -123,6 +135,9 @@ internal fun LeaderRow(
         }
     }
 }
+
+/** Largest fraction of a [LeaderRow]'s free width its trailing content may take from the title. */
+private const val MAX_TRAILING_SHARE = 0.45f
 
 /** A small floating panel anchored under [anchor], dismissed by clicking outside it. */
 @Composable

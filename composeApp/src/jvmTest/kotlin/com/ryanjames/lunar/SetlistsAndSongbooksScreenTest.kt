@@ -221,6 +221,30 @@ class SetlistsAndSongbooksScreenTest {
     }
 
     @Test
+    fun programmeTitlesStayVisibleBesideLongMetadataOnNarrowPanes() {
+        runBlocking {
+            val composer = "Johann Sebastian Bach and the Leipzig Thomanerchor Arrangers Guild"
+            val items = listOf(
+                testSheetMusicItem(id = "moon_river", title = "Moon River", composer = composer, pageCount = 12),
+            )
+            val setlist = testLibrarySetlist(id = "set_long", name = "Long credits", itemIds = items.map { it.id })
+            val runtime = createTestPlatformRuntime(initialItems = items, initialSetlists = listOf(setlist))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateBrowseMode(LibraryBrowseMode.SETLISTS)
+            appState.openSetlist(setlist.id)
+            rule.setLibraryContent(runtime, appState, Modifier.width(320.dp))
+
+            val paneRight = rule.onRoot().getUnclippedBoundsInRoot().right
+            val title = rule.onNodeWithText("Moon River", useUnmergedTree = true).assertIsDisplayed().getUnclippedBoundsInRoot()
+            val metadata = rule.onNodeWithText(composer, substring = true, useUnmergedTree = true).getUnclippedBoundsInRoot()
+            assertTrue(title.width >= 40.dp, "The score title is squeezed to ${title.width}")
+            assertTrue(metadata.left >= title.right, "The metadata overlaps the score title")
+            assertTrue(metadata.right <= paneRight, "The metadata overflows the pane")
+            rule.onNodeWithContentDescription("Remove Moon River from setlist").assertIsDisplayed()
+        }
+    }
+
+    @Test
     fun randomMixCanBeSavedOrDiscardedAndNewSetlistsComeFromAPopover() {
         runBlocking {
             val items = listOf(
