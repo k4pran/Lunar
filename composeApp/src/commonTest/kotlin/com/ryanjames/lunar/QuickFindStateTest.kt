@@ -160,4 +160,22 @@ class QuickFindStateTest {
         assertEquals(setOf(item.id), appState.pickerTargetIds)
         assertEquals(item.id, appState.focusedScoreId)
     }
+
+    @Test
+    fun togglingTwoPageViewWithAViewerOpenTargetsTheViewerNotTheSavedDefault() = runBlocking {
+        val item = testSheetMusicItem(id = "moon_river", title = "Moon River")
+        val runtime = createTestPlatformRuntime(initialItems = listOf(item))
+        val appState = createTestLunarAppState(this, runtime)
+        appState.openScore(item)
+
+        appState.runQuickFindAction(QuickFindAction.TOGGLE_TWO_PAGE_VIEW, emptyList())
+        yield()
+        assertEquals(1, appState.viewerPageModeToggleRequest)
+        assertEquals(ViewerPageModePreference.SINGLE_PAGE, runtime.settingsStore.settings.value.defaultViewerPageMode)
+
+        appState.runQuickFindAction(QuickFindAction.TOGGLE_TWO_PAGE_VIEW, emptyList())
+        yield()
+        assertEquals(2, appState.viewerPageModeToggleRequest)
+        assertEquals(ViewerPageModePreference.SINGLE_PAGE, runtime.settingsStore.settings.value.defaultViewerPageMode)
+    }
 }

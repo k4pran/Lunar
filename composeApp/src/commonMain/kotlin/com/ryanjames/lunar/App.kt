@@ -230,6 +230,7 @@ internal fun LunarApp(
                         null
                     },
                     defaultTwoPageMode = defaultTwoPageMode,
+                    pageModeToggleRequest = appState.viewerPageModeToggleRequest,
                     viewerKeybindings = appSettings.viewerKeybindings,
                     chromeAutoHideMillis = appSettings.viewerChromeAutoHideMillis,
                 )

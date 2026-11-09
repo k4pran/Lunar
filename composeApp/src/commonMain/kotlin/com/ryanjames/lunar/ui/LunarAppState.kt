@@ -268,6 +268,10 @@ class LunarAppState(
     var metronomeVisible: Boolean by mutableStateOf(false)
         private set
 
+    /** Bumped to ask the open viewer to flip its current page layout. */
+    var viewerPageModeToggleRequest: Int by mutableStateOf(0)
+        private set
+
     /** The score a quick find action applies to: the one in the viewer, else a single focused/selected score. */
     val quickFindTargetScoreId: String?
         get() = (fullscreenTarget as? ViewerTarget.Score)?.itemId
@@ -1172,7 +1176,7 @@ class LunarAppState(
         when (action) {
             QuickFindAction.OPEN_RANDOM_SCORE -> openRandomSheetInCurrentViewer(randomScopeItems)
             QuickFindAction.START_METRONOME -> metronomeVisible = true
-            QuickFindAction.TOGGLE_TWO_PAGE_VIEW -> toggleDefaultViewerPageMode()
+            QuickFindAction.TOGGLE_TWO_PAGE_VIEW -> toggleViewerPageMode()
             QuickFindAction.ADD_FOCUSED_SCORE_TO_SETLIST -> quickFindTargetScoreId?.let(::showSetlistPickerForScore)
                 ?: run { bannerMessage = "Open or select a score first." }
             QuickFindAction.SWITCH_SKIN -> switchToNextSkin()
@@ -1181,6 +1185,18 @@ class LunarAppState(
 
     fun dismissMetronome() {
         metronomeVisible = false
+    }
+
+    /**
+     * Flips the visible layout of the open viewer, which keeps its own layout state apart from
+     * the saved default. With no viewer open, the saved default is toggled instead.
+     */
+    fun toggleViewerPageMode() {
+        if (fullscreenTarget != null) {
+            viewerPageModeToggleRequest++
+        } else {
+            toggleDefaultViewerPageMode()
+        }
     }
 
     fun toggleDefaultViewerPageMode() {

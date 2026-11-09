@@ -1,10 +1,11 @@
 package com.ryanjames.lunar
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.input.key.Key
 import androidx.compose.material3.Text
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -105,6 +106,44 @@ class ViewerShortcutTest {
             assertEquals(1, enteredFullscreenCount)
             assertEquals(1, openedRandomCount)
         }
+    }
+
+    @Test
+    fun pageModeToggleRequestFlipsTheVisibleLayoutNotTheDefault() {
+        val runtime = createShortcutTestRuntime()
+        val documentState = ViewerDocumentState(
+            id = "moon_river",
+            title = "Moon River",
+            document = testSheetMusicItem(id = "moon_river", title = "Moon River").document,
+            pageCount = 6,
+        )
+        var toggleRequest by mutableIntStateOf(3)
+
+        rule.setContent {
+            LunarTheme(skin = AppSkin.PAPER) {
+                ViewerScreen(
+                    runtime = runtime,
+                    documentState = documentState,
+                    onBack = {},
+                    onPageChanged = { _ -> },
+                    onPageCountResolved = { _ -> },
+                    defaultTwoPageMode = false,
+                    pageModeToggleRequest = toggleRequest,
+                    viewerKeybindings = ViewerKeybindings(togglePageViewMode = "T"),
+                )
+            }
+        }
+
+        // A request count that predates the viewer does not flip the layout on open.
+        rule.onNodeWithContentDescription("Single-page layout").assertIsDisplayed()
+        rule.onRoot().performKeyInput { pressKey(Key.T) }
+        rule.onNodeWithContentDescription("Two-page layout").assertIsDisplayed()
+
+        toggleRequest += 1
+        rule.onNodeWithContentDescription("Single-page layout").assertIsDisplayed()
+
+        toggleRequest += 1
+        rule.onNodeWithContentDescription("Two-page layout").assertIsDisplayed()
     }
 
     @Test
