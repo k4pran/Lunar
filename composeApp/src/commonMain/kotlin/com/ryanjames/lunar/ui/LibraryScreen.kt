@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -65,6 +67,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -90,6 +93,8 @@ import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.SelectedCoverImage
 import com.ryanjames.lunar.settings.ViewerKeybindings
 import com.ryanjames.lunar.settings.ViewerShortcutAction
+import com.ryanjames.lunar.ui.design.lunarFocusRing
+import com.ryanjames.lunar.ui.design.lunarTouchTarget
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.coroutines.launch
@@ -457,7 +462,8 @@ private fun ArrangementSwitcher(appState: LunarAppState) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
+            .horizontalScroll(rememberScrollState())
+            .selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         LibraryArrangement.entries.forEach { arrangement ->
@@ -480,8 +486,10 @@ private fun BrowseModeTab(arrangement: LibraryArrangement, selected: Boolean, on
         color = bg,
         shape = MaterialTheme.shapes.large,
         modifier = Modifier
+            .lunarTouchTarget()
             .testTag(LunarTestTags.libraryArrangementTab(arrangement))
-            .clickable(onClick = onClick),
+            .lunarFocusRing(MaterialTheme.shapes.large)
+            .selectable(selected = selected, role = Role.Tab, onClick = onClick),
     ) {
         Text(
             text = arrangement.label,
@@ -538,26 +546,34 @@ private fun LibraryActionIconButton(
     val shape = MaterialTheme.shapes.small
 
     LunarTooltip(tooltipText, modifier = modifier) {
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
-            shape = shape,
+        Box(
             modifier = Modifier
-                .size(36.dp)
-                .border(
-                    width = 1.dp,
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.24f),
-                    shape = shape,
-                )
+                .lunarTouchTarget()
+                .lunarFocusRing(shape)
+                .clip(shape)
+                .clickable(role = Role.Button, onClick = onClick)
                 .semantics {
                     this.contentDescription = contentDescription
-                }
-                .clickable(onClick = onClick),
+                },
+            contentAlignment = Alignment.Center,
         ) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.78f),
+                shape = shape,
+                modifier = Modifier
+                    .size(36.dp)
+                    .border(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.24f),
+                        shape = shape,
+                    ),
             ) {
-                content(MaterialTheme.colorScheme.onSurfaceVariant)
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    content(MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }
@@ -775,6 +791,7 @@ private fun LibraryCard(
         modifier = Modifier
             .fillMaxWidth()
             .testTag(LibraryTestTags.row(item.id))
+            .lunarFocusRing(MaterialTheme.shapes.large)
             .clickable(onClick = onClick),
         shape = MaterialTheme.shapes.large,
         colors = androidx.compose.material3.CardDefaults.cardColors(
@@ -1690,4 +1707,3 @@ internal fun LibraryLayoutMode.label(): String = when (this) {
     LibraryLayoutMode.GRID -> "Gallery"
     LibraryLayoutMode.LIST -> "List"
 }
-
