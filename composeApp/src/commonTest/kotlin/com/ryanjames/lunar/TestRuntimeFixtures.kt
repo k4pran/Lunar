@@ -227,6 +227,7 @@ internal class TestSongbookPdfBuilder(
         appendedDocumentPaths: List<String>,
         existingSongbookPath: String?,
         coverImage: SelectedCoverImage?,
+        dropExistingCoverPage: Boolean,
     ): SongbookBuildResult = buildAction(
         songbookName,
         appendedDocumentPaths,

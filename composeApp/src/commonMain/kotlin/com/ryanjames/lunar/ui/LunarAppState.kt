@@ -539,24 +539,30 @@ class LunarAppState(
         }
     }
 
-    /** Rebuilds the songbook PDF from its scores with a newly picked cover page. */
+    /**
+     * Rebinds the songbook PDF behind a newly picked cover page. The existing score pages are
+     * carried over from the bound document (minus any previous cover) rather than rebuilt from
+     * [LibrarySongbook.itemIds], which is de-duplicated and can't reproduce repeated scores.
+     */
     fun changeSongbookCover(songbookId: String) {
         scope.launch {
             if (!canCreateSongbooks || !canPickSongbookCover) {
                 bannerMessage = "Songbook covers aren't available on this device."
                 return@launch
             }
-            if (rebindableSongbookItems(songbookId) == null) return@launch
+            if (existingSongbook(songbookId) == null) return@launch
 
             try {
                 val coverImage = runtime.coverImagePicker.pickCoverImage() ?: return@launch
                 songbookMutationMutex.withLock {
                     // Re-read under the lock: scores may have been added while the picker was open.
-                    val (songbook, items) = rebindableSongbookItems(songbookId) ?: return@withLock
+                    val songbook = existingSongbook(songbookId) ?: return@withLock
                     val buildResult = runtime.songbookBuilder.buildSongbook(
                         songbookName = songbook.name,
-                        appendedDocumentPaths = items.map { it.document.storedPath },
+                        appendedDocumentPaths = emptyList(),
+                        existingSongbookPath = songbook.document.storedPath,
                         coverImage = coverImage,
+                        dropExistingCoverPage = songbook.hasCover,
                     )
                     runtime.repository.replaceSongbookDocument(
                         songbookId = songbookId,
@@ -572,20 +578,10 @@ class LunarAppState(
         }
     }
 
-    /** The songbook and its scores in order, or null (with a banner) when it can't be rebuilt from them. */
-    private fun rebindableSongbookItems(songbookId: String): Pair<LibrarySongbook, List<SheetMusicItem>>? {
-        val songbook = runtime.repository.getSongbook(songbookId)
-        if (songbook == null) {
-            bannerMessage = "That songbook no longer exists."
-            return null
+    private fun existingSongbook(songbookId: String): LibrarySongbook? =
+        runtime.repository.getSongbook(songbookId).also { songbook ->
+            if (songbook == null) bannerMessage = "That songbook no longer exists."
         }
-        val items = songbook.itemIds.mapNotNull(runtime.repository::getItem)
-        if (items.isEmpty() || items.size != songbook.itemIds.size) {
-            bannerMessage = "Some scores in \"${songbook.name}\" are no longer in the library, so it can't be rebound."
-            return null
-        }
-        return songbook to items
-    }
 
     fun requestDeleteSongbook(songbookId: String) {
         deleteCandidateSongbookId = songbookId

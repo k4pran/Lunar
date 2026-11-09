@@ -183,12 +183,16 @@ class SetlistProgrammeTest {
     }
 
     @Test
-    fun changingASongbookCoverRebuildsItFromItsScores() = runBlocking {
+    fun changingASongbookCoverRebindsTheExistingPdfInsteadOfItsDistinctScores() = runBlocking {
+        // "a" was appended twice, but the repository only records distinct item ids.
         val items = listOf(testSheetMusicItem(id = "a"), testSheetMusicItem(id = "b"))
-        val builds = mutableListOf<Pair<List<String>, SelectedCoverImage?>>()
+        val builds = mutableListOf<CoverBuild>()
         val runtime = createTestPlatformRuntime(
             initialItems = items,
-            initialSongbooks = listOf(testLibrarySongbook(id = "book", name = "Book", itemIds = listOf("a", "b"))),
+            initialSongbooks = listOf(
+                testLibrarySongbook(id = "book", name = "Book", itemIds = listOf("a", "b"), pageCount = 3)
+                    .copy(hasCover = true),
+            ),
             songbookCreationSupported = true,
             songbookCoverImageSupported = true,
             songbookBuilder = object : SongbookPdfBuilder {
@@ -197,14 +201,63 @@ class SetlistProgrammeTest {
                     appendedDocumentPaths: List<String>,
                     existingSongbookPath: String?,
                     coverImage: SelectedCoverImage?,
+                    dropExistingCoverPage: Boolean,
                 ): SongbookBuildResult {
-                    builds += appendedDocumentPaths to coverImage
+                    builds += CoverBuild(existingSongbookPath, appendedDocumentPaths, coverImage, dropExistingCoverPage)
                     return SongbookBuildResult(
                         document = com.ryanjames.lunar.library.model.PdfDocumentReference(
                             storedPath = "/songbooks/rebuilt.pdf",
                             originalFileName = "Book.pdf",
                         ),
-                        pageCount = 5,
+                        pageCount = 3,
+                    )
+                }
+            },
+            coverImagePicker = object : com.ryanjames.lunar.platform.CoverImagePicker {
+                override suspend fun pickCoverImage(): SelectedCoverImage =
+                    SelectedCoverImage(displayName = "cover.png", bytes = byteArrayOf(1))
+            },
+        )
+        val appState = createTestLunarAppState(scope = this, runtime = runtime)
+
+        appState.changeSongbookCover("book")
+        waitUntil { runtime.repository.getSongbook("book")?.document?.storedPath == "/songbooks/rebuilt.pdf" }
+
+        val rebuilt = runtime.repository.getSongbook("book")!!
+        assertTrue(rebuilt.hasCover)
+        assertEquals(3, rebuilt.pageCount)
+        assertEquals(listOf("a", "b"), rebuilt.itemIds)
+        val build = builds.single()
+        assertEquals("/songbooks/book.pdf", build.existingSongbookPath)
+        assertEquals(emptyList(), build.appendedDocumentPaths)
+        assertEquals("cover.png", build.coverImage?.displayName)
+        assertTrue(build.dropExistingCoverPage, "The previous cover page must be replaced, not kept.")
+    }
+
+    @Test
+    fun addingAFirstCoverKeepsEveryExistingPage() = runBlocking {
+        val builds = mutableListOf<CoverBuild>()
+        val runtime = createTestPlatformRuntime(
+            // The scores are gone from the library, but the bound PDF still holds their pages.
+            initialItems = emptyList(),
+            initialSongbooks = listOf(testLibrarySongbook(id = "book", name = "Book", itemIds = listOf("a"))),
+            songbookCreationSupported = true,
+            songbookCoverImageSupported = true,
+            songbookBuilder = object : SongbookPdfBuilder {
+                override suspend fun buildSongbook(
+                    songbookName: String,
+                    appendedDocumentPaths: List<String>,
+                    existingSongbookPath: String?,
+                    coverImage: SelectedCoverImage?,
+                    dropExistingCoverPage: Boolean,
+                ): SongbookBuildResult {
+                    builds += CoverBuild(existingSongbookPath, appendedDocumentPaths, coverImage, dropExistingCoverPage)
+                    return SongbookBuildResult(
+                        document = com.ryanjames.lunar.library.model.PdfDocumentReference(
+                            storedPath = "/songbooks/covered.pdf",
+                            originalFileName = "Book.pdf",
+                        ),
+                        pageCount = 2,
                     )
                 }
             },
@@ -218,12 +271,17 @@ class SetlistProgrammeTest {
         appState.changeSongbookCover("book")
         waitUntil { runtime.repository.getSongbook("book")?.hasCover == true }
 
-        val rebuilt = runtime.repository.getSongbook("book")!!
-        assertEquals("/songbooks/rebuilt.pdf", rebuilt.document.storedPath)
-        assertEquals(5, rebuilt.pageCount)
-        assertEquals(listOf("/scores/a.pdf", "/scores/b.pdf"), builds.single().first)
-        assertEquals("cover.png", builds.single().second?.displayName)
+        assertEquals("/songbooks/book.pdf", builds.single().existingSongbookPath)
+        assertEquals(false, builds.single().dropExistingCoverPage)
+        assertEquals("/songbooks/covered.pdf", runtime.repository.getSongbook("book")!!.document.storedPath)
     }
+
+    private data class CoverBuild(
+        val existingSongbookPath: String?,
+        val appendedDocumentPaths: List<String>,
+        val coverImage: SelectedCoverImage?,
+        val dropExistingCoverPage: Boolean,
+    )
 
     @Test
     fun addingScoresDuringACoverRebuildWaitsAndAppendsToTheRebuiltSongbook() = runBlocking {
@@ -245,6 +303,7 @@ class SetlistProgrammeTest {
                     appendedDocumentPaths: List<String>,
                     existingSongbookPath: String?,
                     coverImage: SelectedCoverImage?,
+                    dropExistingCoverPage: Boolean,
                 ): SongbookBuildResult {
                     builds += existingSongbookPath to appendedDocumentPaths
                     if (coverImage != null) coverBuildGate.await()
