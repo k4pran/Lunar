@@ -496,6 +496,45 @@ class ScreenSmokeTest {
     }
 
     @Test
+    fun viewerPickerFromAFilteredSetlistStillShowsItsTarget() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(id = "moon_river", title = "Moon River", originalFileName = "Moon River.pdf"),
+                testSheetMusicItem(id = "prelude", title = "Prelude", originalFileName = "Prelude.ly"),
+            )
+            val morning = testLibrarySetlist(id = "set_morning", name = "Morning rehearsal", itemIds = listOf("moon_river"))
+            val evening = testLibrarySetlist(id = "set_evening", name = "Evening recital", itemIds = emptyList())
+            val runtime = createTestPlatformRuntime(initialItems = items, initialSetlists = listOf(morning, evening))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateViewerSupportFilter(com.ryanjames.lunar.library.model.ViewerSupportFilter.LILYPOND)
+            appState.selectSection(com.ryanjames.lunar.ui.AppSection.SETLISTS)
+            appState.openSetlist("set_morning")
+
+            rule.setContent {
+                val snapshot by runtime.repository.library.collectAsState()
+                LunarTheme(theme = AppColorTheme.OCEAN) {
+                    LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
+                }
+            }
+
+            rule.runOnIdle {
+                appState.openScore(runtime.repository.getItem("moon_river")!!)
+                appState.showSetlistPickerForScore("moon_river")
+            }
+            rule.runOnIdle {
+                assertEquals(com.ryanjames.lunar.ui.AppSection.SETLISTS, appState.selectedSection)
+                assertEquals("moon_river", appState.focusedScoreId)
+                assertTrue(appState.setlistPickerVisible)
+            }
+            rule.onNodeWithTag(LibraryTestTags.DetailTitle, useUnmergedTree = true).assertTextEquals("Moon River")
+            rule.onNodeWithText("Evening recital").performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.library.value.setlists.single { it.id == "set_evening" }.itemIds == listOf("moon_river")
+            }
+        }
+    }
+
+    @Test
     fun setlistDetailKeepsBulkSelectionActions() {
         runBlocking {
             val items = listOf(
