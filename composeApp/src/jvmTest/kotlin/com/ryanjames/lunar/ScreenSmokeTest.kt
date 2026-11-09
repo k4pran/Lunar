@@ -273,13 +273,17 @@ class ScreenSmokeTest {
             rule.onNodeWithText("All collections").assertIsDisplayed()
 
             rule.onDisplayedNodeWithText("Random setlist").performClick()
-            rule.onNodeWithText("Create a random setlist").assertIsDisplayed()
+            rule.onNodeWithText("Shuffle a random set").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Scores in the mix: 2").assertIsDisplayed()
             rule.onNodeWithText("Cancel").performClick()
+            rule.runOnIdle {
+                assertEquals(false, appState.randomSetlistBuilderVisible)
+            }
 
             rule.onNodeWithText("Setlists").performClick()
             rule.onNodeWithText("Morning rehearsal").assertIsDisplayed()
-            rule.onNodeWithText("Open").performClick()
-            rule.onNodeWithText("Saved automatically. Delete it whenever you no longer need it.").assertIsDisplayed()
+            rule.onNodeWithText("Morning rehearsal").performClick()
+            rule.onNodeWithText("Start the set").assertIsDisplayed()
         }
     }
 
@@ -390,6 +394,7 @@ class ScreenSmokeTest {
             rule.onNodeWithText("Songbooks").performClick()
             rule.onNodeWithText("Standards Book").assertIsDisplayed()
             rule.onNodeWithText("Standards Book").performClick()
+            rule.onNodeWithText("Open songbook").performClick()
             rule.runOnIdle {
                 assertEquals(ViewerTarget.Songbook(songbook.id), appState.previewTarget)
             }

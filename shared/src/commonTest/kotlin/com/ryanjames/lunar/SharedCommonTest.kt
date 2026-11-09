@@ -14,6 +14,7 @@ import com.ryanjames.lunar.library.model.HiddenScoreFilter
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.library.model.LibraryQuery
+import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.library.model.LibrarySortOption
 import com.ryanjames.lunar.library.model.ScoreMetadata
 import com.ryanjames.lunar.library.model.ScoreMetadataComposer
@@ -22,6 +23,8 @@ import com.ryanjames.lunar.library.model.ViewerSupportFilter
 import com.ryanjames.lunar.library.model.applyLibraryQuery
 import com.ryanjames.lunar.library.model.collectionDuplicateKey
 import com.ryanjames.lunar.library.model.composerDuplicateKey
+import com.ryanjames.lunar.library.model.contents
+import com.ryanjames.lunar.library.model.songbookStartPages
 import kotlinx.coroutines.runBlocking
 import kotlin.time.Clock
 import kotlin.time.Instant
@@ -619,6 +622,57 @@ class SharedCommonTest {
         reloaded.initialize()
         assertEquals(listOf(ids[0], ids[2]), reloaded.getSetlist(setlist.id)?.itemIds)
         assertEquals(5_000L, reloaded.getSetlist(setlist.id)?.updatedAtEpochMillis)
+    }
+
+    @Test
+    fun songbookStartPagesAccumulatePageCounts() {
+        assertEquals(listOf(1, 3, 7), songbookStartPages(listOf(2, 4, 1)))
+        assertEquals(listOf(2, 4), songbookStartPages(listOf(2, 4), firstPage = 2))
+    }
+
+    @Test
+    fun songbookStartPagesBecomeUnknownAfterAnUnknownCount() {
+        assertEquals(listOf(1, 3, null, null), songbookStartPages(listOf(2, null, 3, 1)))
+        assertEquals(listOf(1, null), songbookStartPages(listOf(0, 3)))
+    }
+
+    @Test
+    fun songbookStartPagesForAnEmptySongbook() {
+        assertEquals(emptyList(), songbookStartPages(emptyList()))
+        val songbook = LibrarySongbook(
+            id = "empty",
+            name = "Empty",
+            document = PdfDocumentReference(storedPath = "/books/empty.pdf", originalFileName = "Empty.pdf"),
+            createdAtEpochMillis = 1L,
+            updatedAtEpochMillis = 1L,
+        )
+        assertEquals(emptyList(), songbook.contents(emptyMap()))
+    }
+
+    @Test
+    fun songbookContentsSkipTheCoverAndKeepMissingScores() {
+        val first = testItem(
+            id = "first",
+            title = "First",
+            composer = "Composer",
+            tags = emptyList(),
+            dateAddedEpochMillis = 1L,
+        ).copy(pageCount = 3)
+        val songbook = LibrarySongbook(
+            id = "book",
+            name = "Book",
+            itemIds = listOf("first", "gone", "last"),
+            document = PdfDocumentReference(storedPath = "/books/book.pdf", originalFileName = "Book.pdf"),
+            createdAtEpochMillis = 1L,
+            updatedAtEpochMillis = 1L,
+            hasCover = true,
+        )
+
+        val contents = songbook.contents(mapOf(first.id to first))
+
+        assertEquals(listOf("first", "gone", "last"), contents.map { it.itemId })
+        assertEquals(listOf(2, 5, null), contents.map { it.startPage })
+        assertNull(contents[1].item)
     }
 
     @Test
