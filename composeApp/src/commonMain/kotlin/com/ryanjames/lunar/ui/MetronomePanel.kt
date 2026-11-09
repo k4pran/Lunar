@@ -3,21 +3,15 @@ package com.ryanjames.lunar.ui
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -26,17 +20,15 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,8 +40,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.roundToInt
 import kotlin.time.Clock
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 
 data class MetronomeTimeSignature(
     val beatsPerMeasure: Int,
@@ -73,52 +63,98 @@ data class MetronomeTimeSignature(
 private const val MIN_BPM = 20
 private const val MAX_BPM = 300
 private const val DEFAULT_BPM = 120
+private const val TAP_RESET_MILLIS = 2_000L
 
 internal data class MetronomeRestartState(
     val beatIndex: Int,
     val shouldAccentImmediately: Boolean,
 )
 
-@Composable
-fun MetronomeContent(
-    modifier: Modifier = Modifier,
+/**
+ * Tempo, metre and playback state for the metronome. It lives outside [MetronomePanel] so the
+ * viewer can close the popover without losing the tempo or stopping the click.
+ */
+@Stable
+class MetronomeState(
+    initialBpm: Int = DEFAULT_BPM,
+    initialTimeSignature: MetronomeTimeSignature = MetronomeTimeSignature.COMMON[2],
 ) {
+    var bpm by mutableIntStateOf(initialBpm.coerceIn(MIN_BPM, MAX_BPM))
+        private set
+    var timeSignature by mutableStateOf(initialTimeSignature)
+    var isPlaying by mutableStateOf(false)
+    var currentBeat by mutableIntStateOf(-1)
+        internal set
+
+    private var lastTapMillis = 0L
+    private var tapCount = 0
+    private var tapBpmAccumulator = 0.0
+
+    fun updateBpm(value: Int) {
+        bpm = value.coerceIn(MIN_BPM, MAX_BPM)
+    }
+
+    fun adjustBpm(delta: Int) = updateBpm(bpm + delta)
+
+    fun togglePlaying() {
+        isPlaying = !isPlaying
+    }
+
+    /** Registers a tap at [nowMillis]; two or more taps within two seconds set the tempo. */
+    fun tap(nowMillis: Long) {
+        if (tapCount == 0 || nowMillis - lastTapMillis > TAP_RESET_MILLIS) {
+            tapCount = 1
+            tapBpmAccumulator = 0.0
+        } else {
+            val interval = (nowMillis - lastTapMillis).coerceAtLeast(1L)
+            tapBpmAccumulator += 60_000.0 / interval
+            tapCount++
+            updateBpm((tapBpmAccumulator / (tapCount - 1)).roundToInt())
+        }
+        lastTapMillis = nowMillis
+    }
+}
+
+@Composable
+fun rememberMetronomeState(): MetronomeState = remember { MetronomeState() }
+
+/** Drives the click for [state] for as long as this effect stays in the composition. */
+@Composable
+fun MetronomePlaybackEffect(state: MetronomeState) {
     val clickPlayer = rememberMetronomeClickPlayer()
-    var bpm by remember { mutableIntStateOf(DEFAULT_BPM) }
-    var isPlaying by remember { mutableStateOf(false) }
-    var currentBeat by remember { mutableIntStateOf(-1) }
-    var selectedTimeSignature by remember { mutableStateOf(MetronomeTimeSignature.COMMON[2]) }
-    var showTimeSignatureMenu by remember { mutableStateOf(false) }
-    var lastTapTime by remember { mutableStateOf(0L) }
-    var tapCount by remember { mutableIntStateOf(0) }
-    var tapBpmAccumulator by remember { mutableStateOf(0.0) }
-    val latestBpm by rememberUpdatedState(bpm)
-    val latestTimeSignature by rememberUpdatedState(selectedTimeSignature)
     DisposableEffect(clickPlayer) {
         onDispose {
             clickPlayer.stop()
         }
     }
 
-    LaunchedEffect(isPlaying) {
+    LaunchedEffect(state, state.isPlaying) {
         clickPlayer.stop()
-        if (!isPlaying) {
-            currentBeat = -1
+        if (!state.isPlaying) {
+            state.currentBeat = -1
             return@LaunchedEffect
         }
         try {
             runMetronomePlayback(
                 clickPlayer = clickPlayer,
-                initialBeat = currentBeat,
-                currentBpm = { latestBpm },
-                currentTimeSignature = { latestTimeSignature },
-                onBeatChanged = { beatIndex -> currentBeat = beatIndex },
+                initialBeat = state.currentBeat,
+                currentBpm = { state.bpm },
+                currentTimeSignature = { state.timeSignature },
+                onBeatChanged = { beatIndex -> state.currentBeat = beatIndex },
                 shouldContinue = { isActive },
             )
         } finally {
             clickPlayer.stop()
         }
     }
+}
+
+@Composable
+fun MetronomePanel(
+    state: MetronomeState,
+    modifier: Modifier = Modifier,
+) {
+    var showTimeSignatureMenu by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -126,7 +162,7 @@ fun MetronomeContent(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "$bpm BPM",
+            text = "${state.bpm} BPM",
             style = MaterialTheme.typography.displaySmall.copy(
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
@@ -135,14 +171,14 @@ fun MetronomeContent(
         )
 
         Text(
-            text = tempoMarking(bpm),
+            text = tempoMarking(state.bpm),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         Slider(
-            value = bpm.toFloat(),
-            onValueChange = { bpm = it.roundToInt() },
+            value = state.bpm.toFloat(),
+            onValueChange = { state.updateBpm(it.roundToInt()) },
             valueRange = MIN_BPM.toFloat()..MAX_BPM.toFloat(),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
         )
@@ -151,43 +187,22 @@ fun MetronomeContent(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedButton(onClick = { bpm = (bpm - 5).coerceAtLeast(MIN_BPM) }) {
-                Text("-5")
-            }
-            OutlinedButton(onClick = { bpm = (bpm - 1).coerceAtLeast(MIN_BPM) }) {
-                Text("-1")
-            }
-            OutlinedButton(onClick = { bpm = (bpm + 1).coerceAtMost(MAX_BPM) }) {
-                Text("+1")
-            }
-            OutlinedButton(onClick = { bpm = (bpm + 5).coerceAtMost(MAX_BPM) }) {
-                Text("+5")
+            listOf(-5, -1, 1, 5).forEach { delta ->
+                OutlinedButton(onClick = { state.adjustBpm(delta) }) {
+                    Text(if (delta > 0) "+$delta" else "$delta")
+                }
             }
         }
 
         FilledTonalButton(
-            onClick = {
-                val now = Clock.System.now().toEpochMilliseconds()
-                if (now - lastTapTime > 2000) {
-                    tapCount = 1
-                    tapBpmAccumulator = 0.0
-                } else {
-                    val interval = now - lastTapTime
-                    tapBpmAccumulator += 60_000.0 / interval
-                    tapCount++
-                    if (tapCount >= 2) {
-                        bpm = (tapBpmAccumulator / (tapCount - 1)).roundToInt().coerceIn(MIN_BPM, MAX_BPM)
-                    }
-                }
-                lastTapTime = now
-            },
+            onClick = { state.tap(Clock.System.now().toEpochMilliseconds()) },
         ) {
             Text("Tap Tempo")
         }
 
         Box {
             OutlinedButton(onClick = { showTimeSignatureMenu = true }) {
-                Text("Time: ${selectedTimeSignature.label}")
+                Text("Time: ${state.timeSignature.label}")
             }
             DropdownMenu(
                 expanded = showTimeSignatureMenu,
@@ -197,7 +212,7 @@ fun MetronomeContent(
                     DropdownMenuItem(
                         text = { Text(ts.label) },
                         onClick = {
-                            selectedTimeSignature = ts
+                            state.timeSignature = ts
                             showTimeSignatureMenu = false
                         },
                     )
@@ -210,8 +225,8 @@ fun MetronomeContent(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(vertical = 8.dp),
         ) {
-            repeat(selectedTimeSignature.beatsPerMeasure) { beatIndex ->
-                val isActive = beatIndex == currentBeat
+            repeat(state.timeSignature.beatsPerMeasure) { beatIndex ->
+                val isActive = beatIndex == state.currentBeat
                 val isAccent = beatIndex == 0
                 val targetColor = when {
                     isActive && isAccent -> MaterialTheme.colorScheme.error
@@ -232,8 +247,8 @@ fun MetronomeContent(
         }
 
         Button(
-            onClick = { isPlaying = !isPlaying },
-            colors = if (isPlaying) {
+            onClick = state::togglePlaying,
+            colors = if (state.isPlaying) {
                 ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
             } else {
                 ButtonDefaults.buttonColors()
@@ -241,67 +256,9 @@ fun MetronomeContent(
             modifier = Modifier.fillMaxWidth(0.6f).height(52.dp),
         ) {
             Text(
-                text = if (isPlaying) "Stop" else "Start",
+                text = if (state.isPlaying) "Stop" else "Start",
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
             )
-        }
-    }
-}
-
-@Composable
-fun MetronomeDialog(
-    onDismiss: () -> Unit,
-) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        BoxWithConstraints(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
-        ) {
-            val horizontalPadding = 20.dp
-            val verticalPadding = 20.dp
-            val dialogWidth = (maxWidth - horizontalPadding * 2).coerceAtMost(460.dp).coerceAtLeast(320.dp)
-            val dialogMaxHeight = (maxHeight - verticalPadding * 2).coerceAtLeast(360.dp)
-
-            Surface(
-                modifier = Modifier
-                    .width(dialogWidth)
-                    .heightIn(max = dialogMaxHeight),
-                shape = MaterialTheme.shapes.extraLarge,
-                tonalElevation = 10.dp,
-                color = MaterialTheme.colorScheme.surface,
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp, vertical = 18.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "Metronome",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontFamily = FontFamily.Serif,
-                                fontWeight = FontWeight.SemiBold,
-                            ),
-                        )
-                        TextButton(onClick = onDismiss) {
-                            Text("Close")
-                        }
-                    }
-
-                    MetronomeContent(
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
         }
     }
 }
