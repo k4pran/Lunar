@@ -268,7 +268,7 @@ private fun GeneralSettingsPage(
             selected = appState.layoutMode,
             options = listOf(
                 ChoiceOption("List", LibraryLayoutMode.LIST),
-                ChoiceOption("Grid", LibraryLayoutMode.GRID),
+                ChoiceOption("Gallery", LibraryLayoutMode.GRID),
             ),
             onSelect = appState::updateLayoutMode,
         )

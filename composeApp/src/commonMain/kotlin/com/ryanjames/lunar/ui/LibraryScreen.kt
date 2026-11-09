@@ -22,8 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -440,11 +438,11 @@ private fun ScoreCatalogue(
     val mode = if (appState.showingHiddenScores) ScoreListMode.HIDDEN else ScoreListMode.NORMAL
     val orderedIds = screenModel.navigationOrderIds(appState.layoutMode)
     when (appState.layoutMode) {
-        LibraryLayoutMode.GRID -> LibraryGrid(
+        LibraryLayoutMode.GRID -> LibraryGallery(
             items = screenModel.visibleItems,
             appState = appState,
             mode = mode,
-            onCardClick = { item -> appState.focusScore(item.id) },
+            grouped = true,
         )
 
         LibraryLayoutMode.LIST -> LibraryCatalogue(
@@ -546,7 +544,7 @@ private fun BrowseModeTab(arrangement: LibraryArrangement, selected: Boolean, on
 
 // ─── Flat score list (setlist detail) ──────────────────────────────────────────────
 
-private enum class ScoreListMode {
+internal enum class ScoreListMode {
     NORMAL,
     HIDDEN,
 }
@@ -556,9 +554,10 @@ private fun FlatScoreList(
     items: List<SheetMusicItem>,
     appState: LunarAppState,
     mode: ScoreListMode = ScoreListMode.NORMAL,
+    grouped: Boolean = false,
 ) {
     when (appState.layoutMode) {
-        LibraryLayoutMode.GRID -> LibraryGrid(items = items, appState = appState, mode = mode)
+        LibraryLayoutMode.GRID -> LibraryGallery(items = items, appState = appState, mode = mode, grouped = grouped)
         LibraryLayoutMode.LIST -> LibraryList(items = items, appState = appState, mode = mode)
     }
 }
@@ -1102,7 +1101,7 @@ private fun LibraryActionIconButton(
 }
 
 @Composable
-private fun LibraryItemQuickActions(
+internal fun LibraryItemQuickActions(
     item: SheetMusicItem,
     appState: LunarAppState,
     includeDownload: Boolean,
@@ -1269,33 +1268,6 @@ private fun DownloadGlyph(color: Color) {
 }
 
 @Composable
-private fun LibraryGrid(
-    items: List<SheetMusicItem>,
-    appState: LunarAppState,
-    mode: ScoreListMode,
-    onCardClick: (SheetMusicItem) -> Unit = appState::openScore,
-) {
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 260.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        items(
-            count = items.size,
-            key = { index -> items[index].id },
-        ) { index ->
-            LibraryCard(
-                item = items[index],
-                appState = appState,
-                mode = mode,
-                onClick = { onCardClick(items[index]) },
-            )
-        }
-    }
-}
-
-@Composable
 private fun LibraryList(
     items: List<SheetMusicItem>,
     appState: LunarAppState,
@@ -1370,16 +1342,6 @@ private fun LibraryCard(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                if (appState.layoutMode == LibraryLayoutMode.GRID) {
-                    ScoreThumbnail(
-                        item = item,
-                        cache = appState.thumbnailCache,
-                        modifier = Modifier
-                            .width(96.dp)
-                            .height(128.dp)
-                            .clip(MaterialTheme.shapes.medium),
-                    )
-                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1450,77 +1412,32 @@ private fun LibraryCard(
                         }
                     }
                 }
-                if (appState.layoutMode == LibraryLayoutMode.GRID) {
-                    GridLibraryCardFooter(
-                        item = item,
-                        appState = appState,
-                        mode = mode,
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = buildDetailsLine(item),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        modifier = Modifier.weight(1f),
                     )
-                } else {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            text = buildDetailsLine(item),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                            modifier = Modifier.weight(1f),
+                        LibraryItemQuickActions(
+                            item = item,
+                            appState = appState,
+                            includeDownload = appState.canDownloadScores,
+                            mode = mode,
                         )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            LibraryItemQuickActions(
-                                item = item,
-                                appState = appState,
-                                includeDownload = appState.canDownloadScores,
-                                mode = mode,
-                            )
-                            androidx.compose.material3.Button(onClick = { appState.openScore(item) }) {
-                                Text("Open")
-                            }
+                        androidx.compose.material3.Button(onClick = { appState.openScore(item) }) {
+                            Text("Open")
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun GridLibraryCardFooter(
-    item: SheetMusicItem,
-    appState: LunarAppState,
-    mode: ScoreListMode,
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            text = buildDetailsLine(item),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            LibraryItemQuickActions(
-                item = item,
-                appState = appState,
-                includeDownload = false,
-                mode = mode,
-                modifier = Modifier
-                    .weight(1f)
-                    .horizontalScroll(rememberScrollState()),
-            )
-            androidx.compose.material3.Button(onClick = { appState.openScore(item) }) {
-                Text("Open")
             }
         }
     }
