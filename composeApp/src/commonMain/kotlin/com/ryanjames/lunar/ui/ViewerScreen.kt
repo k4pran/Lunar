@@ -6,32 +6,32 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -39,34 +39,49 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import com.ryanjames.lunar.composeapp.generated.resources.Res
 import com.ryanjames.lunar.composeapp.generated.resources.lilypond_logo
 import com.ryanjames.lunar.composeapp.generated.resources.pdf_logo
@@ -78,8 +93,15 @@ import com.ryanjames.lunar.platform.LilyPondLiveRenderResult
 import com.ryanjames.lunar.platform.LilyPondSourceSnapshot
 import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.platform.RenderedPdfPage
+import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.ViewerKeybindings
+import com.ryanjames.lunar.settings.ViewerShortcutAction
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.onStart
 import org.jetbrains.compose.resources.painterResource
 
 private const val MinZoom = 0.2f
@@ -89,6 +111,8 @@ private const val FitZoom = 1f
 private const val PageGap = 20
 private const val LilyPondLiveRefreshIntervalMillis = 1_000L
 private const val LilyPondEditorRenderDebounceMillis = 650L
+private const val PageThumbnailTargetWidthPx = 128
+private const val PopoverGapPx = 8
 
 data class ViewerDocumentState(
     val id: String,
@@ -258,6 +282,52 @@ private fun rememberActiveViewerDocument(
     )
 }
 
+private enum class ViewerPopover {
+    METRONOME,
+    ADD,
+    MORE,
+}
+
+private data class ViewerMoreAction(
+    val label: String,
+    val onClick: () -> Unit,
+)
+
+/**
+ * Tracks whether the viewer chrome (top bar, footer and edge buttons) is showing. Input calls
+ * [registerActivity]; [runAutoHide] fades the chrome after a quiet period. Only [visible] is
+ * snapshot state, so pointer movement does not recompose the viewer unless visibility flips.
+ */
+@Stable
+internal class ViewerChromeState {
+    var visible by mutableStateOf(true)
+        private set
+
+    private val activity = MutableSharedFlow<Unit>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    fun registerActivity() {
+        visible = true
+        activity.tryEmit(Unit)
+    }
+
+    /** Hides the chrome [autoHideMillis] after the latest activity; null keeps it visible. */
+    suspend fun runAutoHide(autoHideMillis: Long?) {
+        visible = true
+        if (autoHideMillis == null) {
+            awaitCancellation()
+        }
+        activity
+            .onStart { emit(Unit) }
+            .collectLatest {
+                delay(autoHideMillis)
+                visible = false
+            }
+    }
+}
+
 @Composable
 fun ViewerScreen(
     runtime: PlatformRuntime,
@@ -272,8 +342,10 @@ fun ViewerScreen(
     onPageCountResolved: (Int) -> Unit,
     defaultTwoPageMode: Boolean = false,
     viewerKeybindings: ViewerKeybindings = ViewerKeybindings(),
+    chromeAutoHideMillis: Long? = AppSettings().viewerChromeAutoHideMillis,
     onEnterFullscreen: (() -> Unit)? = null,
-    backButtonLabel: String = "Back to library",
+    backLabel: String = "Library",
+    nextInSetlist: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var currentPage by remember(documentState.id) {
@@ -286,7 +358,7 @@ fun ViewerScreen(
     }
     var errorMessage by remember(documentState.id, currentPage) { mutableStateOf<String?>(null) }
     var isLoading by remember(documentState.id, currentPage) { mutableStateOf(true) }
-    var showMetronomeDialog by remember { mutableStateOf(false) }
+    var openPopover by remember { mutableStateOf<ViewerPopover?>(null) }
     var sourceEditorVisible by remember(documentState.id) { mutableStateOf(false) }
     var sourceEditorText by remember(documentState.id) { mutableStateOf("") }
     var sourceEditorTextReady by remember(documentState.id) { mutableStateOf(false) }
@@ -294,8 +366,13 @@ fun ViewerScreen(
     var sourceEditorAutoRefresh by remember(documentState.id) { mutableStateOf(true) }
     var sourceEditorManualRefreshText by remember(documentState.id) { mutableStateOf<String?>(null) }
     var sourceEditorManualRefreshRequest by remember(documentState.id) { mutableIntStateOf(0) }
+    var topBarHeightPx by remember { mutableIntStateOf(0) }
+    var footerHeightPx by remember { mutableIntStateOf(0) }
     val themePalette = lunarThemePalette()
+    val density = LocalDensity.current
     val focusRequester = remember { FocusRequester() }
+    val chromeState = remember { ViewerChromeState() }
+    val metronomeState = rememberMetronomeState()
     val sourceEditorPreviewText = when {
         !sourceEditorVisible || !sourceEditorTextReady -> null
         sourceEditorAutoRefresh -> sourceEditorText
@@ -314,9 +391,22 @@ fun ViewerScreen(
         editorAutoRefreshEnabled = sourceEditorAutoRefresh,
         editorRefreshPending = sourceEditorRefreshPending,
     )
+    val pageThumbnails = remember(activeDocument.documentPath) { mutableStateMapOf<Int, ImageBitmap>() }
+    // The chrome stays put while source is being edited and when auto-hide is off; the page
+    // then lays out around it instead of under it. Open popovers hold it without re-layout.
+    val chromePinned = chromeAutoHideMillis == null || sourceEditorVisible
+    val chromeHeld = chromePinned || openPopover != null
 
-    LaunchedEffect(documentState.id) {
-        focusRequester.requestFocus()
+    MetronomePlaybackEffect(metronomeState)
+
+    LaunchedEffect(chromeState, chromeAutoHideMillis, chromeHeld) {
+        chromeState.runAutoHide(if (chromeHeld) null else chromeAutoHideMillis)
+    }
+
+    LaunchedEffect(documentState.id, openPopover, sourceEditorVisible) {
+        if (openPopover == null && !sourceEditorVisible) {
+            focusRequester.requestFocus()
+        }
     }
 
     LaunchedEffect(activeDocument.sourceSnapshot?.revision) {
@@ -390,347 +480,39 @@ fun ViewerScreen(
     val pageStep = if (twoPageMode) 2 else 1
     val canGoPrevious = currentPage > 0
     val canGoNext = resolvedPageCount?.let { currentPage + pageStep < it } ?: true
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .focusRequester(focusRequester)
-            .focusable()
-            .viewerShortcutHandler(
-                enabled = !sourceEditorVisible,
-                keybindings = viewerKeybindings,
-                onToggleFullscreen = onEnterFullscreen,
-                onNextPage = {
-                    if (canGoNext) {
-                        currentPage = nextPageIndex(currentPage, resolvedPageCount, pageStep)
+    val goToPreviousPage = {
+        if (canGoPrevious) {
+            currentPage = (currentPage - pageStep).coerceAtLeast(0)
+        }
+    }
+    val goToNextPage = {
+        if (canGoNext) {
+            currentPage = nextPageIndex(currentPage, resolvedPageCount, pageStep)
+        }
+    }
+    val zoomIn = { zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom) }
+    val zoomOut = { zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom) }
+    val togglePageViewMode = {
+        twoPageMode = !twoPageMode
+        zoom = FitZoom
+    }
+    val moreActions = buildList {
+        activeDocument.sourceSnapshot?.let { source ->
+            add(
+                ViewerMoreAction(if (sourceEditorVisible) "Hide source" else "Edit source") {
+                    if (!sourceEditorVisible && !sourceEditorTextReady) {
+                        sourceEditorText = source.sourceText
+                        sourceEditorTextReady = true
+                        sourceEditorDirty = false
+                        sourceEditorManualRefreshText = null
+                        sourceEditorManualRefreshRequest = 0
                     }
-                },
-                onPreviousPage = {
-                    if (canGoPrevious) {
-                        currentPage = (currentPage - pageStep).coerceAtLeast(0)
-                    }
-                },
-                onToggleFavorite = onToggleFavorite,
-                onOpenRandomScore = onOpenRandomScore,
-                onZoomIn = {
-                    zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom)
-                },
-                onZoomOut = {
-                    zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom)
-                },
-                onTogglePageViewMode = {
-                    twoPageMode = !twoPageMode
-                    zoom = FitZoom
-                },
-            ),
-        verticalArrangement = Arrangement.spacedBy(0.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            themePalette.headerGradientStart,
-                            themePalette.headerGradientEnd,
-                        )
-                    )
-                )
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = documentState.title,
-                        style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Serif),
-                        color = themePalette.headerForeground,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    documentState.subtitle?.let { subtitle ->
-                        Text(
-                            text = subtitle,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = themePalette.headerForeground.copy(alpha = 0.7f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    ViewerDocumentMetaRow(
-                        viewerSupport = documentState.document.viewerSupport,
-                        pageCount = resolvedPageCount,
-                        statusLabel = visibleViewerStatusLabel(
-                            statusLabel = activeDocument.statusLabel,
-                            viewerSupport = documentState.document.viewerSupport,
-                        ),
-                        foregroundColor = themePalette.headerForeground,
-                    )
+                    sourceEditorVisible = !sourceEditorVisible
                 }
-                CompactNavButton("<", canGoPrevious) {
-                    currentPage = (currentPage - pageStep).coerceAtLeast(0)
-                }
-                Text(
-                    text = buildPageLabel(currentPage, resolvedPageCount, renderedPages.size),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = themePalette.headerForeground.copy(alpha = 0.9f),
-                )
-                CompactNavButton(">", canGoNext) {
-                    currentPage = nextPageIndex(currentPage, resolvedPageCount, pageStep)
-                }
-                CompactNavButton("-", zoom > MinZoom) { zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom) }
-                CompactNavButton("+", zoom < MaxZoom) { zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom) }
-                CompactNavButton("Fit", zoom != FitZoom) { zoom = FitZoom }
-                LayoutModeDropdownButton(
-                    twoPageMode = twoPageMode,
-                    onSelectSinglePage = {
-                        twoPageMode = false
-                        zoom = FitZoom
-                    },
-                    onSelectTwoPage = {
-                        twoPageMode = true
-                        zoom = FitZoom
-                    },
-                )
-                if (activeDocument.sourceSnapshot != null) {
-                    CompactNavButton(
-                        label = if (sourceEditorVisible) "View" else "Edit",
-                        enabled = true,
-                    ) {
-                        if (!sourceEditorVisible && !sourceEditorTextReady) {
-                            activeDocument.sourceSnapshot.let { source ->
-                                sourceEditorText = source.sourceText
-                                sourceEditorTextReady = true
-                                sourceEditorDirty = false
-                                sourceEditorManualRefreshText = null
-                                sourceEditorManualRefreshRequest = 0
-                            }
-                        }
-                        sourceEditorVisible = !sourceEditorVisible
-                    }
-                }
-                if (documentState.isFavorite != null && onToggleFavorite != null) {
-                    ViewerFavoriteButton(
-                        title = documentState.title,
-                        isFavorite = documentState.isFavorite,
-                        onToggleFavorite = onToggleFavorite,
-                    )
-                }
-                ViewerAddDropdownButton(
-                    onAddToSetlist = onAddToSetlist,
-                    onAddToSongbook = onAddToSongbook,
-                )
-                if (!documentState.isHidden && onHideScore != null) {
-                    CompactToolbarIconButton(
-                        contentDescription = "Hide score",
-                        onClick = onHideScore,
-                    ) { color ->
-                        HideScoreIcon(color = color)
-                    }
-                }
-                if (onEnterFullscreen != null) {
-                    CompactToolbarIconButton(
-                        contentDescription = "Enter fullscreen",
-                        onClick = onEnterFullscreen,
-                    ) { color ->
-                        FullscreenIcon(color = color)
-                    }
-                }
-                CompactNavButton("\u2669", true, onClick = { showMetronomeDialog = true })
-                CompactToolbarIconButton(
-                    contentDescription = backButtonLabel,
-                    onClick = onBack,
-                ) { color ->
-                    CloseIcon(color = color)
-                }
-            }
+            )
         }
-
-        ViewerContentArea(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .background(themePalette.viewerBackdrop),
-            activeDocument = activeDocument,
-            renderedPages = renderedPages,
-            zoom = zoom,
-            isLoading = isLoading,
-            errorMessage = errorMessage,
-            sourceEditorVisible = sourceEditorVisible,
-            sourceEditorText = sourceEditorText.takeIf { sourceEditorTextReady },
-            sourceEditorDirty = sourceEditorDirty,
-            sourceEditorAutoRefresh = sourceEditorAutoRefresh,
-            sourceEditorRefreshPending = sourceEditorRefreshPending,
-            onSourceEditorTextChange = { text ->
-                sourceEditorText = text
-                sourceEditorTextReady = true
-                sourceEditorDirty = text != activeDocument.sourceSnapshot?.sourceText
-            },
-            onSourceEditorAutoRefreshChange = { enabled ->
-                sourceEditorAutoRefresh = enabled
-                sourceEditorManualRefreshText = if (!enabled && sourceEditorTextReady) {
-                    sourceEditorText
-                } else {
-                    null
-                }
-                sourceEditorManualRefreshRequest = 0
-            },
-            onRefreshSourcePreview = {
-                sourceEditorManualRefreshText = sourceEditorText
-                sourceEditorManualRefreshRequest += 1
-            },
-            onResetSourceEditorText = {
-                activeDocument.sourceSnapshot?.let { source ->
-                    sourceEditorText = source.sourceText
-                    sourceEditorTextReady = true
-                    sourceEditorDirty = false
-                    sourceEditorManualRefreshText = null
-                    sourceEditorManualRefreshRequest = 0
-                }
-            },
-        )
+        onEnterFullscreen?.let { add(ViewerMoreAction("Open fullscreen", it)) }
     }
-
-    if (showMetronomeDialog) {
-        MetronomeDialog(onDismiss = { showMetronomeDialog = false })
-    }
-}
-
-@Composable
-fun FullscreenViewerScreen(
-    runtime: PlatformRuntime,
-    documentState: ViewerDocumentState,
-    onBack: () -> Unit,
-    onToggleFavorite: (() -> Unit)? = null,
-    onHideScore: (() -> Unit)? = null,
-    onAddToSetlist: (() -> Unit)? = null,
-    onAddToSongbook: (() -> Unit)? = null,
-    onOpenRandomScore: (() -> Unit)? = null,
-    onPageChanged: (Int) -> Unit,
-    onPageCountResolved: (Int) -> Unit,
-    defaultTwoPageMode: Boolean = false,
-    viewerKeybindings: ViewerKeybindings = ViewerKeybindings(),
-    modifier: Modifier = Modifier,
-) {
-    var currentPage by remember(documentState.id) {
-        mutableIntStateOf(documentState.lastViewedPage.coerceAtLeast(0))
-    }
-    var zoom by remember(documentState.id) { mutableFloatStateOf(1f) }
-    var twoPageMode by remember(documentState.id, defaultTwoPageMode) { mutableStateOf(defaultTwoPageMode) }
-    var renderedPages by remember(documentState.id, currentPage, twoPageMode) {
-        mutableStateOf<List<RenderedPdfPage>>(emptyList())
-    }
-    var errorMessage by remember(documentState.id, currentPage) { mutableStateOf<String?>(null) }
-    var isLoading by remember(documentState.id, currentPage) { mutableStateOf(true) }
-    var overlayVisible by remember { mutableStateOf(false) }
-    var showMetronomeDialog by remember { mutableStateOf(false) }
-    var sourceEditorVisible by remember(documentState.id) { mutableStateOf(false) }
-    var sourceEditorText by remember(documentState.id) { mutableStateOf("") }
-    var sourceEditorTextReady by remember(documentState.id) { mutableStateOf(false) }
-    var sourceEditorDirty by remember(documentState.id) { mutableStateOf(false) }
-    var sourceEditorAutoRefresh by remember(documentState.id) { mutableStateOf(true) }
-    var sourceEditorManualRefreshText by remember(documentState.id) { mutableStateOf<String?>(null) }
-    var sourceEditorManualRefreshRequest by remember(documentState.id) { mutableIntStateOf(0) }
-    val themePalette = lunarThemePalette()
-    val focusRequester = remember { FocusRequester() }
-    val sourceEditorPreviewText = when {
-        !sourceEditorVisible || !sourceEditorTextReady -> null
-        sourceEditorAutoRefresh -> sourceEditorText
-        else -> sourceEditorManualRefreshText
-    }
-    val sourceEditorRefreshPending = sourceEditorVisible &&
-        sourceEditorTextReady &&
-        sourceEditorDirty &&
-        !sourceEditorAutoRefresh &&
-        sourceEditorText != sourceEditorManualRefreshText
-    val activeDocument = rememberActiveViewerDocument(
-        runtime = runtime,
-        documentState = documentState,
-        editedSourceText = sourceEditorPreviewText,
-        editedSourceRenderNonce = sourceEditorManualRefreshRequest,
-        editorAutoRefreshEnabled = sourceEditorAutoRefresh,
-        editorRefreshPending = sourceEditorRefreshPending,
-    )
-
-    LaunchedEffect(documentState.id) {
-        focusRequester.requestFocus()
-    }
-
-    LaunchedEffect(activeDocument.sourceSnapshot?.revision) {
-        val source = activeDocument.sourceSnapshot ?: return@LaunchedEffect
-        if (!sourceEditorDirty || !sourceEditorTextReady) {
-            sourceEditorText = source.sourceText
-            sourceEditorTextReady = true
-            sourceEditorDirty = false
-            sourceEditorManualRefreshText = null
-            sourceEditorManualRefreshRequest = 0
-        }
-    }
-
-    LaunchedEffect(activeDocument.sourceSnapshot) {
-        if (activeDocument.sourceSnapshot == null) {
-            sourceEditorVisible = false
-            sourceEditorText = ""
-            sourceEditorTextReady = false
-            sourceEditorDirty = false
-            sourceEditorManualRefreshText = null
-            sourceEditorManualRefreshRequest = 0
-        }
-    }
-
-    LaunchedEffect(documentState.id, activeDocument.documentPath, currentPage, twoPageMode) {
-        isLoading = true
-        errorMessage = null
-        onPageChanged(currentPage)
-        val documentPath = activeDocument.documentPath
-        if (documentPath == null) {
-            renderedPages = emptyList()
-            isLoading = false
-            return@LaunchedEffect
-        }
-
-        val info = runtime.renderer.inspect(documentPath)
-        if (info != null) {
-            onPageCountResolved(info.pageCount)
-            if (currentPage > info.pageCount - 1) {
-                currentPage = (info.pageCount - 1).coerceAtLeast(0)
-                return@LaunchedEffect
-            }
-        }
-
-        renderedPages = buildList {
-            runtime.renderer.renderPage(
-                documentPath = documentPath,
-                pageIndex = currentPage,
-            )?.let(::add)
-
-            if (twoPageMode) {
-                runtime.renderer.renderPage(
-                    documentPath = documentPath,
-                    pageIndex = currentPage + 1,
-                )?.let(::add)
-            }
-        }
-        renderedPages.firstOrNull()?.let { onPageCountResolved(it.pageCount) }
-
-        if (renderedPages.isEmpty()) {
-            errorMessage = if (runtime.capabilities.inAppViewingSupported) {
-                "The PDF page could not be rendered yet."
-            } else {
-                runtime.capabilities.statusLine
-            }
-        }
-        isLoading = false
-    }
-
-    val resolvedPageCount = renderedPages.firstOrNull()?.pageCount ?: documentState.pageCount
-    val pageStep = if (twoPageMode) 2 else 1
-    val canGoPrevious = currentPage > 0
-    val canGoNext = resolvedPageCount?.let { currentPage + pageStep < it } ?: true
-    val zoomLabel = "${(zoom * 100).toInt()}%"
 
     Box(
         modifier = modifier
@@ -740,37 +522,18 @@ fun FullscreenViewerScreen(
             .viewerShortcutHandler(
                 enabled = !sourceEditorVisible,
                 keybindings = viewerKeybindings,
-                onToggleFullscreen = onBack,
-                onNextPage = {
-                    if (canGoNext) {
-                        currentPage = nextPageIndex(currentPage, resolvedPageCount, pageStep)
-                    }
-                },
-                onPreviousPage = {
-                    if (canGoPrevious) {
-                        currentPage = (currentPage - pageStep).coerceAtLeast(0)
-                    }
-                },
+                onActivity = chromeState::registerActivity,
+                onToggleFullscreen = onEnterFullscreen ?: onBack,
+                onNextPage = goToNextPage,
+                onPreviousPage = goToPreviousPage,
                 onToggleFavorite = onToggleFavorite,
                 onOpenRandomScore = onOpenRandomScore,
-                onZoomIn = {
-                    zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom)
-                },
-                onZoomOut = {
-                    zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom)
-                },
-                onTogglePageViewMode = {
-                    twoPageMode = !twoPageMode
-                    zoom = FitZoom
-                },
+                onZoomIn = zoomIn,
+                onZoomOut = zoomOut,
+                onTogglePageViewMode = togglePageViewMode,
             )
             .background(themePalette.viewerBackdrop)
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onDoubleTap = { overlayVisible = !overlayVisible }
-                )
-            },
-        contentAlignment = Alignment.Center,
+            .observeViewerActivity(chromeState::registerActivity),
     ) {
         ViewerContentArea(
             activeDocument = activeDocument,
@@ -810,246 +573,695 @@ fun FullscreenViewerScreen(
                     sourceEditorManualRefreshRequest = 0
                 }
             },
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    top = if (chromePinned) with(density) { topBarHeightPx.toDp() } else 0.dp,
+                    bottom = if (chromePinned) with(density) { footerHeightPx.toDp() } else 0.dp,
+                ),
         )
 
-        AnimatedVisibility(
-            visible = overlayVisible,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter),
+        ViewerChromeVisibility(
+            visible = chromeState.visible,
+            modifier = Modifier.align(Alignment.CenterStart),
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color.Transparent, themePalette.viewerScrim)
-                        )
-                    )
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 16.dp),
+            ViewerEdgePageButton(
+                contentDescription = "Previous page",
+                tooltip = viewerKeybindings.tooltipFor(ViewerShortcutAction.PREVIOUS_PAGE),
+                pointsLeft = true,
+                enabled = canGoPrevious,
+                onClick = goToPreviousPage,
+            )
+        }
+        ViewerChromeVisibility(
+            visible = chromeState.visible,
+            modifier = Modifier.align(Alignment.CenterEnd),
+        ) {
+            ViewerEdgePageButton(
+                contentDescription = "Next page",
+                tooltip = viewerKeybindings.tooltipFor(ViewerShortcutAction.NEXT_PAGE),
+                pointsLeft = false,
+                enabled = canGoNext,
+                onClick = goToNextPage,
+            )
+        }
+
+        ViewerChromeVisibility(
+            visible = chromeState.visible,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .onSizeChanged { topBarHeightPx = it.height },
+        ) {
+            ViewerTopBar(
+                backLabel = backLabel,
+                onBack = onBack,
+                title = documentState.title,
+                subtitle = documentState.subtitle,
+                viewerSupport = documentState.document.viewerSupport,
+                statusLabel = visibleViewerStatusLabel(
+                    statusLabel = activeDocument.statusLabel,
+                    viewerSupport = documentState.document.viewerSupport,
+                ),
             ) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = themePalette.viewerOverlay,
-                    shape = MaterialTheme.shapes.extraLarge,
-                    tonalElevation = 10.dp,
+                ViewerToolbar(
+                    keybindings = viewerKeybindings,
+                    zoom = zoom,
+                    onZoomOut = zoomOut,
+                    onFit = { zoom = FitZoom },
+                    onZoomIn = zoomIn,
+                    twoPageMode = twoPageMode,
+                    onTogglePageViewMode = togglePageViewMode,
+                    metronomeState = metronomeState,
+                    title = documentState.title,
+                    isFavorite = documentState.isFavorite,
+                    onToggleFavorite = onToggleFavorite,
+                    onAddToSetlist = onAddToSetlist,
+                    onAddToSongbook = onAddToSongbook,
+                    onHideScore = onHideScore.takeUnless { documentState.isHidden },
+                    moreActions = moreActions,
+                    openPopover = openPopover,
+                    onOpenPopoverChange = { openPopover = it },
+                )
+            }
+        }
+
+        ViewerChromeVisibility(
+            visible = chromeState.visible,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .onSizeChanged { footerHeightPx = it.height },
+        ) {
+            ViewerFooter(
+                runtime = runtime,
+                documentPath = activeDocument.documentPath,
+                currentPage = currentPage,
+                pageCount = resolvedPageCount,
+                twoPageMode = twoPageMode,
+                thumbnails = pageThumbnails,
+                onSelectPage = { pageIndex -> currentPage = pageIndex },
+                onOpenRandomScore = onOpenRandomScore,
+                nextInSetlist = nextInSetlist,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ViewerChromeVisibility(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = modifier,
+    ) {
+        content()
+    }
+}
+
+private fun Modifier.observeViewerActivity(onActivity: () -> Unit): Modifier =
+    pointerInput(onActivity) {
+        awaitPointerEventScope {
+            while (true) {
+                // The initial pass sees moves, taps and scrolls without consuming them.
+                awaitPointerEvent(PointerEventPass.Initial)
+                onActivity()
+            }
+        }
+    }
+
+@Composable
+private fun ViewerTopBar(
+    backLabel: String,
+    onBack: () -> Unit,
+    title: String,
+    subtitle: String?,
+    viewerSupport: ScoreViewerSupport,
+    statusLabel: String?,
+    toolbar: @Composable () -> Unit,
+) {
+    val themePalette = lunarThemePalette()
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        themePalette.headerGradientStart,
+                        themePalette.headerGradientEnd,
+                    )
+                )
+            )
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        val heading = @Composable { headingModifier: Modifier ->
+            Row(
+                modifier = headingModifier,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ViewerBackButton(label = backLabel, onClick = onBack)
+                ViewerHeading(
+                    title = title,
+                    subtitle = subtitle,
+                    viewerSupport = viewerSupport,
+                    statusLabel = statusLabel,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+
+        if (maxWidth < 720.dp) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                heading(Modifier.fillMaxWidth())
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 18.dp, vertical = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = documentState.title,
-                                    style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Serif),
-                                    color = themePalette.viewerForeground,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                documentState.subtitle?.let { subtitle ->
-                                    Text(
-                                        text = subtitle,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = themePalette.viewerForeground.copy(alpha = 0.78f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                ViewerDocumentMetaRow(
-                                    viewerSupport = documentState.document.viewerSupport,
-                                    pageCount = resolvedPageCount,
-                                    statusLabel = visibleViewerStatusLabel(
-                                        statusLabel = activeDocument.statusLabel,
-                                        viewerSupport = documentState.document.viewerSupport,
-                                    ),
-                                    foregroundColor = themePalette.viewerForeground,
-                                )
-                            }
-                            Text(
-                                text = buildPageLabel(currentPage, resolvedPageCount, renderedPages.size),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = themePalette.viewerForeground.copy(alpha = 0.92f),
-                                modifier = Modifier.padding(start = 12.dp),
-                            )
-                        }
+                    toolbar()
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                heading(Modifier.weight(1f))
+                toolbar()
+            }
+        }
+    }
+}
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            FullscreenToolbarButton(
-                                label = "Prev",
-                                enabled = canGoPrevious,
-                                onClick = { currentPage = (currentPage - pageStep).coerceAtLeast(0) },
-                            )
-                            FullscreenToolbarButton(
-                                label = "Next",
-                                enabled = canGoNext,
-                                onClick = {
-                                    currentPage = nextPageIndex(currentPage, resolvedPageCount, pageStep)
-                                },
-                            )
-                            Surface(
-                                color = themePalette.viewerForeground.copy(alpha = 0.12f),
-                                shape = MaterialTheme.shapes.large,
-                            ) {
-                                Text(
-                                    text = "Zoom $zoomLabel",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = themePalette.viewerForeground,
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                )
-                            }
-                        }
+@Composable
+private fun ViewerBackButton(
+    label: String,
+    onClick: () -> Unit,
+) {
+    val themePalette = lunarThemePalette()
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Box(modifier = Modifier.weight(1f)) {
-                                FilledTonalButton(
-                                    onClick = { zoom = (zoom - ZoomStep).coerceAtLeast(MinZoom) },
-                                    enabled = zoom > MinZoom,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text("Zoom -")
-                                }
-                            }
-                            Box(modifier = Modifier.weight(1f)) {
-                                FilledTonalButton(
-                                    onClick = { zoom = FitZoom },
-                                    enabled = zoom != FitZoom,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text("Best Fit")
-                                }
-                            }
-                            Box(modifier = Modifier.weight(1f)) {
-                                FilledTonalButton(
-                                    onClick = { zoom = (zoom + ZoomStep).coerceAtMost(MaxZoom) },
-                                    enabled = zoom < MaxZoom,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text("Zoom +")
-                                }
-                            }
-                        }
+    Row(
+        modifier = Modifier
+            .clip(MaterialTheme.shapes.small)
+            .clickable(onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Back to $label"
+            }
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ChevronIcon(
+            pointsLeft = true,
+            color = themePalette.headerForeground,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = themePalette.headerForeground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 160.dp),
+        )
+    }
+}
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Box(modifier = Modifier.weight(1f)) {
-                                FilledTonalButton(
-                                    onClick = {
-                                        twoPageMode = !twoPageMode
-                                        zoom = FitZoom
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text(if (twoPageMode) "Single Page" else "Two Pages")
-                                }
-                            }
-                            if (activeDocument.sourceSnapshot != null) {
-                                Box(modifier = Modifier.weight(1f)) {
-                                    FilledTonalButton(
-                                        onClick = {
-                                            if (!sourceEditorVisible && !sourceEditorTextReady) {
-                                                activeDocument.sourceSnapshot.let { source ->
-                                                    sourceEditorText = source.sourceText
-                                                    sourceEditorTextReady = true
-                                                    sourceEditorDirty = false
-                                                    sourceEditorManualRefreshText = null
-                                                    sourceEditorManualRefreshRequest = 0
-                                                }
-                                            }
-                                            sourceEditorVisible = !sourceEditorVisible
-                                        },
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        Text(if (sourceEditorVisible) "Hide Source" else "Edit Source")
-                                    }
-                                }
-                            }
-                            Box(modifier = Modifier.weight(1f)) {
-                                FilledTonalButton(
-                                    onClick = { showMetronomeDialog = true },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text("\u2669 Metronome")
-                                }
-                            }
-                        }
+@Composable
+private fun ViewerHeading(
+    title: String,
+    subtitle: String?,
+    viewerSupport: ScoreViewerSupport,
+    statusLabel: String?,
+    modifier: Modifier = Modifier,
+) {
+    val themePalette = lunarThemePalette()
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            FullscreenAddDropdownButton(
-                                onAddToSetlist = onAddToSetlist,
-                                onAddToSongbook = onAddToSongbook,
-                                modifier = Modifier.weight(1f),
-                            )
-                            if (documentState.isFavorite != null && onToggleFavorite != null) {
-                                Box(modifier = Modifier.weight(1f)) {
-                                    OutlinedButton(
-                                        onClick = onToggleFavorite,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    ) {
-                                        Text(if (documentState.isFavorite) "Unfavorite" else "Favorite")
-                                    }
-                                }
-                            }
-                            if (!documentState.isHidden && onHideScore != null) {
-                                Box(modifier = Modifier.weight(1f)) {
-                                    OutlinedButton(
-                                        onClick = onHideScore,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .semantics {
-                                                contentDescription = "Hide score"
-                                            },
-                                    ) {
-                                        HideScoreIcon(
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    }
-                                }
-                            }
-                            Box(modifier = Modifier.weight(1f)) {
-                                Button(
-                                    onClick = onBack,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text("Exit Fullscreen")
-                                }
-                            }
-                        }
-                    }
+    Column(modifier = modifier) {
+        LunarTooltip(title) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Serif),
+                color = themePalette.headerForeground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ViewerDocumentMetaRow(
+                viewerSupport = viewerSupport,
+                statusLabel = statusLabel,
+                foregroundColor = themePalette.headerForeground,
+            )
+            subtitle?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = themePalette.headerForeground.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ViewerToolbar(
+    keybindings: ViewerKeybindings,
+    zoom: Float,
+    onZoomOut: () -> Unit,
+    onFit: () -> Unit,
+    onZoomIn: () -> Unit,
+    twoPageMode: Boolean,
+    onTogglePageViewMode: () -> Unit,
+    metronomeState: MetronomeState,
+    title: String,
+    isFavorite: Boolean?,
+    onToggleFavorite: (() -> Unit)?,
+    onAddToSetlist: (() -> Unit)?,
+    onAddToSongbook: (() -> Unit)?,
+    onHideScore: (() -> Unit)?,
+    moreActions: List<ViewerMoreAction>,
+    openPopover: ViewerPopover?,
+    onOpenPopoverChange: (ViewerPopover?) -> Unit,
+) {
+    val canFavorite = isFavorite != null && onToggleFavorite != null
+    val canAdd = onAddToSetlist != null || onAddToSongbook != null
+    val groups = buildList<@Composable () -> Unit> {
+        add {
+            ViewerToolbarButton(
+                contentDescription = "Zoom out",
+                tooltip = keybindings.tooltipFor(ViewerShortcutAction.ZOOM_OUT),
+                enabled = zoom > MinZoom,
+                onClick = onZoomOut,
+            ) { color -> ZoomIcon(zoomIn = false, color = color) }
+            ViewerToolbarTextButton(
+                label = "Fit",
+                contentDescription = "Fit to page",
+                enabled = zoom != FitZoom,
+                onClick = onFit,
+            )
+            ViewerToolbarButton(
+                contentDescription = "Zoom in",
+                tooltip = keybindings.tooltipFor(ViewerShortcutAction.ZOOM_IN),
+                enabled = zoom < MaxZoom,
+                onClick = onZoomIn,
+            ) { color -> ZoomIcon(zoomIn = true, color = color) }
+        }
+        add {
+            ViewerToolbarButton(
+                contentDescription = if (twoPageMode) "Two-page layout" else "Single-page layout",
+                tooltip = keybindings.tooltipFor(ViewerShortcutAction.TOGGLE_PAGE_VIEW_MODE),
+                selected = twoPageMode,
+                onClick = onTogglePageViewMode,
+            ) { color -> PageLayoutIcon(twoPage = true, color = color) }
+        }
+        add {
+            Box {
+                ViewerToolbarButton(
+                    contentDescription = "Metronome",
+                    tooltip = if (metronomeState.isPlaying) {
+                        "Metronome (${metronomeState.bpm} BPM)"
+                    } else {
+                        "Metronome"
+                    },
+                    selected = openPopover == ViewerPopover.METRONOME || metronomeState.isPlaying,
+                    onClick = {
+                        onOpenPopoverChange(
+                            if (openPopover == ViewerPopover.METRONOME) null else ViewerPopover.METRONOME
+                        )
+                    },
+                ) { color -> MetronomeIcon(color = color) }
+                if (openPopover == ViewerPopover.METRONOME) {
+                    MetronomePopover(
+                        state = metronomeState,
+                        onDismiss = { onOpenPopoverChange(null) },
+                    )
+                }
+            }
+        }
+        if (canFavorite || canAdd) {
+            add {
+                if (isFavorite != null && onToggleFavorite != null) {
+                    ViewerFavoriteButton(
+                        title = title,
+                        isFavorite = isFavorite,
+                        tooltip = keybindings.tooltipFor(
+                            action = ViewerShortcutAction.TOGGLE_FAVORITE,
+                            label = if (isFavorite) "Remove from favorites" else "Mark as favorite",
+                        ),
+                        onToggleFavorite = onToggleFavorite,
+                    )
+                }
+                ViewerAddDropdownButton(
+                    expanded = openPopover == ViewerPopover.ADD,
+                    onExpandedChange = { expanded ->
+                        onOpenPopoverChange(if (expanded) ViewerPopover.ADD else null)
+                    },
+                    onAddToSetlist = onAddToSetlist,
+                    onAddToSongbook = onAddToSongbook,
+                )
+            }
+        }
+        if (onHideScore != null || moreActions.isNotEmpty()) {
+            add {
+                onHideScore?.let { onHide ->
+                    ViewerToolbarButton(
+                        contentDescription = "Hide score",
+                        tooltip = "Hide score",
+                        onClick = onHide,
+                    ) { color -> HideScoreIcon(color = color) }
+                }
+                if (moreActions.isNotEmpty()) {
+                    ViewerMoreButton(
+                        actions = moreActions,
+                        expanded = openPopover == ViewerPopover.MORE,
+                        onExpandedChange = { expanded ->
+                            onOpenPopoverChange(if (expanded) ViewerPopover.MORE else null)
+                        },
+                    )
                 }
             }
         }
     }
 
-    if (showMetronomeDialog) {
-        MetronomeDialog(onDismiss = { showMetronomeDialog = false })
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        groups.forEach { group ->
+            ViewerToolbarDivider()
+            group()
+        }
+    }
+}
+
+@Composable
+private fun ViewerToolbarDivider() {
+    val themePalette = lunarThemePalette()
+
+    Box(
+        modifier = Modifier
+            .padding(horizontal = 6.dp)
+            .width(1.dp)
+            .height(22.dp)
+            .background(themePalette.headerForeground.copy(alpha = 0.28f)),
+    )
+}
+
+@Composable
+private fun MetronomePopover(
+    state: MetronomeState,
+    onDismiss: () -> Unit,
+) {
+    val positionProvider = remember { AnchoredBelowPopupPositionProvider() }
+
+    Popup(
+        popupPositionProvider = positionProvider,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Surface(
+            modifier = Modifier
+                .width(360.dp)
+                .heightIn(max = 560.dp),
+            shape = MaterialTheme.shapes.extraLarge,
+            tonalElevation = 10.dp,
+            shadowElevation = 8.dp,
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Metronome",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontFamily = FontFamily.Serif,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                    )
+                    TextButton(onClick = onDismiss) {
+                        Text("Close")
+                    }
+                }
+                MetronomePanel(state = state)
+            }
+        }
+    }
+}
+
+/** Places a popup under its anchor, centred on it and kept inside the window. */
+private class AnchoredBelowPopupPositionProvider : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+    ): IntOffset {
+        val maxX = (windowSize.width - popupContentSize.width).coerceAtLeast(0)
+        val maxY = (windowSize.height - popupContentSize.height).coerceAtLeast(0)
+        val x = anchorBounds.center.x - popupContentSize.width / 2
+        val y = anchorBounds.bottom + PopoverGapPx
+        return IntOffset(x.coerceIn(0, maxX), y.coerceIn(0, maxY))
+    }
+}
+
+@Composable
+private fun ViewerMoreButton(
+    actions: List<ViewerMoreAction>,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+) {
+    Box {
+        ViewerToolbarButton(
+            contentDescription = "More actions",
+            tooltip = "More",
+            selected = expanded,
+            onClick = { onExpandedChange(!expanded) },
+        ) { color -> MoreIcon(color = color) }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { onExpandedChange(false) },
+        ) {
+            actions.forEach { action ->
+                DropdownMenuItem(
+                    text = { Text(action.label) },
+                    onClick = {
+                        onExpandedChange(false)
+                        action.onClick()
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ViewerFooter(
+    runtime: PlatformRuntime,
+    documentPath: String?,
+    currentPage: Int,
+    pageCount: Int?,
+    twoPageMode: Boolean,
+    thumbnails: MutableMap<Int, ImageBitmap>,
+    onSelectPage: (Int) -> Unit,
+    onOpenRandomScore: (() -> Unit)?,
+    nextInSetlist: (@Composable () -> Unit)?,
+) {
+    val themePalette = lunarThemePalette()
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    listOf(themePalette.viewerScrim.copy(alpha = 0f), themePalette.viewerScrim)
+                )
+            )
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = viewerPageLabel(currentPage, pageCount, twoPageMode),
+            style = MaterialTheme.typography.labelLarge,
+            color = themePalette.viewerForeground,
+            maxLines = 1,
+        )
+        Box(modifier = Modifier.weight(1f)) {
+            if (documentPath != null && pageCount != null && pageCount > 1) {
+                ViewerPageStrip(
+                    runtime = runtime,
+                    documentPath = documentPath,
+                    currentPage = currentPage,
+                    pageCount = pageCount,
+                    twoPageMode = twoPageMode,
+                    thumbnails = thumbnails,
+                    onSelectPage = onSelectPage,
+                )
+            }
+        }
+        onOpenRandomScore?.let { onRandom ->
+            TextButton(onClick = onRandom) {
+                Text("Random score", color = themePalette.viewerForeground)
+            }
+        }
+        nextInSetlist?.invoke()
+    }
+}
+
+@Composable
+private fun ViewerPageStrip(
+    runtime: PlatformRuntime,
+    documentPath: String,
+    currentPage: Int,
+    pageCount: Int,
+    twoPageMode: Boolean,
+    thumbnails: MutableMap<Int, ImageBitmap>,
+    onSelectPage: (Int) -> Unit,
+) {
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = (currentPage - 2).coerceIn(0, pageCount - 1),
+    )
+    val visiblePages = viewerVisiblePages(currentPage, pageCount, twoPageMode)
+
+    LaunchedEffect(currentPage) {
+        listState.animateScrollToItem((currentPage - 2).coerceIn(0, pageCount - 1))
+    }
+
+    LazyRow(
+        state = listState,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(count = pageCount, key = { it }) { pageIndex ->
+            ViewerPageThumbnail(
+                runtime = runtime,
+                documentPath = documentPath,
+                pageIndex = pageIndex,
+                current = pageIndex in visiblePages,
+                thumbnails = thumbnails,
+                onClick = { onSelectPage(pageIndex) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ViewerPageThumbnail(
+    runtime: PlatformRuntime,
+    documentPath: String,
+    pageIndex: Int,
+    current: Boolean,
+    thumbnails: MutableMap<Int, ImageBitmap>,
+    onClick: () -> Unit,
+) {
+    val themePalette = lunarThemePalette()
+    val bitmap = thumbnails[pageIndex]
+
+    if (bitmap == null) {
+        LaunchedEffect(documentPath, pageIndex) {
+            runCatching {
+                runtime.renderer.renderPage(
+                    documentPath = documentPath,
+                    pageIndex = pageIndex,
+                    targetWidth = PageThumbnailTargetWidthPx,
+                )
+            }.getOrNull()?.let { page -> thumbnails[pageIndex] = page.image }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .size(width = 34.dp, height = 46.dp)
+            .clip(MaterialTheme.shapes.extraSmall)
+            .background(Color.White)
+            .border(
+                width = if (current) 2.dp else 1.dp,
+                color = if (current) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    themePalette.viewerForeground.copy(alpha = 0.25f)
+                },
+                shape = MaterialTheme.shapes.extraSmall,
+            )
+            .clickable(onClick = onClick)
+            .semantics {
+                contentDescription = "Go to page ${pageIndex + 1}"
+                selected = current
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+            )
+        } else {
+            Text(
+                text = "${pageIndex + 1}",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.Black.copy(alpha = 0.55f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ViewerEdgePageButton(
+    contentDescription: String,
+    tooltip: String,
+    pointsLeft: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val themePalette = lunarThemePalette()
+
+    LunarTooltip(tooltip) {
+        Surface(
+            color = themePalette.viewerOverlay.copy(alpha = if (enabled) 0.72f else 0.32f),
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier
+                .padding(horizontal = 10.dp)
+                .size(width = 52.dp, height = 112.dp)
+                .semantics { this.contentDescription = contentDescription }
+                .clickable(enabled = enabled, onClick = onClick),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                ChevronIcon(
+                    pointsLeft = pointsLeft,
+                    color = themePalette.viewerForeground.copy(alpha = if (enabled) 1f else 0.4f),
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
     }
 }
 
 @Composable
 private fun ViewerDocumentMetaRow(
     viewerSupport: ScoreViewerSupport,
-    pageCount: Int?,
     statusLabel: String?,
     foregroundColor: Color,
 ) {
@@ -1061,15 +1273,6 @@ private fun ViewerDocumentMetaRow(
             viewerSupport = viewerSupport,
             foregroundColor = foregroundColor,
         )
-        pageCount?.let { count ->
-            Text(
-                text = pageCountLabel(count),
-                style = MaterialTheme.typography.labelSmall,
-                color = foregroundColor.copy(alpha = 0.74f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
         statusLabel?.let { status ->
             Text(
                 text = status,
@@ -1101,7 +1304,7 @@ private fun ViewerSupportIcon(
             color = foregroundColor.copy(alpha = 0.13f),
             shape = MaterialTheme.shapes.small,
             modifier = Modifier
-                .size(24.dp)
+                .size(20.dp)
                 .semantics {
                     contentDescription = description
                 },
@@ -1124,133 +1327,40 @@ private fun ViewerSupportIcon(
 }
 
 @Composable
-private fun LayoutModeDropdownButton(
-    twoPageMode: Boolean,
-    onSelectSinglePage: () -> Unit,
-    onSelectTwoPage: () -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    Box {
-        CompactToolbarIconButton(
-            contentDescription = if (twoPageMode) "Two-page layout" else "Single-page layout",
-            onClick = { expanded = true },
-        ) { color ->
-            PageLayoutIcon(twoPage = twoPageMode, color = color)
-        }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-        ) {
-            Row(
-                modifier = Modifier.padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                LayoutModeMenuOption(
-                    twoPage = false,
-                    selected = !twoPageMode,
-                    contentDescription = "Single-page layout",
-                    onClick = {
-                        expanded = false
-                        onSelectSinglePage()
-                    },
-                )
-                LayoutModeMenuOption(
-                    twoPage = true,
-                    selected = twoPageMode,
-                    contentDescription = "Two-page layout",
-                    onClick = {
-                        expanded = false
-                        onSelectTwoPage()
-                    },
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun ViewerAddDropdownButton(
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
     onAddToSetlist: (() -> Unit)?,
     onAddToSongbook: (() -> Unit)?,
 ) {
     if (onAddToSetlist == null && onAddToSongbook == null) return
 
-    var expanded by remember { mutableStateOf(false) }
     val description = addActionsDescription(
         onAddToSetlist = onAddToSetlist,
         onAddToSongbook = onAddToSongbook,
     )
 
     Box {
-        CompactToolbarIconButton(
+        ViewerToolbarButton(
             contentDescription = description,
-            onClick = { expanded = true },
+            tooltip = description,
+            selected = expanded,
+            onClick = { onExpandedChange(!expanded) },
         ) { color ->
             AddIcon(color = color)
         }
         AddActionsDropdownMenu(
             expanded = expanded,
-            onDismiss = { expanded = false },
+            onDismiss = { onExpandedChange(false) },
             onAddToSetlist = onAddToSetlist?.let { onClick ->
                 {
-                    expanded = false
+                    onExpandedChange(false)
                     onClick()
                 }
             },
             onAddToSongbook = onAddToSongbook?.let { onClick ->
                 {
-                    expanded = false
-                    onClick()
-                }
-            },
-        )
-    }
-}
-
-@Composable
-private fun FullscreenAddDropdownButton(
-    onAddToSetlist: (() -> Unit)?,
-    onAddToSongbook: (() -> Unit)?,
-    modifier: Modifier = Modifier,
-) {
-    if (onAddToSetlist == null && onAddToSongbook == null) return
-
-    var expanded by remember { mutableStateOf(false) }
-    val description = addActionsDescription(
-        onAddToSetlist = onAddToSetlist,
-        onAddToSongbook = onAddToSongbook,
-    )
-
-    Box(modifier = modifier) {
-        OutlinedButton(
-            onClick = { expanded = true },
-            modifier = Modifier
-                .fillMaxWidth()
-                .semantics {
-                    contentDescription = description
-                },
-        ) {
-            AddIcon(
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Add")
-        }
-        AddActionsDropdownMenu(
-            expanded = expanded,
-            onDismiss = { expanded = false },
-            onAddToSetlist = onAddToSetlist?.let { onClick ->
-                {
-                    expanded = false
-                    onClick()
-                }
-            },
-            onAddToSongbook = onAddToSongbook?.let { onClick ->
-                {
-                    expanded = false
+                    onExpandedChange(false)
                     onClick()
                 }
             },
@@ -1294,50 +1404,24 @@ private fun addActionsDescription(
 }
 
 @Composable
-private fun LayoutModeMenuOption(
-    twoPage: Boolean,
+private fun viewerToolbarBackground(
+    enabled: Boolean,
     selected: Boolean,
-    contentDescription: String,
-    onClick: () -> Unit,
-) {
-    val color = MaterialTheme.colorScheme.onSurface
-    val background = if (selected) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-    }
-
-    LunarTooltip(contentDescription) {
-        Surface(
-            color = background,
-            shape = MaterialTheme.shapes.small,
-            modifier = Modifier
-                .size(44.dp)
-                .semantics {
-                    this.contentDescription = contentDescription
-                }
-                .clickable(onClick = onClick),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(8.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                PageLayoutIcon(
-                    twoPage = twoPage,
-                    color = color,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
+): Color {
+    val themePalette = lunarThemePalette()
+    return when {
+        !enabled -> Color.Transparent
+        selected -> themePalette.headerForeground.copy(alpha = 0.3f)
+        else -> themePalette.headerForeground.copy(alpha = 0.12f)
     }
 }
 
 @Composable
-private fun CompactToolbarIconButton(
+private fun ViewerToolbarButton(
     contentDescription: String,
+    tooltip: String,
     enabled: Boolean = true,
+    selected: Boolean = false,
     onClick: () -> Unit,
     content: @Composable (Color) -> Unit,
 ) {
@@ -1347,31 +1431,100 @@ private fun CompactToolbarIconButton(
     } else {
         themePalette.headerForeground.copy(alpha = 0.32f)
     }
-    val background = if (enabled) {
-        themePalette.headerForeground.copy(alpha = 0.15f)
-    } else {
-        Color.Transparent
-    }
 
-    LunarTooltip(contentDescription) {
+    LunarTooltip(tooltip) {
         Surface(
-            color = background,
+            color = viewerToolbarBackground(enabled = enabled, selected = selected),
             shape = MaterialTheme.shapes.small,
             modifier = Modifier
-                .size(32.dp)
+                .size(34.dp)
                 .semantics {
                     this.contentDescription = contentDescription
+                    this.selected = selected
                 }
                 .clickable(enabled = enabled, onClick = onClick),
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(7.dp),
+                    .padding(8.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 content(iconColor)
             }
+        }
+    }
+}
+
+@Composable
+private fun ViewerToolbarTextButton(
+    label: String,
+    contentDescription: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val themePalette = lunarThemePalette()
+
+    LunarTooltip(contentDescription) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (enabled) {
+                themePalette.headerForeground
+            } else {
+                themePalette.headerForeground.copy(alpha = 0.32f)
+            },
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.small)
+                .clickable(enabled = enabled, onClick = onClick)
+                .background(viewerToolbarBackground(enabled = enabled, selected = false))
+                .semantics { this.contentDescription = contentDescription }
+                .padding(horizontal = 10.dp, vertical = 7.dp),
+        )
+    }
+}
+
+@Composable
+private fun ViewerFavoriteButton(
+    title: String,
+    isFavorite: Boolean,
+    tooltip: String,
+    onToggleFavorite: () -> Unit,
+) {
+    val themePalette = lunarThemePalette()
+    val backgroundColor = if (isFavorite) {
+        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.82f)
+    } else {
+        themePalette.headerForeground.copy(alpha = 0.12f)
+    }
+    val iconColor = if (isFavorite) {
+        MaterialTheme.colorScheme.onTertiaryContainer
+    } else {
+        themePalette.headerForeground.copy(alpha = 0.82f)
+    }
+    val contentDescription = if (isFavorite) {
+        "Remove $title from favorites"
+    } else {
+        "Mark $title as favorite"
+    }
+
+    LunarTooltip(tooltip) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(MaterialTheme.shapes.small)
+                .background(backgroundColor)
+                .clickable(onClick = onToggleFavorite)
+                .semantics {
+                    this.contentDescription = contentDescription
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = if (isFavorite) "★" else "☆",
+                style = MaterialTheme.typography.titleMedium,
+                color = iconColor,
+            )
         }
     }
 }
@@ -1413,26 +1566,81 @@ private fun PageLayoutIcon(
 }
 
 @Composable
-private fun FullscreenIcon(
+private fun ZoomIcon(
+    zoomIn: Boolean,
     color: Color,
     modifier: Modifier = Modifier,
 ) {
     Canvas(modifier = modifier.fillMaxSize()) {
-        val strokeWidth = size.minDimension * 0.13f
-        val armLength = size.minDimension * 0.34f
-        val inset = strokeWidth / 2f
-        val maxX = size.width - inset
-        val maxY = size.height - inset
-        val style = Stroke(width = strokeWidth, cap = StrokeCap.Square)
+        val strokeWidth = size.minDimension * 0.11f
+        val radius = size.minDimension * 0.32f
+        val center = Offset(size.width * 0.42f, size.height * 0.42f)
+        drawCircle(
+            color = color,
+            radius = radius,
+            center = center,
+            style = Stroke(width = strokeWidth),
+        )
+        val handleStart = Offset(center.x + radius * 0.72f, center.y + radius * 0.72f)
+        drawLine(color, handleStart, Offset(size.width * 0.94f, size.height * 0.94f), strokeWidth, StrokeCap.Round)
+        val arm = radius * 0.5f
+        drawLine(color, Offset(center.x - arm, center.y), Offset(center.x + arm, center.y), strokeWidth, StrokeCap.Round)
+        if (zoomIn) {
+            drawLine(color, Offset(center.x, center.y - arm), Offset(center.x, center.y + arm), strokeWidth, StrokeCap.Round)
+        }
+    }
+}
 
-        drawLine(color, Offset(inset, armLength), Offset(inset, inset), strokeWidth, StrokeCap.Square)
-        drawLine(color, Offset(inset, inset), Offset(armLength, inset), strokeWidth, StrokeCap.Square)
-        drawLine(color, Offset(maxX - armLength + inset, inset), Offset(maxX, inset), strokeWidth, StrokeCap.Square)
-        drawLine(color, Offset(maxX, inset), Offset(maxX, armLength), strokeWidth, StrokeCap.Square)
-        drawLine(color, Offset(maxX, maxY - armLength + inset), Offset(maxX, maxY), strokeWidth, StrokeCap.Square)
-        drawLine(color, Offset(maxX, maxY), Offset(maxX - armLength + inset, maxY), strokeWidth, StrokeCap.Square)
-        drawLine(color, Offset(armLength, maxY), Offset(inset, maxY), strokeWidth, StrokeCap.Square)
-        drawLine(color, Offset(inset, maxY), Offset(inset, maxY - armLength + inset), strokeWidth, StrokeCap.Square)
+@Composable
+private fun MetronomeIcon(
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val strokeWidth = size.minDimension * 0.1f
+        val body = Path().apply {
+            moveTo(size.width * 0.36f, size.height * 0.08f)
+            lineTo(size.width * 0.64f, size.height * 0.08f)
+            lineTo(size.width * 0.9f, size.height * 0.92f)
+            lineTo(size.width * 0.1f, size.height * 0.92f)
+            close()
+        }
+        drawPath(body, color = color, style = Stroke(width = strokeWidth))
+        drawLine(
+            color = color,
+            start = Offset(size.width * 0.5f, size.height * 0.74f),
+            end = Offset(size.width * 0.78f, size.height * 0.2f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+@Composable
+private fun MoreIcon(
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val radius = size.minDimension * 0.09f
+        listOf(0.2f, 0.5f, 0.8f).forEach { fraction ->
+            drawCircle(color = color, radius = radius, center = Offset(size.width * fraction, size.height / 2f))
+        }
+    }
+}
+
+@Composable
+private fun ChevronIcon(
+    pointsLeft: Boolean,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val strokeWidth = size.minDimension * 0.14f
+        val tipX = if (pointsLeft) size.width * 0.3f else size.width * 0.7f
+        val tailX = if (pointsLeft) size.width * 0.7f else size.width * 0.3f
+        drawLine(color, Offset(tailX, size.height * 0.12f), Offset(tipX, size.height / 2f), strokeWidth, StrokeCap.Round)
+        drawLine(color, Offset(tipX, size.height / 2f), Offset(tailX, size.height * 0.88f), strokeWidth, StrokeCap.Round)
     }
 }
 
@@ -1493,34 +1701,6 @@ private fun HideScoreIcon(
     }
 }
 
-@Composable
-private fun CloseIcon(
-    color: Color,
-    modifier: Modifier = Modifier,
-) {
-    Canvas(modifier = modifier.fillMaxSize()) {
-        val strokeWidth = size.minDimension * 0.14f
-        val inset = strokeWidth
-        drawLine(
-            color = color,
-            start = Offset(inset, inset),
-            end = Offset(size.width - inset, size.height - inset),
-            strokeWidth = strokeWidth,
-            cap = StrokeCap.Round,
-        )
-        drawLine(
-            color = color,
-            start = Offset(size.width - inset, inset),
-            end = Offset(inset, size.height - inset),
-            strokeWidth = strokeWidth,
-            cap = StrokeCap.Round,
-        )
-    }
-}
-
-private fun pageCountLabel(pageCount: Int): String =
-    "$pageCount page${if (pageCount == 1) "" else "s"}"
-
 private fun visibleViewerStatusLabel(
     statusLabel: String?,
     viewerSupport: ScoreViewerSupport,
@@ -1532,90 +1712,6 @@ private fun visibleViewerStatusLabel(
     return statusLabel
         ?.takeUnless { it == defaultStatusLabel }
         ?.takeUnless { it == "Loading LilyPond Viewer" }
-}
-
-@Composable
-private fun CompactNavButton(
-    label: String,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    val themePalette = lunarThemePalette()
-
-    Text(
-        text = label,
-        style = MaterialTheme.typography.labelLarge,
-        color = if (enabled) {
-            themePalette.headerForeground
-        } else {
-            themePalette.headerForeground.copy(alpha = 0.3f)
-        },
-        modifier = Modifier
-            .clickable(enabled = enabled, onClick = onClick)
-            .background(
-                if (enabled) {
-                    themePalette.headerForeground.copy(alpha = 0.15f)
-                } else {
-                    Color.Transparent
-                },
-                MaterialTheme.shapes.small,
-            )
-            .padding(horizontal = 10.dp, vertical = 5.dp),
-    )
-}
-
-@Composable
-private fun ViewerFavoriteButton(
-    title: String,
-    isFavorite: Boolean,
-    onToggleFavorite: () -> Unit,
-) {
-    val themePalette = lunarThemePalette()
-    val backgroundColor = if (isFavorite) {
-        MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.82f)
-    } else {
-        themePalette.headerForeground.copy(alpha = 0.12f)
-    }
-    val iconColor = if (isFavorite) {
-        MaterialTheme.colorScheme.onTertiaryContainer
-    } else {
-        themePalette.headerForeground.copy(alpha = 0.82f)
-    }
-    val contentDescription = if (isFavorite) {
-        "Remove $title from favorites"
-    } else {
-        "Mark $title as favorite"
-    }
-    val tooltip = if (isFavorite) "Remove from favorites" else "Mark as favorite"
-
-    LunarTooltip(tooltip) {
-        Text(
-        text = if (isFavorite) "★" else "☆",
-            style = MaterialTheme.typography.titleMedium,
-            color = iconColor,
-            modifier = Modifier
-                .semantics {
-                    this.contentDescription = contentDescription
-                }
-                .clickable(onClick = onToggleFavorite)
-                .background(backgroundColor, MaterialTheme.shapes.small)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-        )
-    }
-}
-
-@Composable
-private fun FullscreenToolbarButton(
-    label: String,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    Button(
-        enabled = enabled,
-        onClick = onClick,
-    ) {
-        Text(label)
-    }
 }
 
 @Composable
@@ -1909,6 +2005,7 @@ private fun ViewerMessage(
 private fun Modifier.viewerShortcutHandler(
     enabled: Boolean = true,
     keybindings: ViewerKeybindings,
+    onActivity: () -> Unit,
     onToggleFullscreen: (() -> Unit)?,
     onNextPage: (() -> Unit)?,
     onPreviousPage: (() -> Unit)?,
@@ -1924,49 +2021,50 @@ private fun Modifier.viewerShortcutHandler(
     if (event.type != KeyEventType.KeyDown) {
         return@onPreviewKeyEvent false
     }
+    onActivity()
 
     when (keybindings.actionForKeyId(viewerShortcutKeyId(event.key))) {
-        com.ryanjames.lunar.settings.ViewerShortcutAction.TOGGLE_FULLSCREEN ->
+        ViewerShortcutAction.TOGGLE_FULLSCREEN ->
             onToggleFullscreen?.let {
                 it()
                 true
             } ?: false
 
-        com.ryanjames.lunar.settings.ViewerShortcutAction.NEXT_PAGE ->
+        ViewerShortcutAction.NEXT_PAGE ->
             onNextPage?.let {
                 it()
                 true
             } ?: false
 
-        com.ryanjames.lunar.settings.ViewerShortcutAction.PREVIOUS_PAGE ->
+        ViewerShortcutAction.PREVIOUS_PAGE ->
             onPreviousPage?.let {
                 it()
                 true
             } ?: false
 
-        com.ryanjames.lunar.settings.ViewerShortcutAction.TOGGLE_FAVORITE ->
+        ViewerShortcutAction.TOGGLE_FAVORITE ->
             onToggleFavorite?.let {
                 it()
                 true
             } ?: false
 
-        com.ryanjames.lunar.settings.ViewerShortcutAction.OPEN_RANDOM_SCORE ->
+        ViewerShortcutAction.OPEN_RANDOM_SCORE ->
             onOpenRandomScore?.let {
                 it()
                 true
             } ?: false
 
-        com.ryanjames.lunar.settings.ViewerShortcutAction.ZOOM_IN -> {
+        ViewerShortcutAction.ZOOM_IN -> {
             onZoomIn()
             true
         }
 
-        com.ryanjames.lunar.settings.ViewerShortcutAction.ZOOM_OUT -> {
+        ViewerShortcutAction.ZOOM_OUT -> {
             onZoomOut()
             true
         }
 
-        com.ryanjames.lunar.settings.ViewerShortcutAction.TOGGLE_PAGE_VIEW_MODE -> {
+        ViewerShortcutAction.TOGGLE_PAGE_VIEW_MODE -> {
             onTogglePageViewMode()
             true
         }
@@ -1975,16 +2073,34 @@ private fun Modifier.viewerShortcutHandler(
     }
 }
 
-private fun buildPageLabel(
+/** Footer label such as "Page 3 of 6" or, for a two-page spread, "Pages 3 and 4 of 6". */
+internal fun viewerPageLabel(
     currentPage: Int,
     pageCount: Int?,
-    visiblePages: Int,
-): String = if (pageCount == null) {
-    "p.${currentPage + 1}"
-} else if (visiblePages > 1) {
-    "${currentPage + 1}-${(currentPage + visiblePages).coerceAtMost(pageCount)} / $pageCount"
-} else {
-    "${currentPage + 1} / $pageCount"
+    twoPageMode: Boolean,
+): String {
+    val first = currentPage + 1
+    if (pageCount == null) {
+        return if (twoPageMode) "Pages $first and ${first + 1}" else "Page $first"
+    }
+    val pages = viewerVisiblePages(currentPage, pageCount, twoPageMode)
+    return if (pages.count() > 1) {
+        "Pages ${pages.first + 1} and ${pages.last + 1} of $pageCount"
+    } else {
+        "Page ${pages.first + 1} of $pageCount"
+    }
+}
+
+/** Zero-based page indices on screen: one page, or a spread clipped to the document. */
+internal fun viewerVisiblePages(
+    currentPage: Int,
+    pageCount: Int,
+    twoPageMode: Boolean,
+): IntRange {
+    val lastIndex = (pageCount - 1).coerceAtLeast(0)
+    val first = currentPage.coerceIn(0, lastIndex)
+    val last = if (twoPageMode) (first + 1).coerceAtMost(lastIndex) else first
+    return first..last
 }
 
 private fun nextPageIndex(

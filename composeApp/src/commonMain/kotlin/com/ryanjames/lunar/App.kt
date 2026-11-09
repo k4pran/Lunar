@@ -46,7 +46,6 @@ import com.ryanjames.lunar.platform.externalScoreDropTarget
 import com.ryanjames.lunar.platform.rememberPlatformRuntime
 import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.ComposeScreen
-import com.ryanjames.lunar.ui.FullscreenViewerScreen
 import com.ryanjames.lunar.ui.ImportScreen
 import com.ryanjames.lunar.ui.LibraryScreen
 import com.ryanjames.lunar.ui.LunarTheme
@@ -165,7 +164,7 @@ internal fun LunarApp(
         val mainScreensStateHolder = rememberSaveableStateHolder()
 
         if (fullscreenDocument != null) {
-            FullscreenViewerScreen(
+            ViewerScreen(
                 runtime = runtime,
                 documentState = fullscreenDocument,
                 onBack = appState::closeFullscreen,
@@ -178,6 +177,7 @@ internal fun LunarApp(
                 onPageCountResolved = appState.fullscreenTarget.pageCountResolved(appState),
                 defaultTwoPageMode = defaultTwoPageMode,
                 viewerKeybindings = appSettings.viewerKeybindings,
+                chromeAutoHideMillis = appSettings.viewerChromeAutoHideMillis,
             )
         } else {
             mainScreensStateHolder.SaveableStateProvider(MainScreensStateKey) {
