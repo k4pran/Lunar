@@ -21,6 +21,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +50,24 @@ internal enum class DetailPanelLayout {
 }
 
 internal val DetailPanelSideBreakpoint = 1200.dp
+
+/**
+ * Unsaved edits for one score's details. Owned by the library screen rather than the panel, so a
+ * draft survives the panel moving between [DetailPanelLayout.SIDE] and [DetailPanelLayout.BOTTOM].
+ */
+@Stable
+internal class ScoreDetailsDraft(item: SheetMusicItem) {
+    var title by mutableStateOf(item.title)
+    var composer by mutableStateOf(item.composer.orEmpty())
+    var tags by mutableStateOf(item.tags.joinToString(", "))
+    var collection by mutableStateOf(item.collection.orEmpty())
+    var isFavorite by mutableStateOf(item.isFavorite)
+}
+
+/** A fresh draft whenever the focused score changes or its editor is opened or closed. */
+@Composable
+internal fun rememberScoreDetailsDraft(item: SheetMusicItem?, editingItemId: String?): ScoreDetailsDraft? =
+    remember(item?.id, editingItemId) { item?.let(::ScoreDetailsDraft) }
 
 // --- Pure helpers ------------------------------------------------------------
 
@@ -106,6 +125,7 @@ internal fun ScoreDetailPanel(
     snapshot: LibrarySnapshot,
     appState: LunarAppState,
     layout: DetailPanelLayout,
+    draft: ScoreDetailsDraft,
     nowEpochMillis: Long,
     onTextInputFocusChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
@@ -245,7 +265,7 @@ internal fun ScoreDetailPanel(
 
             if (editing) {
                 ScoreDetailsEditor(
-                    item = item,
+                    draft = draft,
                     onTextInputFocusChanged = onTextInputFocusChanged,
                     onCancel = appState::dismissEditor,
                     onSave = { title, composer, tags, collection, isFavorite ->
@@ -359,16 +379,11 @@ private fun DetailAction(
 
 @Composable
 private fun ScoreDetailsEditor(
-    item: SheetMusicItem,
+    draft: ScoreDetailsDraft,
     onTextInputFocusChanged: (Boolean) -> Unit,
     onCancel: () -> Unit,
     onSave: (title: String, composer: String, tags: String, collection: String, isFavorite: Boolean) -> Unit,
 ) {
-    var title by remember(item.id) { mutableStateOf(item.title) }
-    var composer by remember(item.id) { mutableStateOf(item.composer.orEmpty()) }
-    var tags by remember(item.id) { mutableStateOf(item.tags.joinToString(", ")) }
-    var collection by remember(item.id) { mutableStateOf(item.collection.orEmpty()) }
-    var isFavorite by remember(item.id) { mutableStateOf(item.isFavorite) }
     val fieldModifier = Modifier
         .fillMaxWidth()
         .onFocusChanged { onTextInputFocusChanged(it.hasFocus) }
@@ -376,40 +391,40 @@ private fun ScoreDetailsEditor(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SmallCapsText("Edit details")
         OutlinedTextField(
-            value = title,
-            onValueChange = { title = it },
+            value = draft.title,
+            onValueChange = { draft.title = it },
             label = { Text("Title") },
             modifier = fieldModifier,
             singleLine = true,
         )
         OutlinedTextField(
-            value = composer,
-            onValueChange = { composer = it },
+            value = draft.composer,
+            onValueChange = { draft.composer = it },
             label = { Text("Composer") },
             modifier = fieldModifier,
             singleLine = true,
         )
         OutlinedTextField(
-            value = collection,
-            onValueChange = { collection = it },
+            value = draft.collection,
+            onValueChange = { draft.collection = it },
             label = { Text("Collection") },
             modifier = fieldModifier,
             singleLine = true,
         )
         OutlinedTextField(
-            value = tags,
-            onValueChange = { tags = it },
+            value = draft.tags,
+            onValueChange = { draft.tags = it },
             label = { Text("Tags (comma separated)") },
             modifier = fieldModifier,
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = isFavorite, onCheckedChange = { isFavorite = it })
+            Checkbox(checked = draft.isFavorite, onCheckedChange = { draft.isFavorite = it })
             Text("Favourite", style = MaterialTheme.typography.bodyMedium)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
-                enabled = title.isNotBlank(),
-                onClick = { onSave(title, composer, tags, collection, isFavorite) },
+                enabled = draft.title.isNotBlank(),
+                onClick = { onSave(draft.title, draft.composer, draft.tags, draft.collection, draft.isFavorite) },
             ) {
                 Text("Save")
             }
