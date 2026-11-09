@@ -262,6 +262,17 @@ class LunarAppState(
     val libraryArrangement: LibraryArrangement
         get() = libraryArrangementFor(browseMode, query.favoritesOnly)
 
+    var quickFindVisible: Boolean by mutableStateOf(false)
+        private set
+
+    var metronomeVisible: Boolean by mutableStateOf(false)
+        private set
+
+    /** The score a quick find action applies to: the one in the viewer, else a single focused/selected score. */
+    val quickFindTargetScoreId: String?
+        get() = (fullscreenTarget as? ViewerTarget.Score)?.itemId
+            ?: pickerTargetIds.singleOrNull()
+
     fun selectSection(section: AppSection) {
         enterSection(section)
     }
@@ -1127,6 +1138,64 @@ class LunarAppState(
         fullscreenTarget = ViewerTarget.Songbook(songbookId)
     }
 
+    fun openQuickFind() {
+        quickFindVisible = true
+    }
+
+    fun dismissQuickFind() {
+        quickFindVisible = false
+    }
+
+    /** Opens a score picked in quick find in the viewer, replacing whatever the viewer shows. */
+    fun openScoreFromQuickFind(item: SheetMusicItem) {
+        dismissQuickFind()
+        openScore(item)
+    }
+
+    fun openSetlistFromQuickFind(setlistId: String) {
+        dismissQuickFind()
+        closeViewers()
+        dismissLibraryTransientUi()
+        openSetlist(setlistId)
+    }
+
+    fun openSongbookFromQuickFind(songbookId: String) {
+        dismissQuickFind()
+        openSongbook(songbookId)
+    }
+
+    fun runQuickFindAction(
+        action: QuickFindAction,
+        randomScopeItems: List<SheetMusicItem>,
+    ) {
+        dismissQuickFind()
+        when (action) {
+            QuickFindAction.OPEN_RANDOM_SCORE -> openRandomSheetInCurrentViewer(randomScopeItems)
+            QuickFindAction.START_METRONOME -> metronomeVisible = true
+            QuickFindAction.TOGGLE_TWO_PAGE_VIEW -> toggleDefaultViewerPageMode()
+            QuickFindAction.ADD_FOCUSED_SCORE_TO_SETLIST -> quickFindTargetScoreId?.let(::showSetlistPickerForScore)
+                ?: run { bannerMessage = "Open or select a score first." }
+            QuickFindAction.SWITCH_SKIN -> switchToNextSkin()
+        }
+    }
+
+    fun dismissMetronome() {
+        metronomeVisible = false
+    }
+
+    fun toggleDefaultViewerPageMode() {
+        val twoPage = runtime.settingsStore.settings.value.defaultViewerPageMode == ViewerPageModePreference.TWO_PAGE
+        val next = if (twoPage) ViewerPageModePreference.SINGLE_PAGE else ViewerPageModePreference.TWO_PAGE
+        updateDefaultViewerPageMode(next)
+        bannerMessage = if (twoPage) "Two-page view off." else "Two-page view on."
+    }
+
+    fun switchToNextSkin() {
+        val skins = AppSkin.entries
+        val current = runtime.settingsStore.settings.value.resolvedSkin
+        updateSkin(skins[(skins.indexOf(current) + 1) % skins.size])
+    }
+
     fun closeFullscreen() {
         val target = fullscreenTarget
         fullscreenTarget = null
@@ -1424,6 +1493,11 @@ class LunarAppState(
         if ((fullscreenTarget as? ViewerTarget.Setlist)?.setlistId == setlistId) {
             fullscreenTarget = null
         }
+    }
+
+    private fun closeViewers() {
+        fullscreenTarget = null
+        viewerStartPage = null
     }
 
     /**

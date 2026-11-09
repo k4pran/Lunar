@@ -7,6 +7,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,11 +32,15 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -49,11 +54,17 @@ import com.ryanjames.lunar.ui.ComposeScreen
 import com.ryanjames.lunar.ui.ImportScreen
 import com.ryanjames.lunar.ui.LibraryScreen
 import com.ryanjames.lunar.ui.LunarTheme
+import com.ryanjames.lunar.ui.MetronomeDialog
+import com.ryanjames.lunar.ui.QuickFindEntry
+import com.ryanjames.lunar.ui.QuickFindPalette
 import com.ryanjames.lunar.ui.SettingsScreen
 import com.ryanjames.lunar.ui.NextInSetlistButton
 import com.ryanjames.lunar.ui.ViewerDocumentState
 import com.ryanjames.lunar.ui.ViewerScreen
 import com.ryanjames.lunar.ui.ViewerTarget
+import com.ryanjames.lunar.ui.availableQuickFindActions
+import com.ryanjames.lunar.ui.buildQuickFindEntries
+import com.ryanjames.lunar.ui.isQuickFindShortcut
 import com.ryanjames.lunar.ui.design.LunarTestTags
 import com.ryanjames.lunar.ui.design.lunarTokens
 import com.ryanjames.lunar.ui.TemporarySetlistSession
@@ -64,6 +75,7 @@ import com.ryanjames.lunar.ui.shell.LunarAppShell
 import com.ryanjames.lunar.ui.toViewerDocumentState
 import com.ryanjames.lunar.settings.ViewerPageModePreference
 import com.ryanjames.lunar.settings.intervalMillis
+import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
@@ -164,97 +176,161 @@ internal fun LunarApp(
         appState.clearBanner()
     }
 
+    val rootFocusRequester = remember { FocusRequester() }
+    var rootHasFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(
+        appState.quickFindVisible,
+        appState.metronomeVisible,
+        appState.selectedSection,
+        appState.fullscreenTarget,
+    ) {
+        // Keep a focus target in the tree so Ctrl+K works even when no control has focus.
+        if (appState.quickFindVisible || appState.metronomeVisible) return@LaunchedEffect
+        withFrameNanos { }
+        if (!rootHasFocus) {
+            runCatching { rootFocusRequester.requestFocus() }
+        }
+    }
+
     LunarTheme(skin = appSettings.resolvedSkin) {
         // The viewer replaces the main screens, so keep their saveable state (e.g. lazy scroll positions)
         // while it is open and restore it on return.
         val mainScreensStateHolder = rememberSaveableStateHolder()
 
-        if (fullscreenDocument != null) {
-            ViewerScreen(
-                runtime = runtime,
-                documentState = fullscreenDocument,
-                onBack = appState::closeFullscreen,
-                backLabel = if (fullscreenInSetlist) "Back to programme" else "Library",
-                onToggleFavorite = favoriteToggle(fullscreenItemId, appState),
-                onHideScore = hideScore(fullscreenItemId.takeUnless { fullscreenInSetlist }, appState),
-                onAddToSetlist = addToSetlist(fullscreenItemId, appState),
-                onAddToSongbook = addToSongbook(fullscreenItemId, appState),
-                onOpenRandomScore = { appState.openRandomSheetInCurrentViewer(libraryScopeItems) }
-                    .takeUnless { fullscreenInSetlist },
-                onPageChanged = pageChanged(fullscreenItemId, appState),
-                onPageCountResolved = pageCountResolved(fullscreenItemId, appState),
-                nextInSetlist = if (fullscreenInSetlist) {
-                    {
-                        NextInSetlistButton(
-                            enabled = appState.hasNextInSetlist(appState.fullscreenTarget),
-                            onClick = appState::nextInSetlist,
-                        )
-                    }
-                } else {
-                    null
-                },
-                defaultTwoPageMode = defaultTwoPageMode,
-                viewerKeybindings = appSettings.viewerKeybindings,
-                chromeAutoHideMillis = appSettings.viewerChromeAutoHideMillis,
-            )
-        } else {
-            mainScreensStateHolder.SaveableStateProvider(MainScreensStateKey) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .externalScoreDropTarget(
-                            enabled = runtime.capabilities.fileImportSupported,
-                            onDroppedPaths = appState::importDroppedPaths,
-                        ),
-                ) {
-                    LunarAppShell(
-                        appState = appState,
-                        snapshot = snapshot,
-                        syncState = syncState,
-                        settings = appSettings,
-                    ) { sidebarContextVisible ->
-                        Scaffold(
-                            containerColor = Color.Transparent,
-                            snackbarHost = { SnackbarHost(snackbarHostState) },
-                        ) { innerPadding ->
-                            when (appState.selectedSection) {
-                                AppSection.IMPORT -> ImportScreen(
-                                    runtime = runtime,
-                                    importerState = importerState,
-                                    syncState = syncState,
-                                    settings = appSettings,
-                                    libraryCount = snapshot.items.size,
-                                    appState = appState,
-                                    modifier = Modifier.padding(innerPadding),
-                                )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .quickFindShortcut(appState::openQuickFind)
+                .onFocusChanged { rootHasFocus = it.hasFocus }
+                .focusRequester(rootFocusRequester)
+                .focusable(),
+        ) {
+            if (fullscreenDocument != null) {
+                ViewerScreen(
+                    runtime = runtime,
+                    documentState = fullscreenDocument,
+                    onBack = appState::closeFullscreen,
+                    backLabel = if (fullscreenInSetlist) "Back to programme" else "Library",
+                    onToggleFavorite = favoriteToggle(fullscreenItemId, appState),
+                    onHideScore = hideScore(fullscreenItemId.takeUnless { fullscreenInSetlist }, appState),
+                    onAddToSetlist = addToSetlist(fullscreenItemId, appState),
+                    onAddToSongbook = addToSongbook(fullscreenItemId, appState),
+                    onOpenRandomScore = { appState.openRandomSheetInCurrentViewer(libraryScopeItems) }
+                        .takeUnless { fullscreenInSetlist },
+                    onPageChanged = pageChanged(fullscreenItemId, appState),
+                    onPageCountResolved = pageCountResolved(fullscreenItemId, appState),
+                    nextInSetlist = if (fullscreenInSetlist) {
+                        {
+                            NextInSetlistButton(
+                                enabled = appState.hasNextInSetlist(appState.fullscreenTarget),
+                                onClick = appState::nextInSetlist,
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                    defaultTwoPageMode = defaultTwoPageMode,
+                    viewerKeybindings = appSettings.viewerKeybindings,
+                    chromeAutoHideMillis = appSettings.viewerChromeAutoHideMillis,
+                )
+            } else {
+                mainScreensStateHolder.SaveableStateProvider(MainScreensStateKey) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .externalScoreDropTarget(
+                                enabled = runtime.capabilities.fileImportSupported,
+                                onDroppedPaths = appState::importDroppedPaths,
+                            ),
+                    ) {
+                        LunarAppShell(
+                            appState = appState,
+                            snapshot = snapshot,
+                            syncState = syncState,
+                            settings = appSettings,
+                        ) { sidebarContextVisible ->
+                            Scaffold(
+                                containerColor = Color.Transparent,
+                                snackbarHost = { SnackbarHost(snackbarHostState) },
+                            ) { innerPadding ->
+                                when (appState.selectedSection) {
+                                    AppSection.IMPORT -> ImportScreen(
+                                        runtime = runtime,
+                                        importerState = importerState,
+                                        syncState = syncState,
+                                        settings = appSettings,
+                                        libraryCount = snapshot.items.size,
+                                        appState = appState,
+                                        modifier = Modifier.padding(innerPadding),
+                                    )
 
-                                AppSection.LIBRARY,
-                                AppSection.SETLISTS,
-                                AppSection.SONGBOOKS -> LibraryScreen(
-                                    runtime = runtime,
-                                    snapshot = snapshot,
-                                    appState = appState,
-                                    viewerKeybindings = appSettings.viewerKeybindings,
-                                    showArrangementSwitcher = !sidebarContextVisible,
-                                    modifier = Modifier.padding(innerPadding),
-                                )
+                                    AppSection.LIBRARY,
+                                    AppSection.SETLISTS,
+                                    AppSection.SONGBOOKS -> LibraryScreen(
+                                        runtime = runtime,
+                                        snapshot = snapshot,
+                                        appState = appState,
+                                        viewerKeybindings = appSettings.viewerKeybindings,
+                                        showArrangementSwitcher = !sidebarContextVisible,
+                                        modifier = Modifier.padding(innerPadding),
+                                    )
 
-                                AppSection.COMPOSE -> ComposeScreen(
-                                    runtime = runtime,
-                                    modifier = Modifier.padding(innerPadding),
-                                )
+                                    AppSection.COMPOSE -> ComposeScreen(
+                                        runtime = runtime,
+                                        modifier = Modifier.padding(innerPadding),
+                                    )
 
-                                AppSection.SETTINGS -> SettingsScreen(
-                                    settings = appSettings,
-                                    appState = appState,
-                                    modifier = Modifier.padding(innerPadding),
-                                )
+                                    AppSection.SETTINGS -> SettingsScreen(
+                                        settings = appSettings,
+                                        appState = appState,
+                                        modifier = Modifier.padding(innerPadding),
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
         }
+
+        if (appState.quickFindVisible) {
+            val hasFocusedScore = appState.quickFindTargetScoreId != null
+            val entriesFor = remember(snapshot, appSettings.viewerKeybindings, hasFocusedScore) {
+                { query: String ->
+                    buildQuickFindEntries(
+                        snapshot = snapshot,
+                        query = query,
+                        actions = availableQuickFindActions(hasFocusedScore),
+                        keybindings = appSettings.viewerKeybindings,
+                    )
+                }
+            }
+            QuickFindPalette(
+                entriesFor = entriesFor,
+                onSelect = { entry ->
+                    when (entry) {
+                        is QuickFindEntry.Score -> appState.openScoreFromQuickFind(entry.item)
+                        is QuickFindEntry.Setlist -> appState.openSetlistFromQuickFind(entry.setlist.id)
+                        is QuickFindEntry.Songbook -> appState.openSongbookFromQuickFind(entry.songbook.id)
+                        is QuickFindEntry.Action -> appState.runQuickFindAction(entry.action, libraryScopeItems)
+                    }
+                },
+                onDismiss = appState::dismissQuickFind,
+            )
+        }
+
+        if (appState.metronomeVisible) {
+            MetronomeDialog(onDismiss = appState::dismissMetronome)
+        }
+    }
+}
+
+private fun Modifier.quickFindShortcut(onOpen: () -> Unit): Modifier = onPreviewKeyEvent { event ->
+    if (event.isQuickFindShortcut()) {
+        onOpen()
+        true
+    } else {
+        false
     }
 }
 

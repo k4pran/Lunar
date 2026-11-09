@@ -20,6 +20,8 @@ object LunarTestTags {
     const val SOURCES_ADD_MENU_LIST = "sources_add_menu_list"
     const val SOURCES_SIDE_PANEL = "sources_side_panel"
     const val COMPOSE_SAVE_TO_LIBRARY = "compose_save_to_library"
+    const val QUICK_FIND_PANEL = "quick_find_panel"
+    const val QUICK_FIND_INPUT = "quick_find_input"
 
     fun navigationItem(section: AppSection): String = "navigation_item_${section.name.lowercase()}"
 
@@ -31,6 +33,8 @@ object LunarTestTags {
     fun setlistRow(setlistId: String): String = "setlist_row_$setlistId"
 
     fun songbookRow(songbookId: String): String = "songbook_row_$songbookId"
+
+    fun quickFindResult(entryKey: String): String = "quick_find_result_$entryKey"
 
     fun skinOption(skin: AppSkin): String = "skin_option_${skin.name.lowercase()}"
 
