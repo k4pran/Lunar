@@ -158,7 +158,7 @@ class ViewerShortcutTest {
         rule.mainClock.autoAdvance = false
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
@@ -209,7 +209,7 @@ class ViewerShortcutTest {
         rule.mainClock.autoAdvance = false
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
@@ -244,7 +244,7 @@ class ViewerShortcutTest {
         var lastPage = -1
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
@@ -290,7 +290,7 @@ class ViewerShortcutTest {
         var backs = 0
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
