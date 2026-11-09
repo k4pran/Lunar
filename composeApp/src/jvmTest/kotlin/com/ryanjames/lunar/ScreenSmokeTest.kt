@@ -757,6 +757,52 @@ class ScreenSmokeTest {
     }
 
     @Test
+    fun galleryEditAndInfoOnFocusedScoreClearMultiSelection() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(id = "alpha", title = "Alpha"),
+                testSheetMusicItem(id = "beta", title = "Beta"),
+            )
+            val runtime = createTestPlatformRuntime(initialItems = items)
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateLayoutMode(com.ryanjames.lunar.ui.LibraryLayoutMode.GRID)
+
+            rule.setContent {
+                LunarTheme(theme = AppColorTheme.OCEAN) {
+                    LibraryScreen(runtime = runtime, snapshot = runtime.repository.library.value, appState = appState)
+                }
+            }
+
+            rule.onNodeWithTag(LibraryTestTags.row("alpha")).performClick()
+            rule.onNodeWithContentDescription("Select Beta").performClick()
+            rule.runOnIdle { assertEquals(setOf("beta"), appState.selectedScoreIds) }
+            assertTrue(rule.onAllNodesWithTag(LibraryTestTags.DetailPanel).fetchSemanticsNodes().isEmpty())
+
+            rule.onNodeWithContentDescription("Edit Alpha").performClick()
+            rule.runOnIdle {
+                assertEquals("alpha", appState.focusedScoreId)
+                assertEquals("alpha", appState.editingItemId)
+                assertTrue(appState.selectedScoreIds.isEmpty())
+            }
+            rule.onNodeWithTag(LibraryTestTags.DetailPanel).assertExists()
+            rule.onNodeWithText("Close editor").assertExists()
+
+            rule.onNodeWithContentDescription("Select Beta").performClick()
+            rule.runOnIdle { assertEquals(setOf("beta"), appState.selectedScoreIds) }
+            assertTrue(rule.onAllNodesWithTag(LibraryTestTags.DetailPanel).fetchSemanticsNodes().isEmpty())
+
+            rule.onNodeWithContentDescription("Show info for Alpha").performClick()
+            rule.runOnIdle {
+                assertEquals("alpha", appState.focusedScoreId)
+                assertEquals("alpha", appState.infoItemId)
+                assertTrue(appState.selectedScoreIds.isEmpty())
+            }
+            rule.onNodeWithTag(LibraryTestTags.DetailPanel).assertExists()
+            rule.onNodeWithText("Fewer details").assertExists()
+        }
+    }
+
+    @Test
     fun groupsNamedLikeTheUnnamedBucketRenderAlongsideIt() {
         runBlocking {
             val items = listOf(
