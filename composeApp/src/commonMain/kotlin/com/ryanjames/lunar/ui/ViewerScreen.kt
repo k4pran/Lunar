@@ -270,6 +270,8 @@ fun ViewerScreen(
     onOpenRandomScore: (() -> Unit)? = null,
     onPageChanged: (Int) -> Unit,
     onPageCountResolved: (Int) -> Unit,
+    onNextInSetlist: (() -> Unit)? = null,
+    nextInSetlistAvailable: Boolean = onNextInSetlist != null,
     defaultTwoPageMode: Boolean = false,
     viewerKeybindings: ViewerKeybindings = ViewerKeybindings(),
     onEnterFullscreen: (() -> Unit)? = null,
@@ -539,6 +541,9 @@ fun ViewerScreen(
                         FullscreenIcon(color = color)
                     }
                 }
+                if (onNextInSetlist != null) {
+                    CompactNavButton("Next in setlist", nextInSetlistAvailable, onClick = onNextInSetlist)
+                }
                 CompactNavButton("\u2669", true, onClick = { showMetronomeDialog = true })
                 CompactToolbarIconButton(
                     contentDescription = backButtonLabel,
@@ -611,6 +616,8 @@ fun FullscreenViewerScreen(
     onOpenRandomScore: (() -> Unit)? = null,
     onPageChanged: (Int) -> Unit,
     onPageCountResolved: (Int) -> Unit,
+    onNextInSetlist: (() -> Unit)? = null,
+    nextInSetlistAvailable: Boolean = onNextInSetlist != null,
     defaultTwoPageMode: Boolean = false,
     viewerKeybindings: ViewerKeybindings = ViewerKeybindings(),
     modifier: Modifier = Modifier,
@@ -898,6 +905,13 @@ fun FullscreenViewerScreen(
                                     currentPage = nextPageIndex(currentPage, resolvedPageCount, pageStep)
                                 },
                             )
+                            if (onNextInSetlist != null) {
+                                FullscreenToolbarButton(
+                                    label = "Next in setlist",
+                                    enabled = nextInSetlistAvailable,
+                                    onClick = onNextInSetlist,
+                                )
+                            }
                             Surface(
                                 color = themePalette.viewerForeground.copy(alpha = 0.12f),
                                 shape = MaterialTheme.shapes.large,

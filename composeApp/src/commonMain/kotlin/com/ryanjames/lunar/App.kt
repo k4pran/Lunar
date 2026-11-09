@@ -62,6 +62,8 @@ import com.ryanjames.lunar.ui.SettingsScreen
 import com.ryanjames.lunar.ui.ViewerDocumentState
 import com.ryanjames.lunar.ui.ViewerScreen
 import com.ryanjames.lunar.ui.ViewerTarget
+import com.ryanjames.lunar.ui.TemporarySetlistSession
+import com.ryanjames.lunar.ui.resolveSetlistItems
 import com.ryanjames.lunar.ui.currentLibraryScopeItems
 import com.ryanjames.lunar.ui.lunarThemePalette
 import com.ryanjames.lunar.ui.rememberLunarAppState
@@ -86,8 +88,12 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
     val snackbarHostState = remember { SnackbarHostState() }
     var appReady by remember(runtime) { mutableStateOf(false) }
     var startupError by remember(runtime) { mutableStateOf<String?>(null) }
-    val previewDocument = snapshot.resolveViewerDocument(appState.previewTarget)
-    val fullscreenDocument = snapshot.resolveViewerDocument(appState.fullscreenTarget)
+    val previewDocument = snapshot.resolveViewerDocument(appState.previewTarget, appState.temporarySetlist)
+    val fullscreenDocument = snapshot.resolveViewerDocument(appState.fullscreenTarget, appState.temporarySetlist)
+    val previewItemId = snapshot.viewerItemId(appState.previewTarget, appState.temporarySetlist)
+    val fullscreenItemId = snapshot.viewerItemId(appState.fullscreenTarget, appState.temporarySetlist)
+    val previewInSetlist = appState.previewTarget is ViewerTarget.Setlist
+    val fullscreenInSetlist = appState.fullscreenTarget is ViewerTarget.Setlist
     val defaultTwoPageMode = appSettings.defaultViewerPageMode == ViewerPageModePreference.TWO_PAGE
     val libraryScopeItems = currentLibraryScopeItems(snapshot = snapshot, appState = appState)
 
@@ -157,13 +163,16 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
                 runtime = runtime,
                 documentState = fullscreenDocument,
                 onBack = appState::closeFullscreen,
-                onToggleFavorite = appState.fullscreenTarget.favoriteToggle(appState),
-                onHideScore = appState.fullscreenTarget.hideScore(appState),
-                onAddToSetlist = appState.fullscreenTarget.addToSetlist(appState),
-                onAddToSongbook = appState.fullscreenTarget.addToSongbook(appState),
-                onOpenRandomScore = { appState.openRandomSheetInCurrentViewer(libraryScopeItems) },
-                onPageChanged = appState.fullscreenTarget.pageChanged(appState),
-                onPageCountResolved = appState.fullscreenTarget.pageCountResolved(appState),
+                onToggleFavorite = favoriteToggle(fullscreenItemId, appState),
+                onHideScore = hideScore(fullscreenItemId.takeUnless { fullscreenInSetlist }, appState),
+                onAddToSetlist = addToSetlist(fullscreenItemId, appState),
+                onAddToSongbook = addToSongbook(fullscreenItemId, appState),
+                onOpenRandomScore = { appState.openRandomSheetInCurrentViewer(libraryScopeItems) }
+                    .takeUnless { fullscreenInSetlist },
+                onPageChanged = pageChanged(fullscreenItemId, appState),
+                onPageCountResolved = pageCountResolved(fullscreenItemId, appState),
+                onNextInSetlist = appState::nextInSetlist.takeIf { fullscreenInSetlist },
+                nextInSetlistAvailable = appState.hasNextInSetlist(appState.fullscreenTarget),
                 defaultTwoPageMode = defaultTwoPageMode,
                 viewerKeybindings = appSettings.viewerKeybindings,
             )
@@ -258,13 +267,16 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
                                             runtime = runtime,
                                             documentState = previewDocument,
                                             onBack = appState::closePreview,
-                                            onToggleFavorite = appState.previewTarget.favoriteToggle(appState),
-                                            onHideScore = appState.previewTarget.hideScore(appState),
-                                            onAddToSetlist = appState.previewTarget.addToSetlist(appState),
-                                            onAddToSongbook = appState.previewTarget.addToSongbook(appState),
-                                            onOpenRandomScore = { appState.openRandomSheetInCurrentViewer(libraryScopeItems) },
-                                            onPageChanged = appState.previewTarget.pageChanged(appState),
-                                            onPageCountResolved = appState.previewTarget.pageCountResolved(appState),
+                                            onToggleFavorite = favoriteToggle(previewItemId, appState),
+                                            onHideScore = hideScore(previewItemId.takeUnless { previewInSetlist }, appState),
+                                            onAddToSetlist = addToSetlist(previewItemId, appState),
+                                            onAddToSongbook = addToSongbook(previewItemId, appState),
+                                            onOpenRandomScore = { appState.openRandomSheetInCurrentViewer(libraryScopeItems) }
+                                                .takeUnless { previewInSetlist },
+                                            onPageChanged = pageChanged(previewItemId, appState),
+                                            onPageCountResolved = pageCountResolved(previewItemId, appState),
+                                            onNextInSetlist = appState::nextInSetlist.takeIf { previewInSetlist },
+                                            nextInSetlistAvailable = appState.hasNextInSetlist(appState.previewTarget),
                                             defaultTwoPageMode = defaultTwoPageMode,
                                             viewerKeybindings = appSettings.viewerKeybindings,
                                             onEnterFullscreen = {
@@ -275,10 +287,13 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
                                                     is ViewerTarget.Songbook ->
                                                         appState.openSongbookFullscreen(target.songbookId)
 
+                                                    is ViewerTarget.Setlist ->
+                                                        appState.openFullscreen(target)
+
                                                     null -> Unit
                                                 }
                                             },
-                                            backButtonLabel = "Close",
+                                            backButtonLabel = if (previewInSetlist) "Back to programme" else "Close",
                                         )
                                     }
                                     Surface(
@@ -296,7 +311,7 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
                                             androidx.compose.material3.OutlinedButton(
                                                 onClick = appState::closePreview,
                                             ) {
-                                                Text("Close")
+                                                Text(if (previewInSetlist) "Back to programme" else "Close")
                                             }
                                             androidx.compose.material3.Button(
                                                 onClick = {
@@ -306,6 +321,9 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
 
                                                         is ViewerTarget.Songbook ->
                                                             appState.openSongbookFullscreen(target.songbookId)
+
+                                                        is ViewerTarget.Setlist ->
+                                                            appState.openFullscreen(target)
 
                                                         null -> Unit
                                                     }
@@ -401,7 +419,10 @@ private fun StartupSpinner(rotation: Float) {
     }
 }
 
-private fun LibrarySnapshot.resolveViewerDocument(target: ViewerTarget?): ViewerDocumentState? = when (target) {
+private fun LibrarySnapshot.resolveViewerDocument(
+    target: ViewerTarget?,
+    temporarySetlist: TemporarySetlistSession?,
+): ViewerDocumentState? = when (target) {
     is ViewerTarget.Score -> items
         .firstOrNull { it.id == target.itemId }
         ?.toViewerDocumentState()
@@ -410,7 +431,31 @@ private fun LibrarySnapshot.resolveViewerDocument(target: ViewerTarget?): Viewer
         .firstOrNull { it.id == target.songbookId }
         ?.toViewerDocumentState()
 
+    is ViewerTarget.Setlist -> {
+        val pieces = resolveSetlistItems(this, target.setlistId, temporarySetlist)
+        pieces.getOrNull(target.index)?.let { item ->
+            item.toViewerDocumentState().copy(
+                subtitle = listOfNotNull(
+                    "Piece ${target.index + 1} of ${pieces.size}",
+                    item.composer?.takeIf(String::isNotBlank),
+                ).joinToString("  |  "),
+            )
+        }
+    }
+
     null -> null
+}
+
+private fun LibrarySnapshot.viewerItemId(
+    target: ViewerTarget?,
+    temporarySetlist: TemporarySetlistSession?,
+): String? = when (target) {
+    is ViewerTarget.Score -> target.itemId
+    is ViewerTarget.Setlist -> resolveSetlistItems(this, target.setlistId, temporarySetlist)
+        .getOrNull(target.index)
+        ?.id
+
+    is ViewerTarget.Songbook, null -> null
 }
 
 private fun LibrarySongbook.toViewerDocumentState(): ViewerDocumentState = ViewerDocumentState(
@@ -429,47 +474,25 @@ private fun LibrarySongbook.toViewerDocumentState(): ViewerDocumentState = Viewe
     pageCount = pageCount,
 )
 
-private fun ViewerTarget?.favoriteToggle(appState: com.ryanjames.lunar.ui.LunarAppState): (() -> Unit)? =
-    when (this) {
-        is ViewerTarget.Score -> { { appState.toggleFavorite(itemId) } }
-        is ViewerTarget.Songbook, null -> null
-    }
+private fun favoriteToggle(itemId: String?, appState: com.ryanjames.lunar.ui.LunarAppState): (() -> Unit)? =
+    itemId?.let { id -> { appState.toggleFavorite(id) } }
 
-private fun ViewerTarget?.hideScore(appState: com.ryanjames.lunar.ui.LunarAppState): (() -> Unit)? =
-    when (this) {
-        is ViewerTarget.Score -> { { appState.hideScore(itemId) } }
-        is ViewerTarget.Songbook, null -> null
-    }
+private fun hideScore(itemId: String?, appState: com.ryanjames.lunar.ui.LunarAppState): (() -> Unit)? =
+    itemId?.let { id -> { appState.hideScore(id) } }
 
-private fun ViewerTarget?.addToSetlist(appState: com.ryanjames.lunar.ui.LunarAppState): (() -> Unit)? =
-    when (this) {
-        is ViewerTarget.Score -> { { appState.showSetlistPickerForScore(itemId) } }
-        is ViewerTarget.Songbook, null -> null
-    }
+private fun addToSetlist(itemId: String?, appState: com.ryanjames.lunar.ui.LunarAppState): (() -> Unit)? =
+    itemId?.let { id -> { appState.showSetlistPickerForScore(id) } }
 
-private fun ViewerTarget?.addToSongbook(appState: com.ryanjames.lunar.ui.LunarAppState): (() -> Unit)? =
-    when (this) {
-        is ViewerTarget.Score -> {
-            if (appState.canCreateSongbooks) {
-                { appState.showSongbookPickerForScore(itemId) }
-            } else {
-                null
-            }
-        }
-        is ViewerTarget.Songbook, null -> null
-    }
+private fun addToSongbook(itemId: String?, appState: com.ryanjames.lunar.ui.LunarAppState): (() -> Unit)? =
+    itemId
+        ?.takeIf { appState.canCreateSongbooks }
+        ?.let { id -> { appState.showSongbookPickerForScore(id) } }
 
-private fun ViewerTarget?.pageChanged(appState: com.ryanjames.lunar.ui.LunarAppState): (Int) -> Unit =
-    when (this) {
-        is ViewerTarget.Score -> { pageIndex -> appState.updateViewerProgress(itemId, pageIndex) }
-        is ViewerTarget.Songbook, null -> { _ -> }
-    }
+private fun pageChanged(itemId: String?, appState: com.ryanjames.lunar.ui.LunarAppState): (Int) -> Unit =
+    itemId?.let { id -> { pageIndex: Int -> appState.updateViewerProgress(id, pageIndex) } } ?: { _ -> }
 
-private fun ViewerTarget?.pageCountResolved(appState: com.ryanjames.lunar.ui.LunarAppState): (Int) -> Unit =
-    when (this) {
-        is ViewerTarget.Score -> { pageCount -> appState.updateViewerPageCount(itemId, pageCount) }
-        is ViewerTarget.Songbook, null -> { _ -> }
-    }
+private fun pageCountResolved(itemId: String?, appState: com.ryanjames.lunar.ui.LunarAppState): (Int) -> Unit =
+    itemId?.let { id -> { pageCount: Int -> appState.updateViewerPageCount(id, pageCount) } } ?: { _ -> }
 
 @Composable
 internal fun BottomNavigationPanel(
