@@ -9,6 +9,7 @@ import com.ryanjames.lunar.ui.alphabetIndex
 import com.ryanjames.lunar.ui.buildCatalogueGroups
 import com.ryanjames.lunar.ui.catalogueGroupingFor
 import com.ryanjames.lunar.ui.catalogueIndexAnchors
+import com.ryanjames.lunar.ui.catalogueLazyIndexOf
 import com.ryanjames.lunar.ui.collectionSwatchSlot
 import com.ryanjames.lunar.ui.nextFocusedItemId
 import com.ryanjames.lunar.ui.openScoreLabel
@@ -230,6 +231,26 @@ class LibraryCatalogueTest {
             catalogueIndexAnchors(flat, LibrarySortOption.TITLE),
         )
         assertTrue(catalogueIndexAnchors(flat, LibrarySortOption.DATE_ADDED).isEmpty())
+    }
+
+    @Test
+    fun lazyIndexOfCountsTheLeadingStripAndGroupHeaders() {
+        val items = listOf(
+            testSheetMusicItem(id = "a1", title = "Air", composer = "Bach"),
+            testSheetMusicItem(id = "a2", title = "Bourree", composer = "Bach"),
+            testSheetMusicItem(id = "c1", title = "Etude", composer = "Chopin"),
+        )
+        val grouped = buildCatalogueGroups(items, CatalogueGrouping.COMPOSER, LibrarySortOption.TITLE, SortDirection.ASCENDING)
+
+        // [jump back in] [BACH] Air Bourree [CHOPIN] Etude
+        assertEquals(2, catalogueLazyIndexOf(grouped, "a1", leadingItemCount = 1))
+        assertEquals(3, catalogueLazyIndexOf(grouped, "a2", leadingItemCount = 1))
+        assertEquals(5, catalogueLazyIndexOf(grouped, "c1", leadingItemCount = 1))
+
+        val flat = buildCatalogueGroups(items, CatalogueGrouping.NONE, LibrarySortOption.TITLE, SortDirection.ASCENDING)
+        assertEquals(2, catalogueLazyIndexOf(flat, "c1"))
+        assertEquals(null, catalogueLazyIndexOf(flat, "missing"))
+        assertEquals(null, catalogueLazyIndexOf(flat, null))
     }
 
     @Test

@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,8 +29,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -184,6 +187,23 @@ internal fun catalogueIndexAnchors(
     return anchors
 }
 
+/** The LazyColumn index of [itemId]'s row, counting the leading strip and every group header before it. */
+internal fun catalogueLazyIndexOf(
+    groups: List<CatalogueGroup>,
+    itemId: String?,
+    leadingItemCount: Int = 0,
+): Int? {
+    if (itemId == null) return null
+    var lazyIndex = leadingItemCount
+    groups.forEach { group ->
+        if (group.header != null) lazyIndex += 1
+        val position = group.items.indexOfFirst { it.id == itemId }
+        if (position >= 0) return lazyIndex + position
+        lazyIndex += group.items.size
+    }
+    return null
+}
+
 /** The A-Z (then '#') index for [groups]: each letter points at the first group starting with it. */
 internal fun alphabetIndex(groups: List<String>): List<AlphabetIndexEntry> {
     val firstIndexByLetter = mutableMapOf<Char, Int>()
@@ -231,6 +251,12 @@ internal fun LibraryCatalogue(
     }
     val indexEntries = remember(anchors) { alphabetIndex(anchors.map { it.first }) }
     val scope = rememberCoroutineScope()
+    val focusedLazyIndex = remember(groups, focusedItemId, leadingItemCount) {
+        catalogueLazyIndexOf(groups, focusedItemId, leadingItemCount)
+    }
+    LaunchedEffect(focusedLazyIndex) {
+        focusedLazyIndex?.let { listState.revealCatalogueItem(it) }
+    }
 
     Row(modifier = modifier.fillMaxSize()) {
         LazyColumn(
@@ -252,7 +278,7 @@ internal fun LibraryCatalogue(
             groups.forEach { group ->
                 val header = group.header
                 if (header != null) {
-                    stickyHeader(key = "group:${header.lowercase()}") {
+                    stickyHeader(key = "$CatalogueGroupKeyPrefix${header.lowercase()}") {
                         CatalogueGroupHeader(title = header, count = group.items.size)
                     }
                 }
@@ -280,6 +306,47 @@ internal fun LibraryCatalogue(
                 },
             )
         }
+    }
+}
+
+private const val CatalogueGroupKeyPrefix = "group:"
+
+/**
+ * Scrolls the least distance that shows the whole row at [index], keeping it clear of a pinned group header.
+ * Rows that are not laid out at all are first brought in from the side they are on.
+ */
+private suspend fun LazyListState.revealCatalogueItem(index: Int) {
+    if (layoutInfo.visibleItemsInfo.none { it.index == index }) {
+        val below = index > (layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1)
+        scrollToItem(index)
+        // Let the jump settle before measuring the row again.
+        withFrameNanos { }
+        if (below) {
+            val info = layoutInfo
+            val row = info.visibleItemsInfo.firstOrNull { it.index == index } ?: return
+            // Coming from above, settle the row on the bottom edge rather than the top.
+            val slack = info.viewportEndOffset - (row.offset + row.size)
+            if (slack > 0) {
+                scrollBy(-slack.toFloat())
+                withFrameNanos { }
+            }
+        }
+    }
+    val info = layoutInfo
+    val row = info.visibleItemsInfo.firstOrNull { it.index == index } ?: return
+    val pinnedHeaderBottom = info.visibleItemsInfo
+        .firstOrNull { item ->
+            item.index < index &&
+                (item.key as? String)?.startsWith(CatalogueGroupKeyPrefix) == true &&
+                item.offset <= info.viewportStartOffset
+        }
+        ?.let { it.offset + it.size }
+        ?: info.viewportStartOffset
+    val visibleTop = maxOf(info.viewportStartOffset, pinnedHeaderBottom)
+    when {
+        row.offset + row.size > info.viewportEndOffset ->
+            scrollBy((row.offset + row.size - info.viewportEndOffset).toFloat())
+        row.offset < visibleTop -> scrollBy((row.offset - visibleTop).toFloat())
     }
 }
 
