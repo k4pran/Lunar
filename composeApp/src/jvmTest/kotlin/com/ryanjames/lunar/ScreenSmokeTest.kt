@@ -496,6 +496,46 @@ class ScreenSmokeTest {
     }
 
     @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun keyboardNavigationScrollsTheFocusedRowIntoView() {
+        runBlocking {
+            val composers = listOf("Albeniz", "Bach", "Chopin", "Debussy", "Elgar", "Faure", "Grieg", "Haydn", "Ives", "Liszt")
+            val items = composers.flatMap { composer ->
+                (1..4).map { index -> testSheetMusicItem(id = "${composer}_$index", title = "$composer piece $index", composer = composer) }
+            }
+            val runtime = createTestPlatformRuntime(initialItems = items)
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateBrowseMode(com.ryanjames.lunar.ui.LibraryBrowseMode.BY_COMPOSER)
+            appState.updateSortOption(com.ryanjames.lunar.library.model.LibrarySortOption.TITLE)
+            appState.updateSortDirection(com.ryanjames.lunar.library.model.SortDirection.ASCENDING)
+
+            rule.setContent {
+                val snapshot by runtime.repository.library.collectAsState()
+                LunarTheme(theme = AppColorTheme.OCEAN) {
+                    LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
+                }
+            }
+
+            assertTrue(rule.onAllNodesWithTag(LibraryTestTags.row("Liszt_4")).fetchSemanticsNodes().isEmpty())
+            rule.onNodeWithTag(LibraryTestTags.row("Albeniz_1")).performClick()
+            repeat(items.size - 1) {
+                rule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
+                rule.waitForIdle()
+            }
+            rule.runOnIdle { assertEquals("Liszt_4", appState.focusedScoreId) }
+            rule.onNodeWithTag(LibraryTestTags.row("Liszt_4")).assertIsDisplayed()
+
+            repeat(items.size - 1) {
+                rule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
+                rule.waitForIdle()
+            }
+            rule.runOnIdle { assertEquals("Albeniz_1", appState.focusedScoreId) }
+            rule.onNodeWithTag(LibraryTestTags.row("Albeniz_1")).assertIsDisplayed()
+            rule.onNodeWithText("ALBENIZ").assertIsDisplayed()
+        }
+    }
+
+    @Test
     fun viewerPickerFromAFilteredSetlistStillShowsItsTarget() {
         runBlocking {
             val items = listOf(
