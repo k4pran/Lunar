@@ -57,6 +57,8 @@ data class LibrarySongbook(
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
     val pageCount: Int? = null,
+    /** True when the PDF starts with a generated cover page before the first score. */
+    val hasCover: Boolean = false,
 )
 
 data class ImportedPdfDescriptor(

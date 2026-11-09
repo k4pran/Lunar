@@ -145,6 +145,13 @@ interface SheetMusicRepository {
 
     suspend fun addItemsToSetlist(setlistId: String, itemIds: List<String>): LibrarySetlist
 
+    /** Reorders a setlist. [itemIds] must name every current item exactly once. */
+    suspend fun reorderSetlist(setlistId: String, itemIds: List<String>): LibrarySetlist
+
+    suspend fun renameSetlist(setlistId: String, name: String): LibrarySetlist
+
+    suspend fun removeFromSetlist(setlistId: String, itemIds: List<String>): LibrarySetlist
+
     suspend fun deleteSetlist(setlistId: String)
 
     suspend fun createSongbook(
@@ -152,6 +159,7 @@ interface SheetMusicRepository {
         itemIds: List<String>,
         document: PdfDocumentReference,
         pageCount: Int? = null,
+        hasCover: Boolean = false,
     ): LibrarySongbook
 
     suspend fun addItemsToSongbook(
@@ -159,6 +167,14 @@ interface SheetMusicRepository {
         itemIds: List<String>,
         document: PdfDocumentReference,
         pageCount: Int? = null,
+    ): LibrarySongbook
+
+    /** Replaces a songbook's PDF, for example after rebuilding it with a new cover. */
+    suspend fun replaceSongbookDocument(
+        songbookId: String,
+        document: PdfDocumentReference,
+        pageCount: Int? = null,
+        hasCover: Boolean,
     ): LibrarySongbook
 
     suspend fun deleteSongbook(songbookId: String)
@@ -496,6 +512,38 @@ class DefaultSheetMusicRepository(
         return requireNotNull(updatedSetlist)
     }
 
+    override suspend fun reorderSetlist(
+        setlistId: String,
+        itemIds: List<String>,
+    ): LibrarySetlist = updateSetlist(setlistId) { setlist, _ ->
+        val requestedIds = itemIds.map(String::trim)
+        require(
+            requestedIds.size == setlist.itemIds.size &&
+                requestedIds.toSet() == setlist.itemIds.toSet() &&
+                requestedIds.distinct().size == requestedIds.size
+        ) {
+            "A reordered setlist must list each of its scores exactly once."
+        }
+        setlist.copy(itemIds = requestedIds)
+    }
+
+    override suspend fun renameSetlist(
+        setlistId: String,
+        name: String,
+    ): LibrarySetlist = updateSetlist(setlistId) { setlist, _ ->
+        val normalizedName = normalizeSetlistName(name)
+            ?: throw IllegalArgumentException("Setlist name cannot be blank.")
+        setlist.copy(name = normalizedName)
+    }
+
+    override suspend fun removeFromSetlist(
+        setlistId: String,
+        itemIds: List<String>,
+    ): LibrarySetlist = updateSetlist(setlistId) { setlist, _ ->
+        val removedIds = itemIds.mapTo(mutableSetOf(), String::trim)
+        setlist.copy(itemIds = setlist.itemIds.filterNot { it in removedIds })
+    }
+
     override suspend fun deleteSetlist(setlistId: String) {
         ensureInitialized()
         mutateSetlists { setlists, _ ->
@@ -508,6 +556,7 @@ class DefaultSheetMusicRepository(
         itemIds: List<String>,
         document: PdfDocumentReference,
         pageCount: Int?,
+        hasCover: Boolean,
     ): LibrarySongbook {
         ensureInitialized()
 
@@ -525,6 +574,7 @@ class DefaultSheetMusicRepository(
                 createdAtEpochMillis = createdAt,
                 updatedAtEpochMillis = createdAt,
                 pageCount = pageCount?.takeIf { it > 0 },
+                hasCover = hasCover,
             )
             createdSongbook = nextSongbook
             songbooks + nextSongbook
@@ -573,6 +623,48 @@ class DefaultSheetMusicRepository(
             .forEach { stalePath ->
                 runCatching { storedDocumentCleaner.deleteStoredDocument(stalePath) }
             }
+
+        return requireNotNull(updatedSongbook)
+    }
+
+    override suspend fun replaceSongbookDocument(
+        songbookId: String,
+        document: PdfDocumentReference,
+        pageCount: Int?,
+        hasCover: Boolean,
+    ): LibrarySongbook {
+        ensureInitialized()
+
+        val updatedAt = clock.now().toEpochMilliseconds()
+        var stalePath: String? = null
+        var updatedSongbook: LibrarySongbook? = null
+        mutateSongbooks { songbooks, _ ->
+            val sanitizedDocument = sanitizeSongbookDocument(document)
+                ?: error("Songbook PDF is unavailable.")
+            songbooks.map { songbook ->
+                if (songbook.id != songbookId) {
+                    songbook
+                } else {
+                    if (songbook.document.storedPath != sanitizedDocument.storedPath) {
+                        stalePath = songbook.document.storedPath
+                    }
+                    songbook.copy(
+                        document = sanitizedDocument,
+                        updatedAtEpochMillis = updatedAt,
+                        pageCount = pageCount?.takeIf { it > 0 } ?: songbook.pageCount,
+                        hasCover = hasCover,
+                    ).also { updatedSongbook = it }
+                }
+            }.also {
+                if (updatedSongbook == null) {
+                    error("Songbook not found.")
+                }
+            }
+        }
+
+        stalePath?.let { path ->
+            runCatching { storedDocumentCleaner.deleteStoredDocument(path) }
+        }
 
         return requireNotNull(updatedSongbook)
     }
@@ -944,6 +1036,24 @@ class DefaultSheetMusicRepository(
                 )
             )
         }
+    }
+
+    private suspend fun updateSetlist(
+        setlistId: String,
+        transform: (LibrarySetlist, List<SheetMusicItem>) -> LibrarySetlist,
+    ): LibrarySetlist {
+        ensureInitialized()
+
+        val updatedAt = clock.now().toEpochMilliseconds()
+        var updatedSetlist: LibrarySetlist? = null
+        mutateSetlists { setlists, items ->
+            val existing = setlists.firstOrNull { it.id == setlistId }
+                ?: error("Setlist not found.")
+            val updated = transform(existing, items).copy(updatedAtEpochMillis = updatedAt)
+            updatedSetlist = updated
+            setlists.map { setlist -> if (setlist.id == setlistId) updated else setlist }
+        }
+        return requireNotNull(updatedSetlist)
     }
 
     private suspend fun mutateSongbooks(

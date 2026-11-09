@@ -23,8 +23,11 @@ import com.ryanjames.lunar.library.model.applyLibraryQuery
 import com.ryanjames.lunar.library.model.collectionDuplicateKey
 import com.ryanjames.lunar.library.model.composerDuplicateKey
 import kotlinx.coroutines.runBlocking
+import kotlin.time.Clock
+import kotlin.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -545,6 +548,108 @@ class SharedCommonTest {
     }
 
     @Test
+    fun repositoryReordersSetlistKeepingEveryItemExactlyOnce() = runBlocking {
+        val storage = InMemoryLibraryStorage()
+        val repository = DefaultSheetMusicRepository(storage)
+        repository.initialize()
+        val ids = repository.importSetlistFixtures()
+        val setlist = repository.createSetlist(name = "Programme", itemIds = ids)
+
+        val reordered = repository.reorderSetlist(setlist.id, listOf(ids[2], ids[0], ids[1]))
+
+        assertEquals(listOf(ids[2], ids[0], ids[1]), reordered.itemIds)
+        assertFailsWith<IllegalArgumentException> {
+            repository.reorderSetlist(setlist.id, listOf(ids[0], ids[1], "unknown"))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            repository.reorderSetlist(setlist.id, listOf(ids[0], ids[0], ids[1]))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            repository.reorderSetlist(setlist.id, listOf(ids[0], ids[1]))
+        }
+        assertFailsWith<IllegalStateException> {
+            repository.reorderSetlist("missing", ids)
+        }
+
+        val reloaded = DefaultSheetMusicRepository(storage)
+        reloaded.initialize()
+        assertEquals(listOf(ids[2], ids[0], ids[1]), reloaded.getSetlist(setlist.id)?.itemIds)
+    }
+
+    @Test
+    fun repositoryRenamesSetlistTrimmingAndRejectingBlankNames() = runBlocking {
+        val storage = InMemoryLibraryStorage()
+        val repository = DefaultSheetMusicRepository(storage)
+        repository.initialize()
+        val setlist = repository.createSetlist(name = "Draft", itemIds = repository.importSetlistFixtures())
+
+        val renamed = repository.renameSetlist(setlist.id, "  Spring recital  ")
+
+        assertEquals("Spring recital", renamed.name)
+        assertFailsWith<IllegalArgumentException> {
+            repository.renameSetlist(setlist.id, "   ")
+        }
+        assertEquals("Spring recital", repository.getSetlist(setlist.id)?.name)
+
+        val reloaded = DefaultSheetMusicRepository(storage)
+        reloaded.initialize()
+        assertEquals("Spring recital", reloaded.getSetlist(setlist.id)?.name)
+    }
+
+    @Test
+    fun repositoryRemovesItemsFromSetlistAndBumpsUpdatedAt() = runBlocking {
+        val storage = InMemoryLibraryStorage()
+        var now = 1_000L
+        val clock = object : Clock {
+            override fun now(): Instant = Instant.fromEpochMilliseconds(now)
+        }
+        val repository = DefaultSheetMusicRepository(storage, clock = clock)
+        repository.initialize()
+        val ids = repository.importSetlistFixtures()
+        val setlist = repository.createSetlist(name = "Programme", itemIds = ids)
+        now = 5_000L
+
+        val updated = repository.removeFromSetlist(setlist.id, listOf(ids[1], "not-in-setlist"))
+
+        assertEquals(listOf(ids[0], ids[2]), updated.itemIds)
+        assertEquals(1_000L, updated.createdAtEpochMillis)
+        assertEquals(5_000L, updated.updatedAtEpochMillis)
+
+        val reloaded = DefaultSheetMusicRepository(storage)
+        reloaded.initialize()
+        assertEquals(listOf(ids[0], ids[2]), reloaded.getSetlist(setlist.id)?.itemIds)
+        assertEquals(5_000L, reloaded.getSetlist(setlist.id)?.updatedAtEpochMillis)
+    }
+
+    @Test
+    fun repositoryReplacesSongbookDocumentAndRecordsCover() = runBlocking {
+        val storage = InMemoryLibraryStorage()
+        val repository = DefaultSheetMusicRepository(storage)
+        repository.initialize()
+        val songbook = repository.createSongbook(
+            name = "Book",
+            itemIds = listOf("a"),
+            document = PdfDocumentReference(storedPath = "/books/v1.pdf", originalFileName = "Book.pdf"),
+            pageCount = 3,
+        )
+        assertEquals(false, songbook.hasCover)
+
+        val rebound = repository.replaceSongbookDocument(
+            songbookId = songbook.id,
+            document = PdfDocumentReference(storedPath = "/books/v2.pdf", originalFileName = "Book.pdf"),
+            pageCount = 4,
+            hasCover = true,
+        )
+
+        assertEquals("/books/v2.pdf", rebound.document.storedPath)
+        assertEquals(4, rebound.pageCount)
+        assertTrue(rebound.hasCover)
+        val reloaded = DefaultSheetMusicRepository(storage)
+        reloaded.initialize()
+        assertEquals(true, reloaded.getSongbook(songbook.id)?.hasCover)
+    }
+
+    @Test
     fun repositoryPersistsSongbooksAcrossInitializations() = runBlocking {
         val storage = InMemoryLibraryStorage()
         val firstRepository = DefaultSheetMusicRepository(storage)
@@ -891,3 +996,12 @@ private fun testItem(
     dateAddedEpochMillis = dateAddedEpochMillis,
     lastOpenedEpochMillis = lastOpenedEpochMillis,
 )
+
+private suspend fun DefaultSheetMusicRepository.importSetlistFixtures(): List<String> = importDocuments(
+    listOf("one", "two", "three").map { name ->
+        ImportedPdfDescriptor(
+            storedPath = "/scores/$name.pdf",
+            originalFileName = "$name.pdf",
+        )
+    }
+).importedItems.map { it.id }
