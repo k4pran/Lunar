@@ -29,15 +29,17 @@ fun songbookStartPages(
 
 /**
  * Works out whether the bound PDF starts with a cover page. Songbooks saved before the cover was
- * recorded are inferred from their page count: one page more than the bound scores means a
- * cover. Returns null when that can't be told.
+ * recorded are inferred from their page count: exactly the bound scores' pages means no cover.
+ * One surplus page only means a cover when the bound order is known; without it, the extra page
+ * could just as well be a one-page score that was bound twice. Returns null when that can't be
+ * told.
  */
 fun LibrarySongbook.resolveHasCover(itemsById: Map<String, SheetMusicItem>): Boolean? {
     hasCover?.let { return it }
     val total = boundScorePageTotal(itemsById) ?: return null
-    return when (pageCount) {
-        total -> false
-        total + 1 -> true
+    return when {
+        pageCount == total -> false
+        pageCount == total + 1 && boundItemIds != null -> true
         else -> null
     }
 }

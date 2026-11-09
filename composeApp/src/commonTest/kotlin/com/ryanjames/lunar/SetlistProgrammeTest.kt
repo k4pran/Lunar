@@ -277,21 +277,22 @@ class SetlistProgrammeTest {
     }
 
     @Test
-    fun changingTheCoverOfALegacySongbookInfersAnExistingCoverFromItsPageCount() = runBlocking {
+    fun changingTheCoverOfALegacySongbookInfersNoCoverWhenItsPagesMatchTheScores() = runBlocking {
         val builds = mutableListOf<CoverBuild>()
-        val runtime = legacyCoverRuntime(songbookPageCount = 4, builds = builds)
+        val runtime = legacyCoverRuntime(songbookPageCount = 3, builds = builds)
         val appState = createTestLunarAppState(scope = this, runtime = runtime)
 
         appState.changeSongbookCover("book")
         waitUntil { runtime.repository.getSongbook("book")?.hasCover == true }
 
-        assertTrue(builds.single().dropExistingCoverPage, "The legacy cover page must be replaced, not kept.")
+        assertFalse(builds.single().dropExistingCoverPage, "No score page may be dropped for the new cover.")
     }
 
     @Test
     fun changingTheCoverOfALegacySongbookWithAnUnknownLayoutLeavesItUnchanged() = runBlocking {
         val builds = mutableListOf<CoverBuild>()
-        val runtime = legacyCoverRuntime(songbookPageCount = 7, builds = builds)
+        // One surplus page could be a cover or a one-page score bound twice.
+        val runtime = legacyCoverRuntime(songbookPageCount = 4, builds = builds)
         val appState = createTestLunarAppState(scope = this, runtime = runtime)
 
         appState.changeSongbookCover("book")

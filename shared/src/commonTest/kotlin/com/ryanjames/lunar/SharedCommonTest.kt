@@ -693,7 +693,7 @@ class SharedCommonTest {
     }
 
     @Test
-    fun legacySongbookCoverIsInferredOnlyWhenPageCountsAddUp() {
+    fun legacySongbookCoverIsInferredOnlyWhenPageCountsAreUnambiguous() {
         val items = listOf(
             testItem(id = "a", title = "A", composer = "C", tags = emptyList(), dateAddedEpochMillis = 1L)
                 .copy(pageCount = 3),
@@ -710,8 +710,13 @@ class SharedCommonTest {
             pageCount = pageCount,
         )
 
-        assertEquals(true, legacy(6).resolveHasCover(items))
-        assertEquals(listOf(2, 5), legacy(6).contents(items).map { it.startPage })
+        // One surplus page could be a cover or a one-page score bound twice.
+        assertNull(legacy(6).resolveHasCover(items))
+        assertEquals(listOf(null, null), legacy(6).contents(items).map { it.startPage })
+        // With the bound order known, the surplus page can only be a cover.
+        val ordered = legacy(6).copy(boundItemIds = listOf("a", "b"))
+        assertEquals(true, ordered.resolveHasCover(items))
+        assertEquals(listOf(2, 5), ordered.contents(items).map { it.startPage })
         assertEquals(false, legacy(5).resolveHasCover(items))
         assertEquals(listOf(1, 4), legacy(5).contents(items).map { it.startPage })
         // Extra pages, such as a score that was bound twice, leave the layout unknown.
