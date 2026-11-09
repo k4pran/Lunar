@@ -33,6 +33,7 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.isPopup
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -420,6 +421,108 @@ class ScreenSmokeTest {
             rule.onNodeWithText("Clear").performClick()
             rule.runOnIdle { assertTrue(appState.selectedScoreIds.isEmpty()) }
             rule.onNodeWithTag(LibraryTestTags.Toolbar).assertIsDisplayed()
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun searchShortcutClearsTheSelectionAndFocusesTheSearchField() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(id = "moon_river", title = "Moon River"),
+                testSheetMusicItem(id = "clair_de_lune", title = "Clair de Lune"),
+            )
+            val runtime = createTestPlatformRuntime(initialItems = items)
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+
+            rule.setContent {
+                val snapshot by runtime.repository.library.collectAsState()
+                LunarTheme(theme = AppColorTheme.OCEAN) {
+                    LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
+                }
+            }
+
+            rule.onNodeWithContentDescription("Select Moon River").performClick()
+            rule.onNodeWithTag(LibraryTestTags.SelectionBar).assertIsDisplayed()
+
+            rule.onRoot().performKeyInput {
+                keyDown(Key.CtrlLeft)
+                pressKey(Key.K)
+                keyUp(Key.CtrlLeft)
+            }
+
+            rule.runOnIdle { assertTrue(appState.selectedScoreIds.isEmpty()) }
+            rule.onNodeWithTag(LibraryTestTags.Toolbar).assertIsDisplayed()
+            // The only text field on screen is the library search.
+            rule.onNode(hasSetTextAction() and isFocused()).assertExists()
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun groupedListNavigatesAndRangeSelectsInDisplayedOrder() {
+        runBlocking {
+            // Sorted by title the order is Alpha, Beta, Gamma; grouped by composer it reads Beta | Alpha, Gamma.
+            val items = listOf(
+                testSheetMusicItem(id = "alpha", title = "Alpha", composer = "Zed"),
+                testSheetMusicItem(id = "beta", title = "Beta", composer = "Abe"),
+                testSheetMusicItem(id = "gamma", title = "Gamma", composer = "Zed"),
+            )
+            val runtime = createTestPlatformRuntime(initialItems = items)
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateBrowseMode(com.ryanjames.lunar.ui.LibraryBrowseMode.BY_COMPOSER)
+            appState.updateSortOption(com.ryanjames.lunar.library.model.LibrarySortOption.TITLE)
+            appState.updateSortDirection(com.ryanjames.lunar.library.model.SortDirection.ASCENDING)
+
+            rule.setContent {
+                val snapshot by runtime.repository.library.collectAsState()
+                LunarTheme(theme = AppColorTheme.OCEAN) {
+                    LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
+                }
+            }
+
+            rule.onNodeWithTag(LibraryTestTags.row("beta")).performClick()
+            rule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
+            rule.runOnIdle { assertEquals("alpha", appState.focusedScoreId) }
+            rule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
+            rule.runOnIdle { assertEquals("gamma", appState.focusedScoreId) }
+
+            rule.onNodeWithTag(LibraryTestTags.row("alpha")).performClick()
+            rule.onRoot().performKeyInput { keyDown(Key.ShiftLeft) }
+            rule.onNodeWithTag(LibraryTestTags.row("gamma")).performClick()
+            rule.onRoot().performKeyInput { keyUp(Key.ShiftLeft) }
+            rule.runOnIdle { assertEquals(setOf("alpha", "gamma"), appState.selectedScoreIds) }
+        }
+    }
+
+    @Test
+    fun setlistDetailKeepsBulkSelectionActions() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(id = "moon_river", title = "Moon River"),
+                testSheetMusicItem(id = "clair_de_lune", title = "Clair de Lune"),
+            )
+            val morning = testLibrarySetlist(id = "set_morning", name = "Morning rehearsal", itemIds = items.map { it.id })
+            val evening = testLibrarySetlist(id = "set_evening", name = "Evening recital", itemIds = emptyList())
+            val runtime = createTestPlatformRuntime(initialItems = items, initialSetlists = listOf(morning, evening))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.selectSection(com.ryanjames.lunar.ui.AppSection.SETLISTS)
+            appState.openSetlist("set_morning")
+
+            rule.setContent {
+                val snapshot by runtime.repository.library.collectAsState()
+                LunarTheme(theme = AppColorTheme.OCEAN) {
+                    LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
+                }
+            }
+
+            rule.onNodeWithContentDescription("Select Moon River").performClick()
+            rule.onNodeWithTag(LibraryTestTags.SelectionBar).assertIsDisplayed()
+            rule.onNodeWithText("Add to setlist").performClick()
+            rule.onNodeWithText("Evening recital").performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.library.value.setlists.single { it.id == "set_evening" }.itemIds == listOf("moon_river")
+            }
         }
     }
 
