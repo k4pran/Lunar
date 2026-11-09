@@ -76,7 +76,15 @@ internal data class CatalogueGroup(
     val header: String?,
     val indexKey: String,
     val items: List<SheetMusicItem>,
-)
+) {
+    /** Lazy-list key for the header; the unnamed group never collides with a group literally named like it. */
+    val headerKey: String
+        get() = if (indexKey.isEmpty()) {
+            "${CatalogueGroupKeyPrefix}unnamed"
+        } else {
+            "${CatalogueGroupKeyPrefix}named:${indexKey.lowercase()}"
+        }
+}
 
 /** One letter of the A-Z index; [targetIndex] points into the labels it was built from, or null when unused. */
 internal data class AlphabetIndexEntry(
@@ -278,7 +286,7 @@ internal fun LibraryCatalogue(
             groups.forEach { group ->
                 val header = group.header
                 if (header != null) {
-                    stickyHeader(key = "$CatalogueGroupKeyPrefix${header.lowercase()}") {
+                    stickyHeader(key = group.headerKey) {
                         CatalogueGroupHeader(title = header, count = group.items.size)
                     }
                 }
@@ -309,7 +317,7 @@ internal fun LibraryCatalogue(
     }
 }
 
-private const val CatalogueGroupKeyPrefix = "group:"
+internal const val CatalogueGroupKeyPrefix = "group:"
 
 /**
  * Scrolls the least distance that shows the whole row at [index], keeping it clear of a pinned group header.

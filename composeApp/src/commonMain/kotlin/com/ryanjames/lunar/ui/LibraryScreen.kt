@@ -1324,8 +1324,10 @@ private fun LibraryCard(
     onClick: () -> Unit,
 ) {
     val themePalette = lunarThemePalette()
-    val isSelected = item.id in appState.selectedScoreIds || item.id == appState.focusedScoreId
-    val containerColor = if (isSelected) {
+    val isChecked = item.id in appState.selectedScoreIds
+    // Focus (which score the detail panel shows) highlights the card but never ticks its checkbox.
+    val isHighlighted = isChecked || item.id == appState.focusedScoreId
+    val containerColor = if (isHighlighted) {
         MaterialTheme.colorScheme.surfaceBright.copy(alpha = 0.96f)
     } else {
         MaterialTheme.colorScheme.surface
@@ -1341,7 +1343,7 @@ private fun LibraryCard(
             containerColor = containerColor,
         ),
         elevation = androidx.compose.material3.CardDefaults.cardElevation(
-            defaultElevation = if (isSelected) 4.dp else 2.dp,
+            defaultElevation = if (isHighlighted) 4.dp else 2.dp,
         ),
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -1403,7 +1405,7 @@ private fun LibraryCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Checkbox(
-                            checked = isSelected,
+                            checked = isChecked,
                             onCheckedChange = { appState.toggleScoreSelection(item.id) },
                             modifier = Modifier.semantics {
                                 contentDescription = "Select ${item.title}"
