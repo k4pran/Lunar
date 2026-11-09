@@ -224,7 +224,7 @@ class SetlistProgrammeTest {
         waitUntil { runtime.repository.getSongbook("book")?.document?.storedPath == "/songbooks/rebuilt.pdf" }
 
         val rebuilt = runtime.repository.getSongbook("book")!!
-        assertTrue(rebuilt.hasCover)
+        assertEquals(true, rebuilt.hasCover)
         assertEquals(3, rebuilt.pageCount)
         assertEquals(listOf("a", "b"), rebuilt.itemIds)
         val build = builds.single()
@@ -275,6 +275,79 @@ class SetlistProgrammeTest {
         assertEquals(false, builds.single().dropExistingCoverPage)
         assertEquals("/songbooks/covered.pdf", runtime.repository.getSongbook("book")!!.document.storedPath)
     }
+
+    @Test
+    fun changingTheCoverOfALegacySongbookInfersAnExistingCoverFromItsPageCount() = runBlocking {
+        val builds = mutableListOf<CoverBuild>()
+        val runtime = legacyCoverRuntime(songbookPageCount = 4, builds = builds)
+        val appState = createTestLunarAppState(scope = this, runtime = runtime)
+
+        appState.changeSongbookCover("book")
+        waitUntil { runtime.repository.getSongbook("book")?.hasCover == true }
+
+        assertTrue(builds.single().dropExistingCoverPage, "The legacy cover page must be replaced, not kept.")
+    }
+
+    @Test
+    fun changingTheCoverOfALegacySongbookWithAnUnknownLayoutLeavesItUnchanged() = runBlocking {
+        val builds = mutableListOf<CoverBuild>()
+        val runtime = legacyCoverRuntime(songbookPageCount = 7, builds = builds)
+        val appState = createTestLunarAppState(scope = this, runtime = runtime)
+
+        appState.changeSongbookCover("book")
+        waitUntil { appState.bannerMessage != null }
+
+        assertEquals(
+            "Couldn't tell whether \"Book\" already has a cover, so it was left unchanged.",
+            appState.bannerMessage,
+        )
+        assertEquals(emptyList(), builds)
+        val songbook = runtime.repository.getSongbook("book")!!
+        assertNull(songbook.hasCover)
+        assertEquals("/songbooks/book.pdf", songbook.document.storedPath)
+    }
+
+    /** A pre-cover-tracking songbook binding one 3-page score into [songbookPageCount] pages. */
+    private suspend fun legacyCoverRuntime(
+        songbookPageCount: Int,
+        builds: MutableList<CoverBuild>,
+    ) = createTestPlatformRuntime(
+        initialItems = listOf(testSheetMusicItem(id = "a", pageCount = 3)),
+        initialSongbooks = listOf(
+            testLibrarySongbook(
+                id = "book",
+                name = "Book",
+                itemIds = listOf("a"),
+                pageCount = songbookPageCount,
+                hasCover = null,
+                boundItemIds = null,
+            ),
+        ),
+        songbookCreationSupported = true,
+        songbookCoverImageSupported = true,
+        songbookBuilder = object : SongbookPdfBuilder {
+            override suspend fun buildSongbook(
+                songbookName: String,
+                appendedDocumentPaths: List<String>,
+                existingSongbookPath: String?,
+                coverImage: SelectedCoverImage?,
+                dropExistingCoverPage: Boolean,
+            ): SongbookBuildResult {
+                builds += CoverBuild(existingSongbookPath, appendedDocumentPaths, coverImage, dropExistingCoverPage)
+                return SongbookBuildResult(
+                    document = com.ryanjames.lunar.library.model.PdfDocumentReference(
+                        storedPath = "/songbooks/rebuilt.pdf",
+                        originalFileName = "Book.pdf",
+                    ),
+                    pageCount = 4,
+                )
+            }
+        },
+        coverImagePicker = object : com.ryanjames.lunar.platform.CoverImagePicker {
+            override suspend fun pickCoverImage(): SelectedCoverImage =
+                SelectedCoverImage(displayName = "cover.png", bytes = byteArrayOf(1))
+        },
+    )
 
     private data class CoverBuild(
         val existingSongbookPath: String?,
@@ -336,7 +409,7 @@ class SetlistProgrammeTest {
         assertEquals("/songbooks/build-1.pdf", builds[1].first)
         assertEquals(listOf("/scores/c.pdf"), builds[1].second)
         assertEquals("/songbooks/build-2.pdf", songbook.document.storedPath)
-        assertTrue(songbook.hasCover)
+        assertEquals(true, songbook.hasCover)
     }
 
     private suspend fun waitUntil(condition: () -> Boolean) {

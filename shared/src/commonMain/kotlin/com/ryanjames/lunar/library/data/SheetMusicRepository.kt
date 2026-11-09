@@ -569,6 +569,7 @@ class DefaultSheetMusicRepository(
                 id = buildSongbookId(createdAt),
                 name = normalizedName,
                 itemIds = sanitizeSongbookItemIds(itemIds),
+                boundItemIds = sanitizeBoundItemIds(itemIds),
                 document = sanitizeSongbookDocument(document)
                     ?: error("Songbook PDF is unavailable."),
                 createdAtEpochMillis = createdAt,
@@ -597,6 +598,7 @@ class DefaultSheetMusicRepository(
             val sanitizedDocument = sanitizeSongbookDocument(document)
                 ?: error("Songbook PDF is unavailable.")
             val sanitizedItems = sanitizeSongbookItemIds(itemIds)
+            val appendedBoundItems = sanitizeBoundItemIds(itemIds)
             songbooks.map { songbook ->
                 if (songbook.id != songbookId) {
                     songbook
@@ -606,6 +608,8 @@ class DefaultSheetMusicRepository(
                     }
                     songbook.copy(
                         itemIds = (songbook.itemIds + sanitizedItems).distinct(),
+                        // An unknown bound order stays unknown: its prefix can't be recovered.
+                        boundItemIds = songbook.boundItemIds?.plus(appendedBoundItems),
                         document = sanitizedDocument,
                         updatedAtEpochMillis = updatedAt,
                         pageCount = pageCount?.takeIf { it > 0 } ?: songbook.pageCount,
@@ -1178,6 +1182,7 @@ private fun sanitizeSongbooks(songbooks: List<LibrarySongbook>): List<LibrarySon
         songbook.copy(
             name = normalizedName,
             itemIds = sanitizeSongbookItemIds(songbook.itemIds),
+            boundItemIds = songbook.boundItemIds?.let(::sanitizeBoundItemIds),
             document = sanitizedDocument,
             pageCount = songbook.pageCount?.takeIf { it > 0 },
         )
@@ -1196,6 +1201,11 @@ private fun sanitizeSongbookItemIds(itemIds: List<String>): List<String> = itemI
     .map(String::trim)
     .filter(String::isNotEmpty)
     .distinct()
+
+/** Like [sanitizeSongbookItemIds] but keeps repeats, since the same score can be bound twice. */
+private fun sanitizeBoundItemIds(itemIds: List<String>): List<String> = itemIds
+    .map(String::trim)
+    .filter(String::isNotEmpty)
 
 private fun sanitizeSongbookDocument(document: PdfDocumentReference): PdfDocumentReference? {
     val storedPath = document.storedPath.trim()

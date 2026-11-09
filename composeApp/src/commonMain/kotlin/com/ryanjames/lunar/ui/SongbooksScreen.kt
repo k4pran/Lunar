@@ -262,5 +262,5 @@ private fun SongbookDetailPane(
 private fun songbookSummaryLabel(songbook: LibrarySongbook): String = buildList {
     add(songbook.itemIds.size.piecesLabel())
     songbook.pageCount?.let { add("$it pages") }
-    if (songbook.hasCover) add("with cover")
+    if (songbook.hasCover == true) add("with cover")
 }.joinToString("  |  ")

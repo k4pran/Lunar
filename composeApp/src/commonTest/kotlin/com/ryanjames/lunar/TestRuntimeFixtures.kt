@@ -165,6 +165,8 @@ internal fun testLibrarySongbook(
     createdAtEpochMillis: Long = 1L,
     updatedAtEpochMillis: Long = 1L,
     pageCount: Int? = null,
+    hasCover: Boolean? = false,
+    boundItemIds: List<String>? = itemIds,
 ): LibrarySongbook = LibrarySongbook(
     id = id,
     name = name,
@@ -176,6 +178,8 @@ internal fun testLibrarySongbook(
     createdAtEpochMillis = createdAtEpochMillis,
     updatedAtEpochMillis = updatedAtEpochMillis,
     pageCount = pageCount,
+    hasCover = hasCover,
+    boundItemIds = boundItemIds,
 )
 
 internal fun testLocalFilesSource(

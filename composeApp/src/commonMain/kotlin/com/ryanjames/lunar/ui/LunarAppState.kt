@@ -20,6 +20,7 @@ import com.ryanjames.lunar.library.model.LibraryQuery
 import com.ryanjames.lunar.library.model.LibrarySortOption
 import com.ryanjames.lunar.library.model.ScoreMetadata
 import com.ryanjames.lunar.library.model.SheetMusicItem
+import com.ryanjames.lunar.library.model.resolveHasCover
 import com.ryanjames.lunar.library.model.SortDirection
 import com.ryanjames.lunar.library.model.ViewerSupportFilter
 import com.ryanjames.lunar.platform.ImportRequestResult
@@ -557,12 +558,21 @@ class LunarAppState(
                 songbookMutationMutex.withLock {
                     // Re-read under the lock: scores may have been added while the picker was open.
                     val songbook = existingSongbook(songbookId) ?: return@withLock
+                    val hasCover = songbook.resolveHasCover(
+                        runtime.repository.library.value.items.associateBy { it.id },
+                    )
+                    if (hasCover == null) {
+                        // Guessing wrong would either keep the old cover or drop a score page.
+                        bannerMessage = "Couldn't tell whether \"${songbook.name}\" already has a cover, " +
+                            "so it was left unchanged."
+                        return@withLock
+                    }
                     val buildResult = runtime.songbookBuilder.buildSongbook(
                         songbookName = songbook.name,
                         appendedDocumentPaths = emptyList(),
                         existingSongbookPath = songbook.document.storedPath,
                         coverImage = coverImage,
-                        dropExistingCoverPage = songbook.hasCover,
+                        dropExistingCoverPage = hasCover,
                     )
                     runtime.repository.replaceSongbookDocument(
                         songbookId = songbookId,
