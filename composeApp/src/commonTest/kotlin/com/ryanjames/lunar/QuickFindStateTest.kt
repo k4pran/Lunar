@@ -83,6 +83,25 @@ class QuickFindStateTest {
         appState.openQuickFind()
         appState.openScoreFromQuickFind(second)
         assertEquals(ViewerTarget.Score(second.id), appState.fullscreenTarget)
+        assertEquals(second.id, appState.focusedScoreId)
+
+        appState.closeFullscreen()
+        assertEquals(null, appState.fullscreenTarget)
+    }
+
+    @Test
+    fun openingASongbookFromTheViewerReplacesTheOpenScore() = runBlocking {
+        val item = testSheetMusicItem(id = "moon_river", title = "Moon River")
+        val appState = createTestLunarAppState(this, createTestPlatformRuntime(initialItems = listOf(item)))
+        appState.openScore(item)
+        appState.openQuickFind()
+
+        appState.openSongbookFromQuickFind("book")
+
+        assertEquals(ViewerTarget.Songbook("book"), appState.fullscreenTarget)
+        assertEquals(null, appState.viewerStartPage)
+        appState.closeFullscreen()
+        assertEquals(null, appState.fullscreenTarget)
     }
 
     @Test
