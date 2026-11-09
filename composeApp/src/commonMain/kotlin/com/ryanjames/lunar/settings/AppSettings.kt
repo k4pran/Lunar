@@ -16,6 +16,7 @@ data class AppSettings(
     val cloudConnectTimeoutSeconds: Int = 15,
     val cloudReadTimeoutSeconds: Int = 60,
     val sidebarCollapsed: Boolean = false,
+    val viewerChromeAutoHideSeconds: Int? = DefaultViewerChromeAutoHideSeconds,
 ) {
     val cloudConnectTimeoutMillis: Int
         get() = cloudConnectTimeoutSeconds.coerceIn(5, 120) * 1000
@@ -26,7 +27,15 @@ data class AppSettings(
     /** The skin to render with, falling back to the legacy theme mapping before [normalize] runs. */
     val resolvedSkin: AppSkin
         get() = skin ?: theme.legacySkin()
+
+    /** Delay before the viewer toolbar and footer fade out, or null to keep them visible. */
+    val viewerChromeAutoHideMillis: Long?
+        get() = viewerChromeAutoHideSeconds?.coerceIn(1, 60)?.times(1000L)
 }
+
+const val DefaultViewerChromeAutoHideSeconds = 3
+
+val ViewerChromeAutoHideOptions: List<Int?> = listOf(3, 5, 10, null)
 
 @Serializable
 data class ViewerKeybindings(

@@ -55,6 +55,7 @@ import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.AppSkin
 import com.ryanjames.lunar.settings.AutoRefreshSchedule
 import com.ryanjames.lunar.settings.CacheLimitPreset
+import com.ryanjames.lunar.settings.ViewerChromeAutoHideOptions
 import com.ryanjames.lunar.settings.ViewerPageModePreference
 import com.ryanjames.lunar.settings.ViewerShortcutAction
 import com.ryanjames.lunar.ui.design.LunarIcon
@@ -246,7 +247,7 @@ private fun GeneralSettingsPage(
 ) {
     SettingsSection(
         title = "Viewer",
-        description = "Set the default page layout when you open a score.",
+        description = "Set the default page layout and how long the viewer controls stay on screen.",
     ) {
         SettingsChoiceRow(
             label = "Default page view",
@@ -256,6 +257,15 @@ private fun GeneralSettingsPage(
                 ChoiceOption("2 pages", ViewerPageModePreference.TWO_PAGE),
             ),
             onSelect = appState::updateDefaultViewerPageMode,
+        )
+        SettingsChoiceRow(
+            label = "Hide viewer controls",
+            selected = settings.viewerChromeAutoHideSeconds,
+            options = ViewerChromeAutoHideOptions.map { seconds ->
+                ChoiceOption(if (seconds == null) "Never" else "After ${seconds}s", seconds)
+            },
+            onSelect = appState::updateViewerChromeAutoHideSeconds,
+            supportingText = "Moving the pointer, tapping or pressing a key brings the controls back.",
         )
     }
 
