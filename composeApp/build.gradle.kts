@@ -177,11 +177,12 @@ compose.desktop {
 // The AppImage task writes the same app-image directory (binaries/main[-release]/app) that the
 // installer tasks (Dmg, Deb, Exe, Msi) read, so order them explicitly. Without this Gradle fails
 // packageReleaseDistributionForCurrentOS with an implicit-dependency validation error.
+// Matched lazily because AppImage is not currently a target format, so the task may not exist.
 tasks.withType<AbstractJPackageTask>().configureEach {
     val appImageTaskName = Regex("^package(.*?)(AppImage|Dmg|Pkg|Deb|Rpm|Exe|Msi)$")
         .matchEntire(name)
         ?.takeIf { it.groupValues[2] != "AppImage" }
         ?.let { "package${it.groupValues[1]}AppImage" }
         ?: return@configureEach
-    mustRunAfter(appImageTaskName)
+    mustRunAfter(tasks.matching { it.name == appImageTaskName })
 }
