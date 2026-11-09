@@ -767,6 +767,46 @@ class ScreenSmokeTest {
 
     @Test
     @OptIn(ExperimentalTestApi::class)
+    fun detailEditorKeepsItsDraftAcrossAViewerVisit() {
+        runBlocking {
+            val item = testSheetMusicItem(id = "moon_river", title = "Moon River", composer = "Mancini")
+            val runtime = createTestPlatformRuntime(
+                initialItems = listOf(item),
+                initialSettings = AppSettings(refreshOnLaunch = false),
+            )
+
+            rule.setContent {
+                LunarApp(runtime)
+            }
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithTag(LibraryTestTags.row("moon_river")).fetchSemanticsNodes().isNotEmpty()
+            }
+
+            rule.onNodeWithTag(LibraryTestTags.row("moon_river")).performClick()
+            rule.onNodeWithContentDescription("Edit Moon River").performScrollTo().performClick()
+            rule.onNode(hasSetTextAction() and hasText("Mancini")).performScrollTo().performTextReplacement("Henry Mancini")
+
+            rule.onNode(hasText("Open") and hasAnyAncestor(hasTestTag(LibraryTestTags.DetailPanel)))
+                .performScrollTo()
+                .performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithTag(LunarTestTags.LIBRARY_PANEL).fetchSemanticsNodes().isEmpty()
+            }
+            rule.onRoot().performKeyInput { pressKey(Key.F11) }
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithTag(LibraryTestTags.DetailPanel).fetchSemanticsNodes().isNotEmpty()
+            }
+
+            rule.onNode(hasSetTextAction() and hasText("Henry Mancini")).performScrollTo()
+            rule.onNodeWithText("Save").performScrollTo().performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.library.value.items.single().composer == "Henry Mancini"
+            }
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
     fun setlistKeepsItsScrollPositionAcrossAViewerVisit() {
         runBlocking {
             val items = (0 until 40).map { index ->

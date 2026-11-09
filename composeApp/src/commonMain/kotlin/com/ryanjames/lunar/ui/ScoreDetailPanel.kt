@@ -24,7 +24,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,18 +58,52 @@ internal val DetailPanelSideBreakpoint = 1200.dp
  * draft survives the panel moving between [DetailPanelLayout.SIDE] and [DetailPanelLayout.BOTTOM].
  */
 @Stable
-internal class ScoreDetailsDraft(item: SheetMusicItem) {
-    var title by mutableStateOf(item.title)
-    var composer by mutableStateOf(item.composer.orEmpty())
-    var tags by mutableStateOf(item.tags.joinToString(", "))
-    var collection by mutableStateOf(item.collection.orEmpty())
-    var isFavorite by mutableStateOf(item.isFavorite)
+internal class ScoreDetailsDraft(
+    title: String,
+    composer: String,
+    tags: String,
+    collection: String,
+    isFavorite: Boolean,
+) {
+    constructor(item: SheetMusicItem) : this(
+        title = item.title,
+        composer = item.composer.orEmpty(),
+        tags = item.tags.joinToString(", "),
+        collection = item.collection.orEmpty(),
+        isFavorite = item.isFavorite,
+    )
+
+    var title by mutableStateOf(title)
+    var composer by mutableStateOf(composer)
+    var tags by mutableStateOf(tags)
+    var collection by mutableStateOf(collection)
+    var isFavorite by mutableStateOf(isFavorite)
+
+    companion object {
+        val Saver: Saver<ScoreDetailsDraft, Any> = listSaver(
+            save = { listOf(it.title, it.composer, it.tags, it.collection, it.isFavorite) },
+            restore = {
+                ScoreDetailsDraft(
+                    title = it[0] as String,
+                    composer = it[1] as String,
+                    tags = it[2] as String,
+                    collection = it[3] as String,
+                    isFavorite = it[4] as Boolean,
+                )
+            },
+        )
+    }
 }
 
-/** A fresh draft whenever the focused score changes or its editor is opened or closed. */
+/**
+ * A fresh draft whenever the focused score changes or its editor is opened or closed. Saveable, so
+ * unsaved edits come back after the viewer temporarily replaces the library screen.
+ */
 @Composable
-internal fun rememberScoreDetailsDraft(item: SheetMusicItem?, editingItemId: String?): ScoreDetailsDraft? =
-    remember(item?.id, editingItemId) { item?.let(::ScoreDetailsDraft) }
+internal fun rememberScoreDetailsDraft(item: SheetMusicItem?, editingItemId: String?): ScoreDetailsDraft? {
+    if (item == null) return null
+    return rememberSaveable(item.id, editingItemId, saver = ScoreDetailsDraft.Saver) { ScoreDetailsDraft(item) }
+}
 
 // --- Pure helpers ------------------------------------------------------------
 
