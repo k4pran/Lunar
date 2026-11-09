@@ -84,7 +84,7 @@ fun List<SheetMusicItem>.applyLibraryQuery(query: LibraryQuery): List<SheetMusic
             return@filter true
         }
 
-        buildSearchFields(item).any { field -> field.contains(normalizedSearch) }
+        librarySearchFields(item).any { field -> field.contains(normalizedSearch) }
     }
 
     return when (query.sortOption) {
@@ -128,7 +128,8 @@ fun List<SheetMusicItem>.availableComposers(): Set<String> =
 private fun String.isLilyPondSourceFileName(): Boolean =
     substringAfterLast('.', "").lowercase() in LilyPondSourceFileExtensions
 
-private fun buildSearchFields(item: SheetMusicItem): List<String> = buildList {
+/** Lowercased fields the library search matches against: title, composer, collection and tags. */
+internal fun librarySearchFields(item: SheetMusicItem): List<String> = buildList {
     add(item.title)
     item.composer?.let(::add)
     item.collection?.let(::add)
