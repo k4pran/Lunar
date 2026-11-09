@@ -43,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -112,16 +113,28 @@ fun LibraryScreen(
     val focusRequester = remember { FocusRequester() }
     val searchFocusRequester = remember { FocusRequester() }
     var isTextInputFocused by remember { mutableStateOf(false) }
+    var searchFocusPending by remember { mutableStateOf(false) }
     var alphabetIndexVisible by rememberSaveable { mutableStateOf(true) }
     val nowEpochMillis = remember(snapshot) { Clock.System.now().toEpochMilliseconds() }
     val catalogueMode = hostedSection == AppSection.LIBRARY
     val focusedItem = screenModel.focusedItem
+    val showSelectionBar = screenModel.selectedItems.isNotEmpty()
+    val showToolbar = catalogueMode && !showSelectionBar
 
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
     }
     LaunchedEffect(screenModel.focusableItemIds) {
         appState.reconcileFocus(screenModel.focusableItemIds)
+    }
+    // The search field only exists while the toolbar is shown (Ctrl/Cmd+K clears any selection first),
+    // so wait for it to be composed and laid out before focusing it.
+    LaunchedEffect(searchFocusPending, showToolbar) {
+        if (searchFocusPending && showToolbar) {
+            withFrameNanos { }
+            searchFocusRequester.requestFocus()
+            searchFocusPending = false
+        }
     }
 
     BoxWithConstraints(
@@ -136,7 +149,8 @@ fun LibraryScreen(
                 }
                 when {
                     event.key == Key.K && (event.isCtrlPressed || event.isMetaPressed) && catalogueMode -> {
-                        searchFocusRequester.requestFocus()
+                        appState.clearScoreSelection()
+                        searchFocusPending = true
                         true
                     }
 
@@ -147,7 +161,7 @@ fun LibraryScreen(
 
                     (event.key == Key.DirectionDown || event.key == Key.DirectionUp) && catalogueMode -> {
                         appState.moveFocus(
-                            orderedItemIds = screenModel.visibleItems.map { it.id },
+                            orderedItemIds = screenModel.navigationOrderIds(appState.layoutMode),
                             delta = if (event.key == Key.DirectionDown) 1 else -1,
                         )
                         true
@@ -195,29 +209,29 @@ fun LibraryScreen(
                 if (showArrangementSwitcher && hostedSection == AppSection.LIBRARY) {
                     ArrangementSwitcher(appState = appState)
                 }
+                if (showSelectionBar) {
+                    LibrarySelectionBar(
+                        selectedItems = screenModel.selectedItems,
+                        setlists = snapshot.setlists,
+                        songbooks = snapshot.songbooks,
+                        appState = appState,
+                    )
+                } else if (showToolbar) {
+                    LibraryToolbar(
+                        appState = appState,
+                        searchFocusRequester = searchFocusRequester,
+                        onTextInputFocusChanged = { isTextInputFocused = it },
+                        alphabetIndexAvailable = appState.layoutMode == LibraryLayoutMode.LIST &&
+                            screenModel.catalogueIndexAvailable,
+                        alphabetIndexVisible = alphabetIndexVisible,
+                        onToggleAlphabetIndex = { alphabetIndexVisible = !alphabetIndexVisible },
+                        filterCollections = screenModel.filterCollections,
+                        filterTags = screenModel.filterTags,
+                        randomScoreAvailable = screenModel.currentScopeItems.isNotEmpty(),
+                        onOpenRandomScore = { appState.openRandomSheet(screenModel.currentScopeItems) },
+                    )
+                }
                 if (catalogueMode) {
-                    if (screenModel.selectedItems.isNotEmpty()) {
-                        LibrarySelectionBar(
-                            selectedItems = screenModel.selectedItems,
-                            setlists = snapshot.setlists,
-                            songbooks = snapshot.songbooks,
-                            appState = appState,
-                        )
-                    } else {
-                        LibraryToolbar(
-                            appState = appState,
-                            searchFocusRequester = searchFocusRequester,
-                            onTextInputFocusChanged = { isTextInputFocused = it },
-                            alphabetIndexAvailable = appState.layoutMode == LibraryLayoutMode.LIST &&
-                                screenModel.catalogueIndexAvailable,
-                            alphabetIndexVisible = alphabetIndexVisible,
-                            onToggleAlphabetIndex = { alphabetIndexVisible = !alphabetIndexVisible },
-                            filterCollections = screenModel.filterCollections,
-                            filterTags = screenModel.filterTags,
-                            randomScoreAvailable = screenModel.currentScopeItems.isNotEmpty(),
-                            onOpenRandomScore = { appState.openRandomSheet(screenModel.currentScopeItems) },
-                        )
-                    }
                     ActiveFilterChips(appState = appState)
                 }
 
@@ -421,7 +435,7 @@ private fun ScoreCatalogue(
     nowEpochMillis: Long,
 ) {
     val mode = if (appState.showingHiddenScores) ScoreListMode.HIDDEN else ScoreListMode.NORMAL
-    val orderedIds = screenModel.visibleItems.map { it.id }
+    val orderedIds = screenModel.navigationOrderIds(appState.layoutMode)
     when (appState.layoutMode) {
         LibraryLayoutMode.GRID -> LibraryGrid(
             items = screenModel.visibleItems,
@@ -2096,7 +2110,13 @@ private data class LibraryScreenModel(
     val deleteCandidate: SheetMusicItem?,
     val deleteSetlistCandidate: LibrarySetlist?,
     val deleteSongbookCandidate: LibrarySongbook?,
-)
+) {
+    /** Row order as displayed: the list shows grouped rows, the gallery keeps the sorted order. */
+    fun navigationOrderIds(layoutMode: LibraryLayoutMode): List<String> = when (layoutMode) {
+        LibraryLayoutMode.LIST -> catalogueGroups.flatMap { group -> group.items.map { it.id } }
+        LibraryLayoutMode.GRID -> visibleItems.map { it.id }
+    }
+}
 
 internal fun currentLibraryScopeItems(
     snapshot: LibrarySnapshot,
