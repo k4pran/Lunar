@@ -266,6 +266,14 @@ class LunarAppState(
         }
     }
 
+    fun updateStartSidebarCollapsed(collapsed: Boolean) {
+        updateStoredSettings { settings -> settings.copy(sidebarCollapsed = collapsed) }
+    }
+
+    fun updateViewerChromeAutoHideSeconds(seconds: Int?) {
+        updateStoredSettings { settings -> settings.copy(viewerChromeAutoHideSeconds = seconds) }
+    }
+
     fun updateSearchText(searchText: String) {
         if (query.searchText == searchText) {
             return

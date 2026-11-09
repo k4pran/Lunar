@@ -15,6 +15,7 @@ data class AppSettings(
     val cacheLimit: CacheLimitPreset = CacheLimitPreset.GB_2,
     val cloudConnectTimeoutSeconds: Int = 15,
     val cloudReadTimeoutSeconds: Int = 60,
+    /** Whether the sidebar starts collapsed. Compose may collapse it temporarily without changing this. */
     val sidebarCollapsed: Boolean = false,
     val viewerChromeAutoHideSeconds: Int? = DefaultViewerChromeAutoHideSeconds,
 ) {
