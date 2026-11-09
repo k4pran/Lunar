@@ -328,12 +328,14 @@ class LunarAppState(
 
     fun updateBrowseMode(mode: LibraryBrowseMode) {
         clearScoreSelection()
+        clearScoreFocus()
         browseMode = mode
         selectedGroup = null
     }
 
     fun selectGroup(groupName: String) {
         clearScoreSelection()
+        clearScoreFocus()
         selectedGroup = groupName
     }
 
@@ -422,6 +424,31 @@ class LunarAppState(
     /** Scores the setlist and songbook pickers act on: the multi-selection, else the focused score. */
     val pickerTargetIds: Set<String>
         get() = selectedScoreIds.ifEmpty { setOfNotNull(focusedScoreId) }
+
+    /** Ctrl/Cmd-click: toggle the score in the multi-selection and focus it, keeping the selection. */
+    fun toggleScoreSelectionAndFocus(itemId: String) {
+        toggleScoreSelection(itemId)
+        focusWithoutClearingSelection(itemId)
+    }
+
+    /** Shift-click: extend the multi-selection from the anchor to [itemId] and focus it. */
+    fun selectScoreRange(orderedIds: List<String>, itemId: String) {
+        extendScoreSelection(itemId, orderedIds)
+        focusWithoutClearingSelection(itemId)
+    }
+
+    /** Drops the focused score and the range anchor, e.g. when the visible list changes wholesale. */
+    fun clearScoreFocus() {
+        clearFocus()
+        selectionAnchorId = null
+    }
+
+    private fun focusWithoutClearingSelection(itemId: String) {
+        if (focusedScoreId != itemId) {
+            dismissFocusedScoreExtras()
+        }
+        focusedScoreId = itemId
+    }
 
     fun showSetlistPicker() {
         if (pickerTargetIds.isNotEmpty()) {

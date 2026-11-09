@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -27,6 +28,9 @@ import com.ryanjames.lunar.library.model.ScoreViewerSupport
 import com.ryanjames.lunar.library.model.SheetMusicItem
 import com.ryanjames.lunar.library.model.viewerSupport
 import org.jetbrains.compose.resources.painterResource
+
+const val ScoreThumbnailImageTag = "ScoreThumbnailImage"
+const val ScoreThumbnailPlaceholderTag = "ScoreThumbnailPlaceholder"
 
 @Composable
 fun ScoreThumbnail(
@@ -45,13 +49,17 @@ fun ScoreThumbnail(
         Image(
             bitmap = resolved,
             contentDescription = null,
-            modifier = modifier.semantics { contentDescription = item.title },
+            modifier = modifier
+                .testTag(ScoreThumbnailImageTag)
+                .semantics { contentDescription = item.title },
             contentScale = contentScale,
         )
     } else {
         ThumbnailPlaceholder(
             item = item,
-            modifier = modifier.semantics { contentDescription = item.title },
+            modifier = modifier
+                .testTag(ScoreThumbnailPlaceholderTag)
+                .semantics { contentDescription = item.title },
         )
     }
 }

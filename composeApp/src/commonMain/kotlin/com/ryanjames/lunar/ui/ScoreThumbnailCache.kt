@@ -1,6 +1,7 @@
 package com.ryanjames.lunar.ui
 
 import com.ryanjames.lunar.library.model.SheetMusicItem
+import kotlin.coroutines.cancellation.CancellationException
 
 const val ThumbnailTargetWidthPx = 256
 
@@ -17,6 +18,8 @@ const val ThumbnailTargetWidthPx = 256
  * Rendering happens outside the cache lock so a slow PDF decode never blocks
  * other cache readers; concurrent misses for the same id may render twice,
  * which is acceptable because the list only lazily composes visible cards.
+ * A renderer failure is treated like a miss (nothing cached, `null` returned)
+ * so callers fall back to a placeholder instead of crashing.
  */
 class ScoreThumbnailCache<T>(
     private val renderer: suspend (SheetMusicItem) -> T?,
@@ -31,7 +34,13 @@ class ScoreThumbnailCache<T>(
         val cached = synchronized(cache) { cache[item.id] }
         if (cached != null) return cached
 
-        val value = renderer(item) ?: return null
+        val value = try {
+            renderer(item)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            null
+        } ?: return null
         synchronized(cache) {
             cache[item.id] = value
             while (cache.size > maxSize) {
