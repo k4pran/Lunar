@@ -35,6 +35,8 @@ import com.ryanjames.lunar.settings.ViewerPageModePreference
 import com.ryanjames.lunar.settings.ViewerShortcutAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.time.Clock
 
 enum class LibraryLayoutMode {
@@ -86,6 +88,10 @@ class LunarAppState(
 
     val canPickSongbookCover: Boolean
         get() = runtime.capabilities.songbookCoverImageSupported
+
+    // Songbook edits read the stored PDF, rebuild it off-thread and then replace it; running two
+    // at once would let the later write discard the other's pages, so they take turns.
+    private val songbookMutationMutex = Mutex()
 
     val thumbnailCache: ScoreThumbnailCache<ImageBitmap> = ScoreThumbnailCache(
         renderer = { item ->
@@ -540,35 +546,45 @@ class LunarAppState(
                 bannerMessage = "Songbook covers aren't available on this device."
                 return@launch
             }
-            val songbook = runtime.repository.getSongbook(songbookId)
-            if (songbook == null) {
-                bannerMessage = "That songbook no longer exists."
-                return@launch
-            }
-            val items = songbook.itemIds.mapNotNull(runtime.repository::getItem)
-            if (items.isEmpty() || items.size != songbook.itemIds.size) {
-                bannerMessage = "Some scores in \"${songbook.name}\" are no longer in the library, so it can't be rebound."
-                return@launch
-            }
+            if (rebindableSongbookItems(songbookId) == null) return@launch
 
             try {
                 val coverImage = runtime.coverImagePicker.pickCoverImage() ?: return@launch
-                val buildResult = runtime.songbookBuilder.buildSongbook(
-                    songbookName = songbook.name,
-                    appendedDocumentPaths = items.map { it.document.storedPath },
-                    coverImage = coverImage,
-                )
-                runtime.repository.replaceSongbookDocument(
-                    songbookId = songbookId,
-                    document = buildResult.document,
-                    pageCount = buildResult.pageCount,
-                    hasCover = true,
-                )
-                bannerMessage = "Updated the cover of \"${songbook.name}\"."
+                songbookMutationMutex.withLock {
+                    // Re-read under the lock: scores may have been added while the picker was open.
+                    val (songbook, items) = rebindableSongbookItems(songbookId) ?: return@withLock
+                    val buildResult = runtime.songbookBuilder.buildSongbook(
+                        songbookName = songbook.name,
+                        appendedDocumentPaths = items.map { it.document.storedPath },
+                        coverImage = coverImage,
+                    )
+                    runtime.repository.replaceSongbookDocument(
+                        songbookId = songbookId,
+                        document = buildResult.document,
+                        pageCount = buildResult.pageCount,
+                        hasCover = true,
+                    )
+                    bannerMessage = "Updated the cover of \"${songbook.name}\"."
+                }
             } catch (error: Throwable) {
                 bannerMessage = error.message ?: "Could not change the songbook cover."
             }
         }
+    }
+
+    /** The songbook and its scores in order, or null (with a banner) when it can't be rebuilt from them. */
+    private fun rebindableSongbookItems(songbookId: String): Pair<LibrarySongbook, List<SheetMusicItem>>? {
+        val songbook = runtime.repository.getSongbook(songbookId)
+        if (songbook == null) {
+            bannerMessage = "That songbook no longer exists."
+            return null
+        }
+        val items = songbook.itemIds.mapNotNull(runtime.repository::getItem)
+        if (items.isEmpty() || items.size != songbook.itemIds.size) {
+            bannerMessage = "Some scores in \"${songbook.name}\" are no longer in the library, so it can't be rebound."
+            return null
+        }
+        return songbook to items
     }
 
     fun requestDeleteSongbook(songbookId: String) {
@@ -1159,34 +1175,44 @@ class LunarAppState(
                 return@launch
             }
 
-            val existingSongbook = runtime.repository.getSongbook(songbookId)
-            if (existingSongbook == null) {
-                bannerMessage = "That songbook no longer exists."
-                return@launch
-            }
-
             try {
-                val buildResult = runtime.songbookBuilder.buildSongbook(
-                    songbookName = existingSongbook.name,
-                    existingSongbookPath = existingSongbook.document.storedPath,
-                    appendedDocumentPaths = selectedItems.map { it.document.storedPath },
-                )
-                val updatedSongbook = runtime.repository.addItemsToSongbook(
-                    songbookId = songbookId,
-                    itemIds = selectedItems.map { it.id },
-                    document = buildResult.document,
-                    pageCount = buildResult.pageCount,
-                )
-                showSongbooksOverview()
-                selectedSongbookId = updatedSongbook.id
-                if (openAfterUpdate) {
-                    previewTarget = ViewerTarget.Songbook(updatedSongbook.id)
+                songbookMutationMutex.withLock {
+                    appendToSongbook(songbookId, selectedItems, openAfterUpdate)
                 }
-                bannerMessage = "Updated \"${updatedSongbook.name}\"."
             } catch (error: Throwable) {
                 bannerMessage = error.message ?: "Could not update the songbook."
             }
         }
+    }
+
+    private suspend fun appendToSongbook(
+        songbookId: String,
+        selectedItems: List<SheetMusicItem>,
+        openAfterUpdate: Boolean,
+    ) {
+        val existingSongbook = runtime.repository.getSongbook(songbookId)
+        if (existingSongbook == null) {
+            bannerMessage = "That songbook no longer exists."
+            return
+        }
+
+        val buildResult = runtime.songbookBuilder.buildSongbook(
+            songbookName = existingSongbook.name,
+            existingSongbookPath = existingSongbook.document.storedPath,
+            appendedDocumentPaths = selectedItems.map { it.document.storedPath },
+        )
+        val updatedSongbook = runtime.repository.addItemsToSongbook(
+            songbookId = songbookId,
+            itemIds = selectedItems.map { it.id },
+            document = buildResult.document,
+            pageCount = buildResult.pageCount,
+        )
+        showSongbooksOverview()
+        selectedSongbookId = updatedSongbook.id
+        if (openAfterUpdate) {
+            previewTarget = ViewerTarget.Songbook(updatedSongbook.id)
+        }
+        bannerMessage = "Updated \"${updatedSongbook.name}\"."
     }
 
     fun confirmDeleteSetlist() {
@@ -1205,7 +1231,7 @@ class LunarAppState(
     fun confirmDeleteSongbook() {
         val songbookId = deleteCandidateSongbookId ?: return
         scope.launch {
-            runtime.repository.deleteSongbook(songbookId)
+            songbookMutationMutex.withLock { runtime.repository.deleteSongbook(songbookId) }
             if (selectedSongbookId == songbookId) {
                 selectedSongbookId = null
             }

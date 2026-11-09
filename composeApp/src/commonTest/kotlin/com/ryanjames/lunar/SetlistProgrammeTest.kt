@@ -11,6 +11,7 @@ import com.ryanjames.lunar.ui.mergeVisibleSetlistOrder
 import com.ryanjames.lunar.ui.moved
 import com.ryanjames.lunar.ui.next
 import com.ryanjames.lunar.ui.setlistSummaryLabel
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
 import kotlin.test.Test
@@ -222,6 +223,61 @@ class SetlistProgrammeTest {
         assertEquals(5, rebuilt.pageCount)
         assertEquals(listOf("/scores/a.pdf", "/scores/b.pdf"), builds.single().first)
         assertEquals("cover.png", builds.single().second?.displayName)
+    }
+
+    @Test
+    fun addingScoresDuringACoverRebuildWaitsAndAppendsToTheRebuiltSongbook() = runBlocking {
+        val items = listOf(
+            testSheetMusicItem(id = "a"),
+            testSheetMusicItem(id = "b"),
+            testSheetMusicItem(id = "c"),
+        )
+        val coverBuildGate = CompletableDeferred<Unit>()
+        val builds = mutableListOf<Pair<String?, List<String>>>()
+        val runtime = createTestPlatformRuntime(
+            initialItems = items,
+            initialSongbooks = listOf(testLibrarySongbook(id = "book", name = "Book", itemIds = listOf("a", "b"))),
+            songbookCreationSupported = true,
+            songbookCoverImageSupported = true,
+            songbookBuilder = object : SongbookPdfBuilder {
+                override suspend fun buildSongbook(
+                    songbookName: String,
+                    appendedDocumentPaths: List<String>,
+                    existingSongbookPath: String?,
+                    coverImage: SelectedCoverImage?,
+                ): SongbookBuildResult {
+                    builds += existingSongbookPath to appendedDocumentPaths
+                    if (coverImage != null) coverBuildGate.await()
+                    return SongbookBuildResult(
+                        document = com.ryanjames.lunar.library.model.PdfDocumentReference(
+                            storedPath = "/songbooks/build-${builds.size}.pdf",
+                            originalFileName = "Book.pdf",
+                        ),
+                        pageCount = builds.size * 10,
+                    )
+                }
+            },
+            coverImagePicker = object : com.ryanjames.lunar.platform.CoverImagePicker {
+                override suspend fun pickCoverImage(): SelectedCoverImage =
+                    SelectedCoverImage(displayName = "cover.png", bytes = byteArrayOf(1))
+            },
+        )
+        val appState = createTestLunarAppState(scope = this, runtime = runtime)
+
+        appState.changeSongbookCover("book")
+        waitUntil { builds.size == 1 }
+        appState.addSelectionToSongbook("book", listOf(items[2]), openAfterUpdate = false)
+        repeat(20) { yield() }
+        assertEquals(1, builds.size, "The append must wait for the cover rebuild to finish.")
+
+        coverBuildGate.complete(Unit)
+        waitUntil { runtime.repository.getSongbook("book")?.itemIds == listOf("a", "b", "c") }
+
+        val songbook = runtime.repository.getSongbook("book")!!
+        assertEquals("/songbooks/build-1.pdf", builds[1].first)
+        assertEquals(listOf("/scores/c.pdf"), builds[1].second)
+        assertEquals("/songbooks/build-2.pdf", songbook.document.storedPath)
+        assertTrue(songbook.hasCover)
     }
 
     private suspend fun waitUntil(condition: () -> Boolean) {
