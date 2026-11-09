@@ -256,7 +256,10 @@ fun AddCloudSourceDialog(
         },
     ) {
         Column(
+            // Weighted so LunarDialog measures the action row first: on short windows the form
+            // shrinks and scrolls instead of pushing Cancel / Connect out of the dialog.
             modifier = Modifier
+                .weight(1f, fill = false)
                 .heightIn(max = 520.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(tokens.spacing.md),
