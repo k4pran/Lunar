@@ -18,6 +18,8 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.performTextInput
@@ -716,6 +718,70 @@ class ScreenSmokeTest {
             rule.onNodeWithContentDescription("Jump to L").performClick()
             rule.onNodeWithTag(LibraryTestTags.row("Liszt_1")).assertIsDisplayed()
             rule.onNodeWithText("LISZT").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun galleryFocusDoesNotTickTheCardCheckbox() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(id = "alpha", title = "Alpha"),
+                testSheetMusicItem(id = "beta", title = "Beta"),
+            )
+            val runtime = createTestPlatformRuntime(initialItems = items)
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateLayoutMode(com.ryanjames.lunar.ui.LibraryLayoutMode.GRID)
+
+            rule.setContent {
+                LunarTheme(theme = AppColorTheme.OCEAN) {
+                    LibraryScreen(runtime = runtime, snapshot = runtime.repository.library.value, appState = appState)
+                }
+            }
+
+            rule.onNodeWithTag(LibraryTestTags.row("alpha")).performClick()
+            rule.runOnIdle {
+                assertEquals("alpha", appState.focusedScoreId)
+                assertTrue(appState.selectedScoreIds.isEmpty())
+            }
+            rule.onNodeWithContentDescription("Select Alpha").assertIsOff()
+
+            rule.onNodeWithContentDescription("Select Beta").performClick()
+            rule.runOnIdle { assertEquals(setOf("beta"), appState.selectedScoreIds) }
+            rule.onNodeWithContentDescription("Select Alpha").assertIsOff()
+            rule.onNodeWithContentDescription("Select Beta").assertIsOn()
+
+            rule.onNodeWithContentDescription("Select Alpha").performClick()
+            rule.onNodeWithContentDescription("Select Alpha").performClick()
+            rule.runOnIdle { assertEquals(setOf("beta"), appState.selectedScoreIds) }
+        }
+    }
+
+    @Test
+    fun groupsNamedLikeTheUnnamedBucketRenderAlongsideIt() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(id = "named", title = "Named", composer = "No composer", collection = "No collection"),
+                testSheetMusicItem(id = "loose", title = "Loose", composer = ""),
+            )
+            val runtime = createTestPlatformRuntime(initialItems = items)
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateBrowseMode(com.ryanjames.lunar.ui.LibraryBrowseMode.BY_COLLECTION)
+
+            rule.setContent {
+                LunarTheme(theme = AppColorTheme.OCEAN) {
+                    LibraryScreen(runtime = runtime, snapshot = runtime.repository.library.value, appState = appState)
+                }
+            }
+
+            assertEquals(2, rule.onAllNodesWithText("NO COLLECTION").fetchSemanticsNodes().size)
+            rule.onNodeWithTag(LibraryTestTags.row("named")).assertIsDisplayed()
+            rule.onNodeWithTag(LibraryTestTags.row("loose")).assertIsDisplayed()
+
+            rule.runOnIdle { appState.updateBrowseMode(com.ryanjames.lunar.ui.LibraryBrowseMode.BY_COMPOSER) }
+            rule.waitForIdle()
+            assertEquals(2, rule.onAllNodesWithText("NO COMPOSER").fetchSemanticsNodes().size)
+            rule.onNodeWithTag(LibraryTestTags.row("named")).assertIsDisplayed()
+            rule.onNodeWithTag(LibraryTestTags.row("loose")).assertIsDisplayed()
         }
     }
 

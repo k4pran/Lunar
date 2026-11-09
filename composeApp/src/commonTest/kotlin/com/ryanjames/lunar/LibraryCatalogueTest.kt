@@ -202,6 +202,18 @@ class LibraryCatalogueTest {
         assertEquals(listOf("nocturne", "ballade"), groups[1].items.map { it.id })
         assertEquals("", groups.last().indexKey)
 
+        val lookalikes = buildCatalogueGroups(
+            listOf(
+                testSheetMusicItem(id = "named", composer = "No composer"),
+                testSheetMusicItem(id = "loose", composer = ""),
+            ),
+            CatalogueGrouping.COMPOSER,
+            LibrarySortOption.TITLE,
+            SortDirection.ASCENDING,
+        )
+        assertEquals(listOf("No composer", "No composer"), lookalikes.map { it.header })
+        assertEquals(2, lookalikes.map { it.headerKey }.distinct().size)
+
         val descending = buildCatalogueGroups(items, CatalogueGrouping.COMPOSER, LibrarySortOption.COMPOSER, SortDirection.DESCENDING)
         assertEquals(listOf("chopin", "Bach", "No composer"), descending.map { it.header })
 
