@@ -22,6 +22,22 @@ class ScoreThumbnailCacheTest {
         )
 
     @Test
+    fun rendererFailureReturnsNullAndDoesNotCache() = runBlocking {
+        var shouldFail = true
+        val cache = ScoreThumbnailCache<String>(
+            renderer = { item ->
+                if (shouldFail) error("corrupt pdf") else "thumb-${item.id}"
+            },
+        )
+
+        assertNull(cache.get("a".fakeItem))
+        assertEquals(0, cache.size)
+
+        shouldFail = false
+        assertEquals("thumb-a", cache.get("a".fakeItem))
+    }
+
+    @Test
     fun missRendersAndCachesValue() = runBlocking {
         var callCount = 0
         val cache = ScoreThumbnailCache<String>(
