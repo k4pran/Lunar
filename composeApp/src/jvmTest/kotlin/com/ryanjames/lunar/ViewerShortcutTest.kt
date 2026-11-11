@@ -129,6 +129,7 @@ class ViewerShortcutTest {
                     onPageCountResolved = { _ -> },
                     defaultTwoPageMode = false,
                     pageModeToggleRequest = toggleRequest,
+                    chromeAutoHideMillis = null,
                     viewerKeybindings = ViewerKeybindings(togglePageViewMode = "T"),
                 )
             }

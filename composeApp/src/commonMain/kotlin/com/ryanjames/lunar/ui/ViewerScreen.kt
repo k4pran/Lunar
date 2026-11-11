@@ -370,10 +370,6 @@ fun ViewerScreen(
         twoPageMode = !twoPageMode
         zoom = FitZoom
     }
-    OnPageModeToggleRequest(pageModeToggleRequest) {
-        twoPageMode = !twoPageMode
-        zoom = FitZoom
-    }
     var renderedPages by remember(documentState.id, currentPage, twoPageMode) {
         mutableStateOf<List<RenderedPdfPage>>(emptyList())
     }
