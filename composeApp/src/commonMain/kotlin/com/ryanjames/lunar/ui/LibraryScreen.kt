@@ -892,33 +892,107 @@ private fun LibraryCard(
                         }
                     }
                 }
+                ListLibraryCardFooter(
+                    item = item,
+                    appState = appState,
+                    mode = mode,
+                )
+            }
+        }
+    }
+}
+
+/** Below this width the list footer's quick actions and Open button no longer fit beside the details line. */
+private val LibraryListFooterStackWidth = 560.dp
+
+@Composable
+private fun ListLibraryCardFooter(
+    item: SheetMusicItem,
+    appState: LunarAppState,
+    mode: ScoreListMode,
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        if (maxWidth < LibraryListFooterStackWidth) {
+            StackedLibraryCardFooter(
+                item = item,
+                appState = appState,
+                includeDownload = appState.canDownloadScores,
+                mode = mode,
+            )
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = buildDetailsLine(item),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                    modifier = Modifier.weight(1f),
+                )
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = buildDetailsLine(item),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                        modifier = Modifier.weight(1f),
+                    LibraryItemQuickActions(
+                        item = item,
+                        appState = appState,
+                        includeDownload = appState.canDownloadScores,
+                        mode = mode,
                     )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        LibraryItemQuickActions(
-                            item = item,
-                            appState = appState,
-                            includeDownload = appState.canDownloadScores,
-                            mode = mode,
-                        )
-                        androidx.compose.material3.Button(onClick = { appState.openScore(item) }) {
-                            Text("Open")
-                        }
-                    }
+                    LibraryOpenButton(item = item, appState = appState)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun LibraryOpenButton(
+    item: SheetMusicItem,
+    appState: LunarAppState,
+) {
+    androidx.compose.material3.Button(
+        onClick = { appState.openScore(item) },
+        modifier = Modifier.testTag(LunarTestTags.libraryOpen(item.id)),
+    ) {
+        Text("Open")
+    }
+}
+
+@Composable
+private fun StackedLibraryCardFooter(
+    item: SheetMusicItem,
+    appState: LunarAppState,
+    includeDownload: Boolean,
+    mode: ScoreListMode,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = buildDetailsLine(item),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LibraryItemQuickActions(
+                item = item,
+                appState = appState,
+                includeDownload = includeDownload,
+                mode = mode,
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+            )
+            LibraryOpenButton(item = item, appState = appState)
         }
     }
 }

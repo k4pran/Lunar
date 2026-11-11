@@ -129,6 +129,28 @@ class KeyboardNavigationTest {
         rule.waitUntil(timeoutMillis = 5_000) { hasNode(hasTestTag(LunarTestTags.SETTINGS_PANEL)) }
     }
 
+    @Test
+    fun narrowPhoneListFooterKeepsOpenButtonFullyVisible() {
+        val runtime = createKeyboardTestRuntime()
+        rule.setContent {
+            Box(modifier = Modifier.requiredSize(width = 360.dp, height = 800.dp)) {
+                LunarApp(runtime)
+            }
+        }
+        awaitLibrary()
+
+        val row = rule.onNodeWithTag(LunarTestTags.libraryRow("moon_river")).getBoundsInRoot()
+        val open = rule.onNodeWithTag(LunarTestTags.libraryOpen("moon_river"))
+        open.assertIsDisplayed()
+        val bounds = open.getBoundsInRoot()
+        assertTrue(bounds.right - bounds.left >= 58.dp, "Open button is squeezed below its minimum width")
+        assertTrue(bounds.bottom - bounds.top >= 40.dp, "Open button is shorter than its minimum height")
+        assertTrue(bounds.right <= row.right, "Open button overflows its library card")
+
+        val favourite = rule.onNode(hasContentDescription("Mark Moon River as favorite")).getBoundsInRoot()
+        assertTrue(favourite.bottom - favourite.top >= 44.dp, "Quick action is shorter than the touch target")
+    }
+
     private fun awaitLibrary() {
         rule.waitUntil(timeoutMillis = 5_000) {
             rule.onAllNodesWithTag(LunarTestTags.libraryRow("moon_river")).fetchSemanticsNodes().isNotEmpty()

@@ -32,6 +32,8 @@ object LunarTestTags {
 
     fun libraryRow(itemId: String): String = "library_row_$itemId"
 
+    fun libraryOpen(itemId: String): String = "library_open_$itemId"
+
     fun setlistRow(setlistId: String): String = "setlist_row_$setlistId"
 
     fun songbookRow(songbookId: String): String = "songbook_row_$songbookId"
