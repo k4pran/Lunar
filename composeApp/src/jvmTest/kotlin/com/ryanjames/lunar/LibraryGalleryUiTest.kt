@@ -111,9 +111,9 @@ class LibraryGalleryUiTest {
             }
 
             rule.onNodeWithText("Add to setlist").performClick()
-            rule.onNodeWithText("Add 2 scores to a setlist").assertIsDisplayed()
-            rule.onNodeWithText("New setlist name").performTextInput("Recital run")
-            rule.onNodeWithText("Save").performClick()
+            rule.onNodeWithText("ADD 2 SCORES TO A SETLIST").assertIsDisplayed()
+            rule.onNodeWithContentDescription("New setlist...").performTextInput("Recital run")
+            rule.onNodeWithText("Create").performClick()
 
             rule.waitUntil(timeoutMillis = 5_000) {
                 runtime.repository.library.value.setlists.any { it.name == "Recital run" }

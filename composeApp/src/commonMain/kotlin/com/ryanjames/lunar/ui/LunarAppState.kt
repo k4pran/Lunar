@@ -328,14 +328,19 @@ class LunarAppState(
 
     fun updateBrowseMode(mode: LibraryBrowseMode) {
         clearScoreSelection()
-        clearScoreFocus()
+        // Rearranging keeps focus; flipping between hidden and visible scores swaps the whole list.
+        if ((mode == LibraryBrowseMode.HIDDEN) != (browseMode == LibraryBrowseMode.HIDDEN)) {
+            clearScoreFocus()
+        } else {
+            selectionAnchorId = null
+        }
         browseMode = mode
         selectedGroup = null
     }
 
     fun selectGroup(groupName: String) {
         clearScoreSelection()
-        clearScoreFocus()
+        selectionAnchorId = null
         selectedGroup = groupName
     }
 

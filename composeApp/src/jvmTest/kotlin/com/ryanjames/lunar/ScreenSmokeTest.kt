@@ -987,7 +987,7 @@ class ScreenSmokeTest {
             rule.onNodeWithTag(LibraryTestTags.DetailPanel).assertExists()
             rule.onNodeWithText("Close editor").assertExists()
 
-            rule.onNodeWithContentDescription("Select Beta").performClick()
+            rule.onNodeWithContentDescription("Select Beta").performScrollTo().performClick()
             rule.runOnIdle { assertEquals(setOf("beta"), appState.selectedScoreIds) }
             assertTrue(rule.onAllNodesWithTag(LibraryTestTags.DetailPanel).fetchSemanticsNodes().isEmpty())
 

@@ -43,6 +43,7 @@ import androidx.compose.ui.input.pointer.isMetaPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -80,10 +81,6 @@ internal fun galleryGroupPositions(groups: List<LibraryGroup>): List<Int> {
 /** Label for the focused card's open action; page 1 just reads "Open". */
 internal fun galleryOpenLabel(item: SheetMusicItem): String =
     if (item.lastViewedPage > 0) "Open at p. ${item.lastViewedPage + 1}" else "Open"
-
-/** Stable, case-insensitive swatch slot for a collection name. */
-internal fun collectionSwatchSlot(collection: String, slotCount: Int): Int =
-    collection.trim().lowercase().sumOf(Char::code) % slotCount
 
 @Composable
 internal fun LibraryGallery(
@@ -236,6 +233,7 @@ private fun GalleryCard(
 
     Column(
         modifier = Modifier
+            .testTag(LibraryTestTags.row(item.id))
             .fillMaxWidth()
             .then(ring)
             .clip(shape)
@@ -358,11 +356,10 @@ private fun TruncatedLine(
 
 @Composable
 private fun CollectionSwatch(collection: String?) {
-    val swatches = collectionSwatches()
     val color = if (collection == null) {
         MaterialTheme.colorScheme.outlineVariant
     } else {
-        swatches[collectionSwatchSlot(collection, swatches.size)]
+        collectionSwatchColor(collection)
     }
     Box(
         modifier = Modifier
@@ -372,23 +369,6 @@ private fun CollectionSwatch(collection: String?) {
     )
 }
 
-@Composable
-private fun collectionSwatches(): List<Color> {
-    val palette = lunarThemePalette()
-    val scheme = MaterialTheme.colorScheme
-    return listOf(
-        scheme.primary,
-        scheme.secondary,
-        scheme.tertiary,
-        palette.accentGradientStart,
-        palette.accentGradientEnd,
-    )
-}
-
-/**
- * Always-visible selection checkbox so touch users can build a multi-selection
- * without Ctrl/Cmd or Shift.
- */
 @Composable
 private fun GallerySelectToggle(
     title: String,
