@@ -472,7 +472,8 @@ private fun CatalogueRowTrailing(item: SheetMusicItem) {
             )
         }
         item.collection?.trim()?.takeIf(String::isNotEmpty)?.let { collection ->
-            CollectionLabel(name = collection, modifier = Modifier.widthIn(max = 160.dp))
+            // Weighted so the collection is the part that ellipsizes when the row is narrow.
+            CollectionLabel(name = collection, modifier = Modifier.weight(1f, fill = false).widthIn(max = 160.dp))
         }
         Text(
             text = item.pageCount?.let { "$it pp" } ?: "- pp",
@@ -517,7 +518,10 @@ internal fun collectionSwatchSlot(name: String, slotCount: Int): Int {
     return hash.mod(slotCount)
 }
 
-/** Title, a dotted leader that never shrinks below a minimum width, then trailing content. */
+/**
+ * Title, a dotted leader that never shrinks below a minimum width, then trailing content. The title always keeps
+ * at least half of the space left after the leader, so long trailing metadata cannot squeeze it out on narrow rows.
+ */
 @Composable
 internal fun LeaderRow(
     title: @Composable () -> Unit,
@@ -545,7 +549,7 @@ internal fun LeaderRow(
         val gap = 8.dp.roundToPx()
         val minLeader = 24.dp.roundToPx()
         val maxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else 4096
-        val trailing = measurables[2].measure(Constraints(maxWidth = maxWidth))
+        val trailing = measurables[2].measure(Constraints(maxWidth = leaderRowTrailingBudget(maxWidth, minLeader, gap)))
         val titleMax = (maxWidth - trailing.width - minLeader - gap * 2).coerceAtLeast(0)
         val title = measurables[0].measure(Constraints(maxWidth = titleMax))
         val leaderWidth = (maxWidth - trailing.width - title.width - gap * 2).coerceAtLeast(0)
@@ -557,6 +561,12 @@ internal fun LeaderRow(
             trailing.placeRelative(maxWidth - trailing.width, (height - trailing.height) / 2)
         }
     }
+}
+
+/** Widest the trailing content may be: whatever is left after the leader, gaps and the title's reserved half. */
+internal fun leaderRowTrailingBudget(maxWidth: Int, minLeader: Int, gap: Int): Int {
+    val shared = (maxWidth - minLeader - gap * 2).coerceAtLeast(0)
+    return shared - shared / 2
 }
 
 /** One line with an ellipsis; the full text shows in a tooltip on hover or long-press and stays in semantics. */
