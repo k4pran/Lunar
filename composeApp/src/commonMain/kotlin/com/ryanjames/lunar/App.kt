@@ -51,6 +51,7 @@ import com.ryanjames.lunar.ui.LibraryScreen
 import com.ryanjames.lunar.ui.LunarTheme
 import com.ryanjames.lunar.ui.SettingsScreen
 import com.ryanjames.lunar.ui.ViewerDocumentState
+import com.ryanjames.lunar.ui.ViewerScreen
 import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.design.LunarTestTags
 import com.ryanjames.lunar.ui.design.lunarTokens
