@@ -18,7 +18,10 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.unit.dp
 import com.ryanjames.lunar.platform.PlatformRuntime
@@ -133,14 +136,24 @@ class KeyboardNavigationTest {
     }
 
     @Test
-    fun narrowPhoneGalleryFooterKeepsOpenButtonFullyVisible() {
-        val runtime = createKeyboardTestRuntime(defaultLibraryLayout = LibraryLayoutPreference.GRID)
+    fun narrowPhoneListCardFooterKeepsOpenButtonFullyVisible() {
+        val runtime = createKeyboardTestRuntime()
         rule.setContent {
             Box(modifier = Modifier.requiredSize(width = 360.dp, height = 800.dp)) {
                 LunarApp(runtime)
             }
         }
         awaitLibrary()
+
+        // Setlist details still list scores as cards with the quick-action and Open footer.
+        rule.onNode(hasContentDescription("Open navigation")).performClick()
+        rule.waitUntil(timeoutMillis = 5_000) {
+            hasNode(hasTestTag(LunarTestTags.navigationItem(AppSection.SETLISTS)))
+        }
+        rule.onNodeWithTag(LunarTestTags.navigationItem(AppSection.SETLISTS)).performClick()
+        rule.waitUntil(timeoutMillis = 5_000) { hasNode(hasTestTag(LunarTestTags.setlistRow("set_morning"))) }
+        rule.onNodeWithTag(LunarTestTags.setlistRow("set_morning")).performClick()
+        rule.waitUntil(timeoutMillis = 5_000) { hasNode(hasTestTag(LunarTestTags.libraryOpen("moon_river"))) }
 
         val row = rule.onNodeWithTag(LunarTestTags.libraryRow("moon_river")).getBoundsInRoot()
         val open = rule.onNodeWithTag(LunarTestTags.libraryOpen("moon_river"))
