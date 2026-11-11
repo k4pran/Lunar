@@ -32,6 +32,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
 import com.ryanjames.lunar.ui.LibraryTestTags
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -865,6 +866,34 @@ class ScreenSmokeTest {
             titleNode.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
             assertTrue(layouts.single().hasVisualOverflow)
             assertEquals(1, layouts.single().lineCount)
+        }
+    }
+
+    @Test
+    fun compactCatalogueRowKeepsTitleVisibleNextToLongCollection() {
+        runBlocking {
+            val item = testSheetMusicItem(
+                id = "compact",
+                title = "Clair de lune",
+                collection = "The Complete Collected Works for Solo Piano, Volume Three",
+                pageCount = 12,
+            ).copy(isFavorite = true)
+            val runtime = createTestPlatformRuntime(initialItems = listOf(item))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+
+            rule.setContent {
+                LunarTheme(skin = AppSkin.PAPER) {
+                    Box(modifier = Modifier.requiredSize(width = 360.dp, height = 640.dp)) {
+                        LibraryScreen(runtime = runtime, snapshot = runtime.repository.library.value, appState = appState)
+                    }
+                }
+            }
+
+            val title = rule.onNodeWithTag(LibraryTestTags.rowTitle("compact"), useUnmergedTree = true)
+            title.assertIsDisplayed()
+            val titleBounds = title.getBoundsInRoot()
+            assertTrue(titleBounds.right - titleBounds.left >= 60.dp, "Title was squeezed to ${titleBounds.right - titleBounds.left}")
+            rule.onNodeWithText("12 pp", useUnmergedTree = true).assertIsDisplayed()
         }
     }
 

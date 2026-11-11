@@ -11,6 +11,7 @@ import com.ryanjames.lunar.ui.catalogueGroupingFor
 import com.ryanjames.lunar.ui.catalogueIndexAnchors
 import com.ryanjames.lunar.ui.catalogueLazyIndexOf
 import com.ryanjames.lunar.ui.collectionSwatchSlot
+import com.ryanjames.lunar.ui.leaderRowTrailingBudget
 import com.ryanjames.lunar.ui.nextFocusedItemId
 import com.ryanjames.lunar.ui.openScoreLabel
 import com.ryanjames.lunar.ui.relativeTimeLabel
@@ -303,5 +304,13 @@ class LibraryCatalogueTest {
         val slots = listOf("Standards", "Recital", "Jazz", "Etudes", "Hymns", "Pop").map { collectionSwatchSlot(it, 5) }
         assertTrue(slots.all { it in 0 until 5 })
         assertTrue(slots.toSet().size > 1)
+    }
+
+    @Test
+    fun leaderRowTrailingBudgetLeavesTheTitleHalfOfTheSharedSpace() {
+        // 300 wide, 24 leader, two 8 gaps: 260 shared between title and trailing.
+        assertEquals(130, leaderRowTrailingBudget(maxWidth = 300, minLeader = 24, gap = 8))
+        assertEquals(131, leaderRowTrailingBudget(maxWidth = 301, minLeader = 24, gap = 8))
+        assertEquals(0, leaderRowTrailingBudget(maxWidth = 30, minLeader = 24, gap = 8))
     }
 }
