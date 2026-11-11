@@ -23,6 +23,7 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.unit.dp
 import com.ryanjames.lunar.platform.PlatformRuntime
 import com.ryanjames.lunar.settings.AppSettings
+import com.ryanjames.lunar.settings.LibraryLayoutPreference
 import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.LibraryArrangement
 import com.ryanjames.lunar.ui.design.LunarTestTags
@@ -48,13 +49,14 @@ class KeyboardNavigationTest {
         }
         awaitLibrary()
 
-        // Library: Tab reaches a score's quick action and Enter activates it.
+        // Library: Tab reaches a catalogue row, Enter focuses it, and the detail panel's actions follow.
+        tabUntilFocused(hasTestTag(LunarTestTags.libraryRow("moon_river")))
+        pressKey(Key.Enter)
         tabUntilFocused(hasContentDescription("Show info for Moon River"))
         pressKey(Key.Enter)
-        rule.waitUntil(timeoutMillis = 5_000) { hasNode(hasText("Score info")) }
-        tabUntilFocused(hasText("Close"))
+        rule.waitUntil(timeoutMillis = 5_000) { hasNode(hasText("Fewer details")) }
         pressKey(Key.Enter)
-        rule.waitUntil(timeoutMillis = 5_000) { !hasNode(hasText("Score info")) }
+        rule.waitUntil(timeoutMillis = 5_000) { hasNode(hasText("More details")) }
 
         // Setlists: the sidebar destinations are reachable and selectable from the keyboard.
         tabUntilFocused(hasTestTag(LunarTestTags.navigationItem(AppSection.SETLISTS)))
@@ -73,11 +75,12 @@ class KeyboardNavigationTest {
         pressKey(Key.Enter)
         rule.waitUntil(timeoutMillis = 5_000) { hasNode(hasTestTag(LunarTestTags.LIBRARY_PANEL)) }
 
-        // Viewer: open a score from its catalogue card and reach the viewer toolbar.
+        // Viewer: focus a catalogue row and open it from the detail panel.
         tabUntilFocused(hasTestTag(LunarTestTags.libraryRow("moon_river")))
         pressKey(Key.Enter)
-        rule.waitUntil(timeoutMillis = 5_000) { hasNode(hasText("View Fullscreen")) }
-        tabUntilFocused(hasText("View Fullscreen"))
+        tabUntilFocused(hasText("Open"))
+        pressKey(Key.Enter)
+        rule.waitUntil(timeoutMillis = 5_000) { hasNode(hasText("Viewer unavailable")) }
     }
 
     @Test
@@ -130,8 +133,8 @@ class KeyboardNavigationTest {
     }
 
     @Test
-    fun narrowPhoneListFooterKeepsOpenButtonFullyVisible() {
-        val runtime = createKeyboardTestRuntime()
+    fun narrowPhoneGalleryFooterKeepsOpenButtonFullyVisible() {
+        val runtime = createKeyboardTestRuntime(defaultLibraryLayout = LibraryLayoutPreference.GRID)
         rule.setContent {
             Box(modifier = Modifier.requiredSize(width = 360.dp, height = 800.dp)) {
                 LunarApp(runtime)
@@ -181,7 +184,9 @@ class KeyboardNavigationTest {
     }
 }
 
-private fun createKeyboardTestRuntime(): PlatformRuntime = runBlocking {
+private fun createKeyboardTestRuntime(
+    defaultLibraryLayout: LibraryLayoutPreference = LibraryLayoutPreference.LIST,
+): PlatformRuntime = runBlocking {
     val items = listOf(
         testSheetMusicItem(id = "moon_river", title = "Moon River", pageCount = 2),
         testSheetMusicItem(id = "clair_de_lune", title = "Clair de Lune", pageCount = 4),
@@ -191,6 +196,6 @@ private fun createKeyboardTestRuntime(): PlatformRuntime = runBlocking {
         initialSetlists = listOf(
             testLibrarySetlist(id = "set_morning", name = "Morning rehearsal", itemIds = items.map { it.id }),
         ),
-        initialSettings = AppSettings(refreshOnLaunch = false),
+        initialSettings = AppSettings(refreshOnLaunch = false, defaultLibraryLayout = defaultLibraryLayout),
     )
 }
