@@ -314,61 +314,69 @@ private fun AddSourceMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
         ) {
-            SmallCapsLabel(
-                text = "On this device",
-                modifier = Modifier.padding(horizontal = tokens.spacing.lg, vertical = tokens.spacing.xs),
-            )
-            AddSourceMenuItem(
-                key = "files",
-                title = "Files",
-                subtitle = localFileImportDescription(
-                    localImageImportSupported = capabilities.localImageImportSupported,
-                    lilyPondImportSupported = capabilities.lilyPondImportSupported,
-                    museScoreImportSupported = capabilities.museScoreImportSupported,
-                ),
-                icon = LunarIconKind.FOLDER,
-                enabled = capabilities.fileImportSupported && localImportEnabled,
-                onClick = {
-                    expanded = false
-                    onAddFiles()
-                },
-            )
-            AddSourceMenuItem(
-                key = "folder",
-                title = "Folder",
-                subtitle = localFolderImportDescription(
-                    folderImportSupported = capabilities.folderImportSupported,
-                    localImageImportSupported = capabilities.localImageImportSupported,
-                    lilyPondImportSupported = capabilities.lilyPondImportSupported,
-                    museScoreImportSupported = capabilities.museScoreImportSupported,
-                ),
-                icon = LunarIconKind.FOLDER,
-                enabled = capabilities.folderImportSupported && localImportEnabled,
-                onClick = {
-                    expanded = false
-                    onAddFolder()
-                },
-            )
-            HorizontalDivider(
-                color = tokens.colors.rule,
-                modifier = Modifier.padding(vertical = tokens.spacing.xs),
-            )
-            SmallCapsLabel(
-                text = "Cloud",
-                modifier = Modifier.padding(horizontal = tokens.spacing.lg, vertical = tokens.spacing.xs),
-            )
-            supportedCloudProviders().forEach { provider ->
+            // The popup is bounded by the window, so on short windows (landscape phones) the
+            // trailing cloud entries must scroll into view rather than be clipped.
+            Column(
+                modifier = Modifier
+                    .testTag(LunarTestTags.SOURCES_ADD_MENU_LIST)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                SmallCapsLabel(
+                    text = "On this device",
+                    modifier = Modifier.padding(horizontal = tokens.spacing.lg, vertical = tokens.spacing.xs),
+                )
                 AddSourceMenuItem(
-                    key = provider.id,
-                    title = provider.displayName,
-                    subtitle = provider.description,
-                    icon = LunarIconKind.CLOUD,
-                    enabled = true,
+                    key = "files",
+                    title = "Files",
+                    subtitle = localFileImportDescription(
+                        localImageImportSupported = capabilities.localImageImportSupported,
+                        lilyPondImportSupported = capabilities.lilyPondImportSupported,
+                        museScoreImportSupported = capabilities.museScoreImportSupported,
+                    ),
+                    icon = LunarIconKind.FOLDER,
+                    enabled = capabilities.fileImportSupported && localImportEnabled,
                     onClick = {
                         expanded = false
-                        onAddCloudSource(provider.id)
+                        onAddFiles()
                     },
                 )
+                AddSourceMenuItem(
+                    key = "folder",
+                    title = "Folder",
+                    subtitle = localFolderImportDescription(
+                        folderImportSupported = capabilities.folderImportSupported,
+                        localImageImportSupported = capabilities.localImageImportSupported,
+                        lilyPondImportSupported = capabilities.lilyPondImportSupported,
+                        museScoreImportSupported = capabilities.museScoreImportSupported,
+                    ),
+                    icon = LunarIconKind.FOLDER,
+                    enabled = capabilities.folderImportSupported && localImportEnabled,
+                    onClick = {
+                        expanded = false
+                        onAddFolder()
+                    },
+                )
+                HorizontalDivider(
+                    color = tokens.colors.rule,
+                    modifier = Modifier.padding(vertical = tokens.spacing.xs),
+                )
+                SmallCapsLabel(
+                    text = "Cloud",
+                    modifier = Modifier.padding(horizontal = tokens.spacing.lg, vertical = tokens.spacing.xs),
+                )
+                supportedCloudProviders().forEach { provider ->
+                    AddSourceMenuItem(
+                        key = provider.id,
+                        title = provider.displayName,
+                        subtitle = provider.description,
+                        icon = LunarIconKind.CLOUD,
+                        enabled = true,
+                        onClick = {
+                            expanded = false
+                            onAddCloudSource(provider.id)
+                        },
+                    )
+                }
             }
         }
     }

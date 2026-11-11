@@ -1205,6 +1205,39 @@ class ScreenSmokeTest {
     }
 
     @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun addSourceMenuScrollsToTheCloudEntriesOnShortWindows() = runBlocking {
+        val runtime = createTestPlatformRuntime()
+        val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+        // A landscape phone: the menu is taller than the window, so it has to scroll.
+        runDesktopComposeUiTest(width = 900, height = 260) {
+            setContent {
+                LunarTheme(skin = AppSkin.PAPER) {
+                    ImportScreen(
+                        runtime = runtime,
+                        importerState = ImporterState(),
+                        syncState = CloudSyncState(),
+                        settings = runtime.settingsStore.settings.value,
+                        libraryCount = 0,
+                        appState = appState,
+                    )
+                }
+            }
+
+            onNodeWithTag(LunarTestTags.SOURCES_ADD_MENU).performClick()
+            val list = onNodeWithTag(LunarTestTags.SOURCES_ADD_MENU_LIST).fetchSemanticsNode()
+            assertTrue(list.boundsInRoot.height <= 260f, "Menu should fit the window, got ${list.boundsInRoot}")
+
+            val lastProvider = com.ryanjames.lunar.sync.supportedCloudProviders().last().id
+            onNodeWithTag(LunarTestTags.addSourceOption(lastProvider))
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
+            onNodeWithText("Add cloud source").assertIsDisplayed()
+        }
+    }
+
+    @Test
     fun failingSourceShowsItsErrorOnItsOwnRow() {
         runBlocking {
             val healthy = testSupabaseSource("healthy")

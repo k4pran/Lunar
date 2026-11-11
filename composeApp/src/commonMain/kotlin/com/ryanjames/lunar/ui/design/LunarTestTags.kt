@@ -17,6 +17,7 @@ object LunarTestTags {
     const val SETTINGS_APPEARANCE_PANEL = "settings_appearance_panel"
     const val SOURCES_PANEL = "sources_panel"
     const val SOURCES_ADD_MENU = "sources_add_menu"
+    const val SOURCES_ADD_MENU_LIST = "sources_add_menu_list"
     const val SOURCES_SIDE_PANEL = "sources_side_panel"
     const val COMPOSE_SAVE_TO_LIBRARY = "compose_save_to_library"
 
