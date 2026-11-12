@@ -26,6 +26,7 @@ import com.ryanjames.lunar.library.model.composerDuplicateKey
 import com.ryanjames.lunar.library.model.contents
 import com.ryanjames.lunar.library.model.resolveHasCover
 import com.ryanjames.lunar.library.model.songbookStartPages
+import com.ryanjames.lunar.library.model.jumpBackInItems
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlin.time.Clock
@@ -252,6 +253,33 @@ class SharedCommonTest {
         )
 
         assertEquals(listOf("Take Five"), result.map { it.title })
+    }
+
+    @Test
+    fun jumpBackInListsMostRecentlyOpenedVisibleScoresUpToTheLimit() {
+        val items = listOf(
+            testItem(id = "old", title = "Old", composer = "A", tags = emptyList(), dateAddedEpochMillis = 1L, lastOpenedEpochMillis = 10L),
+            testItem(id = "never", title = "Never", composer = "A", tags = emptyList(), dateAddedEpochMillis = 2L),
+            testItem(id = "newest", title = "Newest", composer = "A", tags = emptyList(), dateAddedEpochMillis = 3L, lastOpenedEpochMillis = 50L),
+            testItem(id = "hidden", title = "Hidden", composer = "A", tags = emptyList(), isHidden = true, dateAddedEpochMillis = 4L, lastOpenedEpochMillis = 99L),
+            testItem(id = "middle", title = "Middle", composer = "A", tags = emptyList(), dateAddedEpochMillis = 5L, lastOpenedEpochMillis = 30L),
+            testItem(id = "recent", title = "Recent", composer = "A", tags = emptyList(), dateAddedEpochMillis = 6L, lastOpenedEpochMillis = 40L),
+        )
+
+        assertEquals(listOf("newest", "recent", "middle"), items.jumpBackInItems().map { it.id })
+        assertEquals(listOf("newest"), items.jumpBackInItems(limit = 1).map { it.id })
+        assertEquals(listOf("newest", "recent", "middle", "old"), items.jumpBackInItems(limit = 10).map { it.id })
+        assertTrue(items.jumpBackInItems(limit = 0).isEmpty())
+    }
+
+    @Test
+    fun jumpBackInIsEmptyWhenOnlyHiddenOrUnopenedScoresExist() {
+        val items = listOf(
+            testItem(id = "never", title = "Never", composer = "A", tags = emptyList(), dateAddedEpochMillis = 1L),
+            testItem(id = "hidden", title = "Hidden", composer = "A", tags = emptyList(), isHidden = true, dateAddedEpochMillis = 2L, lastOpenedEpochMillis = 5L),
+        )
+
+        assertTrue(items.jumpBackInItems().isEmpty())
     }
 
     @Test

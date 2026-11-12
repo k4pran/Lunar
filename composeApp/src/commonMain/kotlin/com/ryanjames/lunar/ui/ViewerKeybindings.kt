@@ -32,6 +32,14 @@ internal fun ViewerKeybindings.actionForKeyId(keyId: String?): ViewerShortcutAct
         }
     }
 
+/** Tooltip text naming the key bound to [action], e.g. "Zoom in (Up Arrow)". */
+internal fun ViewerKeybindings.tooltipFor(
+    action: ViewerShortcutAction,
+    label: String = action.displayLabel(),
+): String = bindingFor(action)
+    ?.let { keyId -> "$label (${viewerShortcutKeyLabel(keyId)})" }
+    ?: label
+
 internal fun viewerShortcutKeyId(key: Key): String? =
     SupportedViewerKeys.firstOrNull { entry -> entry.key == key }?.id
 

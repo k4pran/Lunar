@@ -3,7 +3,7 @@ package com.ryanjames.lunar
 import com.ryanjames.lunar.platform.SelectedCoverImage
 import com.ryanjames.lunar.platform.SongbookBuildResult
 import com.ryanjames.lunar.platform.SongbookPdfBuilder
-import com.ryanjames.lunar.ui.LibraryBrowseMode
+import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.TEMPORARY_SETLIST_ID
 import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.clothSwatchIndex
@@ -101,28 +101,25 @@ class SetlistProgrammeTest {
 
         appState.startSetlist(setlist.id)
 
-        assertEquals(ViewerTarget.Setlist(setlist.id, 0), appState.previewTarget)
+        assertEquals(ViewerTarget.Setlist(setlist.id, 0), appState.fullscreenTarget)
         assertEquals(setlist.id, appState.selectedSetlistId)
-        assertTrue(appState.hasNextInSetlist(appState.previewTarget))
+        assertTrue(appState.hasNextInSetlist(appState.fullscreenTarget))
 
-        appState.openFullscreen(appState.previewTarget!!)
         appState.nextInSetlist()
 
-        assertEquals(ViewerTarget.Setlist(setlist.id, 1), appState.previewTarget)
         assertEquals(ViewerTarget.Setlist(setlist.id, 1), appState.fullscreenTarget)
         assertEquals("two", appState.setlistItems(setlist.id)[1].id)
-        assertFalse(appState.hasNextInSetlist(appState.previewTarget))
+        assertFalse(appState.hasNextInSetlist(appState.fullscreenTarget))
 
         appState.nextInSetlist()
-        assertEquals(ViewerTarget.Setlist(setlist.id, 1), appState.previewTarget)
+        assertEquals(ViewerTarget.Setlist(setlist.id, 1), appState.fullscreenTarget)
         assertEquals("That was the last piece in the set.", appState.bannerMessage)
 
+        appState.selectSection(AppSection.LIBRARY)
         appState.closeFullscreen()
-        appState.updateBrowseMode(LibraryBrowseMode.ALL)
-        appState.closePreview()
 
-        assertNull(appState.previewTarget)
-        assertEquals(LibraryBrowseMode.SETLISTS, appState.browseMode)
+        assertNull(appState.fullscreenTarget)
+        assertEquals(AppSection.SETLISTS, appState.selectedSection)
         assertEquals(setlist.id, appState.selectedSetlistId)
     }
 
@@ -135,7 +132,7 @@ class SetlistProgrammeTest {
 
         appState.startSetlist("empty")
 
-        assertNull(appState.previewTarget)
+        assertNull(appState.fullscreenTarget)
         assertEquals("Add scores to this setlist before starting it.", appState.bannerMessage)
     }
 
@@ -174,11 +171,11 @@ class SetlistProgrammeTest {
         assertEquals(shuffled.reversed(), appState.temporarySetlist!!.itemIds)
 
         appState.startSetlist(TEMPORARY_SETLIST_ID)
-        assertEquals(ViewerTarget.Setlist(TEMPORARY_SETLIST_ID, 0), appState.previewTarget)
+        assertEquals(ViewerTarget.Setlist(TEMPORARY_SETLIST_ID, 0), appState.fullscreenTarget)
         assertTrue(appState.temporarySetlistOpen)
 
         appState.discardTemporarySetlist()
-        assertNull(appState.previewTarget)
+        assertNull(appState.fullscreenTarget)
         assertNull(appState.temporarySetlist)
     }
 
@@ -399,7 +396,7 @@ class SetlistProgrammeTest {
 
         appState.changeSongbookCover("book")
         waitUntil { builds.size == 1 }
-        appState.addSelectionToSongbook("book", listOf(items[2]), openAfterUpdate = false)
+        appState.addSelectionToSongbook("book", listOf(items[2]))
         repeat(20) { yield() }
         assertEquals(1, builds.size, "The append must wait for the cover rebuild to finish.")
 

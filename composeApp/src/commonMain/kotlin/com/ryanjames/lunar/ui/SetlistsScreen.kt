@@ -197,7 +197,7 @@ private fun SetlistIndexPane(
                 onDismiss = { newSetlistOpen = false },
                 onCreate = { name ->
                     newSetlistOpen = false
-                    appState.createSetlist(name = name, itemIds = emptyList())
+                    appState.createSetlist(name = name, itemIds = emptyList(), open = true)
                 },
             ) {
                 TextButton(onClick = { newSetlistOpen = true }) {

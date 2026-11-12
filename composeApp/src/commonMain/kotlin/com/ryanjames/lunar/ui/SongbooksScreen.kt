@@ -106,7 +106,6 @@ internal fun SongbooksPane(
                 appState.addSelectionToSongbook(
                     songbookId = addTargetSongbook.id,
                     items = chosen,
-                    openAfterUpdate = false,
                 )
             },
         )

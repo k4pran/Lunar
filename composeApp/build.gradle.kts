@@ -1,4 +1,5 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -77,6 +78,7 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+            implementation(libs.okio.fakefilesystem)
         }
         jvmTest.dependencies {
             implementation(compose.desktop.currentOs)
@@ -131,6 +133,9 @@ compose.desktop {
         }
 
         nativeDistributions {
+            // No TargetFormat.AppImage: it is the same jpackage app image that
+            // createReleaseDistributable already writes to binaries/<build>/app, and the two
+            // tasks sharing that output breaks packageReleaseDmg's task validation on macOS.
             targetFormats(
                 TargetFormat.Deb,
                 TargetFormat.Dmg,
@@ -167,4 +172,17 @@ compose.desktop {
             }
         }
     }
+}
+
+// The AppImage task writes the same app-image directory (binaries/main[-release]/app) that the
+// installer tasks (Dmg, Deb, Exe, Msi) read, so order them explicitly. Without this Gradle fails
+// packageReleaseDistributionForCurrentOS with an implicit-dependency validation error.
+// Matched lazily because AppImage is not currently a target format, so the task may not exist.
+tasks.withType<AbstractJPackageTask>().configureEach {
+    val appImageTaskName = Regex("^package(.*?)(AppImage|Dmg|Pkg|Deb|Rpm|Exe|Msi)$")
+        .matchEntire(name)
+        ?.takeIf { it.groupValues[2] != "AppImage" }
+        ?.let { "package${it.groupValues[1]}AppImage" }
+        ?: return@configureEach
+    mustRunAfter(tasks.matching { it.name == appImageTaskName })
 }

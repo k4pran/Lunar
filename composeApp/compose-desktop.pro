@@ -1,22 +1,18 @@
-# ProGuard rules for the Compose desktop release build (proguardReleaseJars).
+# ProGuard rules for the desktop release build (createReleaseDistributable).
 
-# PDFBox ships optional integrations (Bouncy Castle encryption, alternate
-# logging backends) that Lunar does not bundle. Ignore those references.
--dontwarn org.bouncycastle.**
--dontwarn org.apache.logging.**
--dontwarn org.apache.log4j.**
--dontwarn org.apache.log.**
--dontwarn org.apache.avalon.**
--dontwarn org.slf4j.**
--dontwarn javax.servlet.**
-# IOUtils calls the signature-polymorphic MethodHandle.invokeExact, which
-# ProGuard cannot resolve against the library class.
--dontwarn org.apache.pdfbox.io.IOUtils
-# Optional log4j adapter inside commons-logging; log4j is not bundled.
--dontwarn org.apache.commons.logging.impl.Log4jApiLogFactory**
-
-# PDFBox/FontBox and commons-logging load implementations and resources
-# reflectively, so keep them intact.
+# PDFBox renders library thumbnails. It references optional dependencies
+# (BouncyCastle for encrypted PDFs, alternate commons-logging backends) that
+# are not on the classpath, and loads fonts/codecs reflectively.
 -keep class org.apache.pdfbox.** { *; }
 -keep class org.apache.fontbox.** { *; }
 -keep class org.apache.commons.logging.** { *; }
+-dontwarn org.bouncycastle.**
+-dontwarn org.apache.avalon.framework.**
+-dontwarn org.apache.log.**
+-dontwarn org.apache.log4j.**
+-dontwarn org.apache.logging.log4j.**
+-dontwarn org.slf4j.**
+-dontwarn javax.servlet.**
+-dontwarn org.apache.commons.logging.impl.**
+# Java 9+ MethodHandle signature-polymorphic call in PDFBox's IOUtils.
+-dontwarn org.apache.pdfbox.io.IOUtils

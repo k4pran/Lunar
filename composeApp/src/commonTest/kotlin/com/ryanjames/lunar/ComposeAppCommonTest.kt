@@ -13,7 +13,7 @@ import com.ryanjames.lunar.platform.PdfPageRenderer
 import com.ryanjames.lunar.platform.RenderedPdfPage
 import com.ryanjames.lunar.platform.SelectedCoverImage
 import com.ryanjames.lunar.platform.SongbookBuildResult
-import com.ryanjames.lunar.settings.AppColorTheme
+import com.ryanjames.lunar.settings.AppSkin
 import com.ryanjames.lunar.settings.AutoRefreshSchedule
 import com.ryanjames.lunar.settings.InMemoryAppSettingsStore
 import com.ryanjames.lunar.settings.ViewerShortcutAction
@@ -24,6 +24,7 @@ import com.ryanjames.lunar.sync.LibrarySyncManager
 import com.ryanjames.lunar.sync.ManagedPdfStore
 import com.ryanjames.lunar.sync.SyncHttpClient
 import com.ryanjames.lunar.ui.AppSection
+import com.ryanjames.lunar.ui.LibraryArrangement
 import com.ryanjames.lunar.ui.LibraryBrowseMode
 import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.buildRandomSightReadingSelection
@@ -46,19 +47,19 @@ class ComposeAppCommonTest {
 
         store.updateSettings {
             it.copy(
-                theme = AppColorTheme.FOREST,
+                skin = AppSkin.MOONLIGHT,
                 autoRefreshSchedule = AutoRefreshSchedule.HOURLY,
                 cloudConnectTimeoutSeconds = 30,
             )
         }
 
-        assertEquals(AppColorTheme.FOREST, store.settings.value.theme)
+        assertEquals(AppSkin.MOONLIGHT, store.settings.value.skin)
         assertEquals(AutoRefreshSchedule.HOURLY, store.settings.value.autoRefreshSchedule)
         assertEquals(30, store.settings.value.cloudConnectTimeoutSeconds)
 
         store.reset()
 
-        assertEquals(AppColorTheme.OCEAN, store.settings.value.theme)
+        assertEquals(AppSkin.PAPER, store.settings.value.resolvedSkin)
         assertEquals(AutoRefreshSchedule.MINUTES_15, store.settings.value.autoRefreshSchedule)
         assertEquals(15, store.settings.value.cloudConnectTimeoutSeconds)
     }
@@ -94,31 +95,50 @@ class ComposeAppCommonTest {
     }
 
     @Test
-    fun closingFullscreenReturnsToExistingPreview() = runBlocking {
+    fun openingScoreGoesStraightToViewerAndKeepsItFocused() = runBlocking {
         val item = testSheetMusicItem(
             id = "moon_river",
             title = "Moon River",
-        )
+        ).copy(lastViewedPage = 3)
         val runtime = createTestPlatformRuntime(initialItems = listOf(item))
         val appState = createTestLunarAppState(
             scope = this,
             runtime = runtime,
         )
 
-        appState.openPreview(item)
-        appState.openFullscreen(item.id)
+        appState.openScore(item)
 
-        assertEquals(ViewerTarget.Score(item.id), appState.previewTarget)
         assertEquals(ViewerTarget.Score(item.id), appState.fullscreenTarget)
+        assertEquals(3, appState.viewerStartPage)
+        assertEquals(item.id, appState.focusedScoreId)
 
         appState.closeFullscreen()
 
-        assertEquals(ViewerTarget.Score(item.id), appState.previewTarget)
         assertEquals(null, appState.fullscreenTarget)
+        assertEquals(null, appState.viewerStartPage)
+        assertEquals(item.id, appState.focusedScoreId)
     }
 
     @Test
-    fun openingRandomSheetInFullscreenReplacesBothViewerTargets() = runBlocking {
+    fun openingScoreFromTheTopStartsAtFirstPageAndRecordsIt() = runBlocking {
+        val item = testSheetMusicItem(id = "moon_river", title = "Moon River").copy(lastViewedPage = 5)
+        val runtime = createTestPlatformRuntime(initialItems = listOf(item))
+        val appState = createTestLunarAppState(scope = this, runtime = runtime)
+
+        appState.openScore(item, fromTop = true)
+        repeat(10) {
+            if (runtime.repository.library.value.items.single().lastOpenedEpochMillis != null) return@repeat
+            yield()
+        }
+
+        val stored = runtime.repository.library.value.items.single()
+        assertNotNull(stored.lastOpenedEpochMillis)
+        assertEquals(0, stored.lastViewedPage)
+        assertEquals(0, appState.viewerStartPage)
+    }
+
+    @Test
+    fun openingRandomSheetInViewerReplacesViewerTarget() = runBlocking {
         val first = testSheetMusicItem(
             id = "moon_river",
             title = "Moon River",
@@ -133,17 +153,15 @@ class ComposeAppCommonTest {
             runtime = runtime,
         )
 
-        appState.openPreview(first)
-        appState.openFullscreen(first.id)
+        appState.openScore(first)
         appState.openRandomSheetInCurrentViewer(listOf(second))
 
-        assertEquals(ViewerTarget.Score(second.id), appState.previewTarget)
         assertEquals(ViewerTarget.Score(second.id), appState.fullscreenTarget)
         assertEquals("Opening a random sheet.", appState.bannerMessage)
     }
 
     @Test
-    fun viewerSetlistActionSelectsCurrentScoreAndOpensPicker() = runBlocking {
+    fun viewerSetlistActionFocusesCurrentScoreAndOpensPicker() = runBlocking {
         val item = testSheetMusicItem(
             id = "moon_river",
             title = "Moon River",
@@ -154,21 +172,21 @@ class ComposeAppCommonTest {
             runtime = runtime,
         )
 
-        appState.openPreview(item)
-        appState.openFullscreen(item.id)
+        appState.openScore(item)
 
         appState.showSetlistPickerForScore(item.id)
 
         assertEquals(AppSection.LIBRARY, appState.selectedSection)
-        assertEquals(setOf(item.id), appState.selectedScoreIds)
+        assertEquals(item.id, appState.focusedScoreId)
+        assertTrue(appState.selectedScoreIds.isEmpty())
+        assertEquals(setOf(item.id), appState.pickerTargetIds)
         assertTrue(appState.setlistPickerVisible)
         assertFalse(appState.songbookPickerVisible)
-        assertEquals(null, appState.previewTarget)
         assertEquals(null, appState.fullscreenTarget)
     }
 
     @Test
-    fun viewerSongbookActionSelectsCurrentScoreAndOpensPicker() = runBlocking {
+    fun viewerSongbookActionFocusesCurrentScoreAndOpensPicker() = runBlocking {
         val item = testSheetMusicItem(
             id = "blue_bossa",
             title = "Blue Bossa",
@@ -182,15 +200,15 @@ class ComposeAppCommonTest {
             runtime = runtime,
         )
 
-        appState.openPreview(item)
+        appState.openScore(item)
 
         appState.showSongbookPickerForScore(item.id)
 
         assertEquals(AppSection.LIBRARY, appState.selectedSection)
-        assertEquals(setOf(item.id), appState.selectedScoreIds)
+        assertEquals(item.id, appState.focusedScoreId)
+        assertEquals(setOf(item.id), appState.pickerTargetIds)
         assertFalse(appState.setlistPickerVisible)
         assertTrue(appState.songbookPickerVisible)
-        assertEquals(null, appState.previewTarget)
         assertEquals(null, appState.fullscreenTarget)
     }
 
@@ -206,8 +224,7 @@ class ComposeAppCommonTest {
             runtime = runtime,
         )
 
-        appState.openPreview(item)
-        appState.openFullscreen(item.id)
+        appState.openScore(item)
         appState.hideScore(item.id)
         repeat(10) {
             if (runtime.repository.library.value.items.single().isHidden) {
@@ -217,8 +234,8 @@ class ComposeAppCommonTest {
         }
 
         assertTrue(runtime.repository.library.value.items.single().isHidden)
-        assertEquals(null, appState.previewTarget)
         assertEquals(null, appState.fullscreenTarget)
+        assertEquals(null, appState.focusedScoreId)
         assertEquals("Score hidden. You can restore it from Hidden.", appState.bannerMessage)
 
         appState.updateBrowseMode(LibraryBrowseMode.HIDDEN)
@@ -558,12 +575,14 @@ class ComposeAppCommonTest {
     }
 
     @Test
-    fun leavingSetlistsBrowseClosesOpenSetlistDetail() = runBlocking {
+    fun leavingSetlistsSectionClosesOpenSetlistDetail() = runBlocking {
         val appState = createTestLunarAppState(this)
 
         appState.openSetlist("saved-setlist")
-        appState.updateBrowseMode(LibraryBrowseMode.BY_COLLECTION)
+        assertEquals(AppSection.SETLISTS, appState.selectedSection)
+        appState.selectArrangement(LibraryArrangement.COLLECTION)
 
+        assertEquals(AppSection.LIBRARY, appState.selectedSection)
         assertEquals(LibraryBrowseMode.BY_COLLECTION, appState.browseMode)
         assertEquals(null, appState.selectedSetlistId)
         assertFalse(appState.temporarySetlistOpen)
@@ -581,7 +600,7 @@ class ComposeAppCommonTest {
 
         appState.openTemporarySetlist()
 
-        assertEquals(LibraryBrowseMode.SETLISTS, appState.browseMode)
+        assertEquals(AppSection.SETLISTS, appState.selectedSection)
         assertEquals(null, appState.selectedSetlistId)
         assertTrue(appState.temporarySetlistOpen)
     }
@@ -611,7 +630,7 @@ class ComposeAppCommonTest {
     }
 
     @Test
-    fun creatingSongbookBuildsCombinedPdfAndOpensSongbookViewer() = runBlocking {
+    fun creatingSongbookBuildsCombinedPdfAndStaysInLibrary() = runBlocking {
         val items = listOf(
             testSheetMusicItem(id = "one", title = "One"),
             testSheetMusicItem(id = "two", title = "Two"),
@@ -659,8 +678,9 @@ class ComposeAppCommonTest {
         assertEquals("Evening book", songbook.name)
         assertEquals(items.map { it.id }, songbook.itemIds)
         assertEquals("/songbooks/evening-book.pdf", songbook.document.storedPath)
-        assertEquals(LibraryBrowseMode.SONGBOOKS, appState.browseMode)
-        assertEquals(ViewerTarget.Songbook(songbook.id), appState.previewTarget)
+        assertEquals(LibraryBrowseMode.ALL, appState.browseMode)
+        assertEquals(null, appState.fullscreenTarget)
+        assertFalse(appState.newSongbookDialogVisible)
         assertEquals("Saved \"Evening book\".", appState.bannerMessage)
     }
 
@@ -714,8 +734,8 @@ class ComposeAppCommonTest {
         val updatedSongbook = runtime.repository.library.value.songbooks.single()
         assertEquals(listOf(existingItems[0].id, existingItems[1].id), updatedSongbook.itemIds)
         assertEquals("/songbooks/evening-book-v2.pdf", updatedSongbook.document.storedPath)
-        assertEquals(ViewerTarget.Songbook(existingSongbook.id), appState.previewTarget)
-        assertEquals("Updated \"Evening book\".", appState.bannerMessage)
+        assertEquals(null, appState.fullscreenTarget)
+        assertEquals("Added to \"Evening book\".", appState.bannerMessage)
     }
 
     @Test
@@ -732,7 +752,7 @@ class ComposeAppCommonTest {
             scope = this,
             runtime = runtime,
         )
-        appState.openSongbookFullscreen(existingSongbook.id)
+        appState.openSongbook(existingSongbook.id)
         appState.requestDeleteSongbook(existingSongbook.id)
 
         appState.confirmDeleteSongbook()

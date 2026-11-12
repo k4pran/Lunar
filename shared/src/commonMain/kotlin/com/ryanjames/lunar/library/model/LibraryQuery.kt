@@ -95,6 +95,22 @@ fun List<SheetMusicItem>.applyLibraryQuery(query: LibraryQuery): List<SheetMusic
     }
 }
 
+const val JumpBackInLimit = 3
+
+/**
+ * The most recently opened scores that are not hidden, newest first, for the
+ * library's "Jump back in" strip. Scores that have never been opened are skipped.
+ */
+fun List<SheetMusicItem>.jumpBackInItems(limit: Int = JumpBackInLimit): List<SheetMusicItem> =
+    asSequence()
+        .filter { !it.isHidden && it.lastOpenedEpochMillis != null }
+        .sortedWith(
+            compareByDescending<SheetMusicItem> { it.lastOpenedEpochMillis }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title.trim() }
+        )
+        .take(limit.coerceAtLeast(0))
+        .toList()
+
 fun List<SheetMusicItem>.availableTags(): Set<String> =
     flatMap { it.tags }
         .map(String::trim)

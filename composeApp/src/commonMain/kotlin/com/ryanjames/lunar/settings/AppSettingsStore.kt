@@ -38,14 +38,16 @@ class InMemoryAppSettingsStore(
     }
 }
 
+internal val AppSettingsJson = Json {
+    prettyPrint = true
+    ignoreUnknownKeys = true
+    encodeDefaults = true
+}
+
 class JsonAppSettingsStore(
     private val fileSystem: FileSystem,
     private val settingsPath: Path,
-    private val json: Json = Json {
-        prettyPrint = true
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-    },
+    private val json: Json = AppSettingsJson,
 ) : AppSettingsStore {
     private val mutex = Mutex()
     private val state = MutableStateFlow(AppSettings())
@@ -73,7 +75,7 @@ class JsonAppSettingsStore(
     override suspend fun reset() {
         ensureInitialized()
         mutex.withLock {
-            val defaults = AppSettings()
+            val defaults = AppSettings().normalize()
             writeToDisk(defaults)
             state.value = defaults
         }

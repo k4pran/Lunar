@@ -7,20 +7,14 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -33,53 +27,62 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.ryanjames.lunar.library.data.LibrarySnapshot
 import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.platform.externalScoreDropTarget
 import com.ryanjames.lunar.platform.rememberPlatformRuntime
 import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.ComposeScreen
-import com.ryanjames.lunar.ui.FullscreenViewerScreen
 import com.ryanjames.lunar.ui.ImportScreen
 import com.ryanjames.lunar.ui.LibraryScreen
-import com.ryanjames.lunar.ui.LunarTooltip
 import com.ryanjames.lunar.ui.LunarTheme
 import com.ryanjames.lunar.ui.SettingsScreen
+import com.ryanjames.lunar.ui.NextInSetlistButton
 import com.ryanjames.lunar.ui.ViewerDocumentState
 import com.ryanjames.lunar.ui.ViewerScreen
 import com.ryanjames.lunar.ui.ViewerTarget
+import com.ryanjames.lunar.ui.design.LunarTestTags
+import com.ryanjames.lunar.ui.design.lunarTokens
 import com.ryanjames.lunar.ui.TemporarySetlistSession
-import com.ryanjames.lunar.ui.resolveSetlistItems
 import com.ryanjames.lunar.ui.currentLibraryScopeItems
-import com.ryanjames.lunar.ui.lunarThemePalette
 import com.ryanjames.lunar.ui.rememberLunarAppState
+import com.ryanjames.lunar.ui.resolveSetlistItems
+import com.ryanjames.lunar.ui.shell.LunarAppShell
 import com.ryanjames.lunar.ui.toViewerDocumentState
 import com.ryanjames.lunar.settings.ViewerPageModePreference
 import com.ryanjames.lunar.settings.intervalMillis
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 
+/**
+ * @param sidebarToggleRequests window-level shortcut requests (desktop Ctrl+B) to toggle the
+ * sidebar even when nothing inside the app holds keyboard focus.
+ */
 @Composable
-fun App() {
+fun App(sidebarToggleRequests: Flow<Unit> = emptyFlow()) {
     val runtime = rememberPlatformRuntime()
-    LunarApp(runtime)
+    LunarApp(runtime, sidebarToggleRequests)
 }
 
 @Composable
-internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
+internal fun LunarApp(
+    runtime: com.ryanjames.lunar.platform.PlatformRuntime,
+    sidebarToggleRequests: Flow<Unit> = emptyFlow(),
+) {
     val appState = rememberLunarAppState(runtime)
     val snapshot by runtime.repository.library.collectAsState()
     val importerState by runtime.importer.state.collectAsState()
@@ -88,11 +91,11 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
     val snackbarHostState = remember { SnackbarHostState() }
     var appReady by remember(runtime) { mutableStateOf(false) }
     var startupError by remember(runtime) { mutableStateOf<String?>(null) }
-    val previewDocument = snapshot.resolveViewerDocument(appState.previewTarget, appState.temporarySetlist)
     val fullscreenDocument = snapshot.resolveViewerDocument(appState.fullscreenTarget, appState.temporarySetlist)
-    val previewItemId = snapshot.viewerItemId(appState.previewTarget, appState.temporarySetlist)
+        ?.let { document ->
+            appState.viewerStartPage?.let { document.copy(lastViewedPage = it) } ?: document
+        }
     val fullscreenItemId = snapshot.viewerItemId(appState.fullscreenTarget, appState.temporarySetlist)
-    val previewInSetlist = appState.previewTarget is ViewerTarget.Setlist
     val fullscreenInSetlist = appState.fullscreenTarget is ViewerTarget.Setlist
     val defaultTwoPageMode = appSettings.defaultViewerPageMode == ViewerPageModePreference.TWO_PAGE
     val libraryScopeItems = currentLibraryScopeItems(snapshot = snapshot, appState = appState)
@@ -128,7 +131,9 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
     }
 
     if (!appReady) {
-        StartupLoadingScreen(errorMessage = startupError)
+        LunarTheme(skin = appSettings.resolvedSkin) {
+            StartupLoadingScreen(errorMessage = startupError)
+        }
         return
     }
 
@@ -149,20 +154,27 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
         }
     }
 
+    LaunchedEffect(appState, sidebarToggleRequests) {
+        sidebarToggleRequests.collect { appState.toggleSidebarCollapsed() }
+    }
+
     LaunchedEffect(appState.bannerMessage) {
         val message = appState.bannerMessage ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(message)
         appState.clearBanner()
     }
 
-    LunarTheme(theme = appSettings.theme) {
-        val themePalette = lunarThemePalette()
+    LunarTheme(skin = appSettings.resolvedSkin) {
+        // The viewer replaces the main screens, so keep their saveable state (e.g. lazy scroll positions)
+        // while it is open and restore it on return.
+        val mainScreensStateHolder = rememberSaveableStateHolder()
 
         if (fullscreenDocument != null) {
-            FullscreenViewerScreen(
+            ViewerScreen(
                 runtime = runtime,
                 documentState = fullscreenDocument,
                 onBack = appState::closeFullscreen,
+                backLabel = if (fullscreenInSetlist) "Back to programme" else "Library",
                 onToggleFavorite = favoriteToggle(fullscreenItemId, appState),
                 onHideScore = hideScore(fullscreenItemId.takeUnless { fullscreenInSetlist }, appState),
                 onAddToSetlist = addToSetlist(fullscreenItemId, appState),
@@ -171,172 +183,72 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
                     .takeUnless { fullscreenInSetlist },
                 onPageChanged = pageChanged(fullscreenItemId, appState),
                 onPageCountResolved = pageCountResolved(fullscreenItemId, appState),
-                onNextInSetlist = appState::nextInSetlist.takeIf { fullscreenInSetlist },
-                nextInSetlistAvailable = appState.hasNextInSetlist(appState.fullscreenTarget),
-                defaultTwoPageMode = defaultTwoPageMode,
-                viewerKeybindings = appSettings.viewerKeybindings,
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .externalScoreDropTarget(
-                        enabled = runtime.capabilities.fileImportSupported,
-                        onDroppedPaths = appState::importDroppedPaths,
-                    )
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.background,
-                                themePalette.appBackgroundGradientBottom,
-                            )
-                        )
-                    ),
-            ) {
-                Scaffold(
-                    containerColor = Color.Transparent,
-                    snackbarHost = { SnackbarHost(snackbarHostState) },
-                    bottomBar = {
-                        BottomNavigationPanel(
-                            selectedSection = appState.selectedSection,
-                            onSelectSection = appState::selectSection,
-                        )
-                    },
-                ) { innerPadding ->
-                    when (appState.selectedSection) {
-                        AppSection.IMPORT -> ImportScreen(
-                            runtime = runtime,
-                            importerState = importerState,
-                            syncState = syncState,
-                            settings = appSettings,
-                            libraryCount = snapshot.items.size,
-                            appState = appState,
-                            modifier = Modifier.padding(innerPadding),
-                        )
-
-                        AppSection.LIBRARY -> LibraryScreen(
-                            runtime = runtime,
-                            snapshot = snapshot,
-                            appState = appState,
-                            viewerKeybindings = appSettings.viewerKeybindings,
-                            modifier = Modifier.padding(innerPadding),
-                        )
-
-                        AppSection.COMPOSE -> ComposeScreen(
-                            runtime = runtime,
-                            modifier = Modifier.padding(innerPadding),
-                        )
-
-                        AppSection.SETTINGS -> SettingsScreen(
-                            settings = appSettings,
-                            appState = appState,
-                            modifier = Modifier.padding(innerPadding),
+                nextInSetlist = if (fullscreenInSetlist) {
+                    {
+                        NextInSetlistButton(
+                            enabled = appState.hasNextInSetlist(appState.fullscreenTarget),
+                            onClick = appState::nextInSetlist,
                         )
                     }
-                }
-
-                if (previewDocument != null) {
-                    Dialog(
-                        onDismissRequest = appState::closePreview,
-                        properties = DialogProperties(
-                            usePlatformDefaultWidth = false,
+                } else {
+                    null
+                },
+                defaultTwoPageMode = defaultTwoPageMode,
+                viewerKeybindings = appSettings.viewerKeybindings,
+                chromeAutoHideMillis = appSettings.viewerChromeAutoHideMillis,
+            )
+        } else {
+            mainScreensStateHolder.SaveableStateProvider(MainScreensStateKey) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .externalScoreDropTarget(
+                            enabled = runtime.capabilities.fileImportSupported,
+                            onDroppedPaths = appState::importDroppedPaths,
                         ),
-                    ) {
-                        BoxWithConstraints(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            val horizontalMargin = if (maxWidth < 720.dp) 12.dp else 28.dp
-                            val verticalMargin = if (maxHeight < 720.dp) 12.dp else 24.dp
-                            val dialogWidth = ((maxHeight - verticalMargin * 2) * 1.32f)
-                                .coerceAtMost(maxWidth - horizontalMargin * 2)
-                                .coerceAtLeast(320.dp)
-                            val dialogHeight = (maxHeight - verticalMargin * 2).coerceAtLeast(360.dp)
+                ) {
+                    LunarAppShell(
+                        appState = appState,
+                        snapshot = snapshot,
+                        syncState = syncState,
+                        settings = appSettings,
+                    ) { sidebarContextVisible ->
+                        Scaffold(
+                            containerColor = Color.Transparent,
+                            snackbarHost = { SnackbarHost(snackbarHostState) },
+                        ) { innerPadding ->
+                            when (appState.selectedSection) {
+                                AppSection.IMPORT -> ImportScreen(
+                                    runtime = runtime,
+                                    importerState = importerState,
+                                    syncState = syncState,
+                                    settings = appSettings,
+                                    libraryCount = snapshot.items.size,
+                                    appState = appState,
+                                    modifier = Modifier.padding(innerPadding),
+                                )
 
-                            Surface(
-                                modifier = Modifier
-                                    .width(dialogWidth)
-                                    .height(dialogHeight),
-                                shape = MaterialTheme.shapes.extraLarge,
-                                tonalElevation = 10.dp,
-                                color = MaterialTheme.colorScheme.surface,
-                            ) {
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        ViewerScreen(
-                                            runtime = runtime,
-                                            documentState = previewDocument,
-                                            onBack = appState::closePreview,
-                                            onToggleFavorite = favoriteToggle(previewItemId, appState),
-                                            onHideScore = hideScore(previewItemId.takeUnless { previewInSetlist }, appState),
-                                            onAddToSetlist = addToSetlist(previewItemId, appState),
-                                            onAddToSongbook = addToSongbook(previewItemId, appState),
-                                            onOpenRandomScore = { appState.openRandomSheetInCurrentViewer(libraryScopeItems) }
-                                                .takeUnless { previewInSetlist },
-                                            onPageChanged = pageChanged(previewItemId, appState),
-                                            onPageCountResolved = pageCountResolved(previewItemId, appState),
-                                            onNextInSetlist = appState::nextInSetlist.takeIf { previewInSetlist },
-                                            nextInSetlistAvailable = appState.hasNextInSetlist(appState.previewTarget),
-                                            defaultTwoPageMode = defaultTwoPageMode,
-                                            viewerKeybindings = appSettings.viewerKeybindings,
-                                            onEnterFullscreen = {
-                                                when (val target = appState.previewTarget) {
-                                                    is ViewerTarget.Score ->
-                                                        appState.openFullscreen(target.itemId)
+                                AppSection.LIBRARY,
+                                AppSection.SETLISTS,
+                                AppSection.SONGBOOKS -> LibraryScreen(
+                                    runtime = runtime,
+                                    snapshot = snapshot,
+                                    appState = appState,
+                                    viewerKeybindings = appSettings.viewerKeybindings,
+                                    showArrangementSwitcher = !sidebarContextVisible,
+                                    modifier = Modifier.padding(innerPadding),
+                                )
 
-                                                    is ViewerTarget.Songbook ->
-                                                        appState.openSongbookFullscreen(target.songbookId)
+                                AppSection.COMPOSE -> ComposeScreen(
+                                    runtime = runtime,
+                                    modifier = Modifier.padding(innerPadding),
+                                )
 
-                                                    is ViewerTarget.Setlist ->
-                                                        appState.openFullscreen(target)
-
-                                                    null -> Unit
-                                                }
-                                            },
-                                            backButtonLabel = if (previewInSetlist) "Back to programme" else "Close",
-                                        )
-                                    }
-                                    Surface(
-                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-                                        shape = MaterialTheme.shapes.extraLarge,
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 16.dp, vertical = 10.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            androidx.compose.material3.OutlinedButton(
-                                                onClick = appState::closePreview,
-                                            ) {
-                                                Text(if (previewInSetlist) "Back to programme" else "Close")
-                                            }
-                                            androidx.compose.material3.Button(
-                                                onClick = {
-                                                    when (val target = appState.previewTarget) {
-                                                        is ViewerTarget.Score ->
-                                                            appState.openFullscreen(target.itemId)
-
-                                                        is ViewerTarget.Songbook ->
-                                                            appState.openSongbookFullscreen(target.songbookId)
-
-                                                        is ViewerTarget.Setlist ->
-                                                            appState.openFullscreen(target)
-
-                                                        null -> Unit
-                                                    }
-                                                },
-                                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                                                    containerColor = MaterialTheme.colorScheme.primary,
-                                                ),
-                                            ) {
-                                                Text("View Fullscreen", color = MaterialTheme.colorScheme.onPrimary)
-                                            }
-                                        }
-                                    }
-                                }
+                                AppSection.SETTINGS -> SettingsScreen(
+                                    settings = appSettings,
+                                    appState = appState,
+                                    modifier = Modifier.padding(innerPadding),
+                                )
                             }
                         }
                     }
@@ -345,6 +257,8 @@ internal fun LunarApp(runtime: com.ryanjames.lunar.platform.PlatformRuntime) {
         }
     }
 }
+
+private const val MainScreensStateKey = "main-screens"
 
 @Composable
 private fun StartupLoadingScreen(
@@ -365,11 +279,13 @@ private fun StartupLoadingScreen(
     } else {
         "Lunar startup failed"
     }
+    val tokens = lunarTokens()
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFF111820))
+            .testTag(LunarTestTags.STARTUP_SCREEN)
+            .background(tokens.colors.bg)
             .semantics {
                 contentDescription = description
             },
@@ -377,19 +293,26 @@ private fun StartupLoadingScreen(
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(tokens.spacing.md),
         ) {
-            StartupSpinner(rotation = rotation)
+            StartupSpinner(
+                rotation = rotation,
+                color = if (errorMessage == null) tokens.colors.accent else tokens.colors.danger,
+            )
             Text(
                 text = errorMessage ?: "Loading Lunar",
-                color = Color(0xFFE8F2F8),
+                style = tokens.typography.subtitle,
+                color = if (errorMessage == null) tokens.colors.ink2 else tokens.colors.danger,
             )
         }
     }
 }
 
 @Composable
-private fun StartupSpinner(rotation: Float) {
+private fun StartupSpinner(
+    rotation: Float,
+    color: Color,
+) {
     Canvas(modifier = Modifier.size(44.dp)) {
         val strokeWidth = 4.dp.toPx()
         val inset = strokeWidth / 2f
@@ -399,7 +322,7 @@ private fun StartupSpinner(rotation: Float) {
         )
         val topLeft = Offset(inset, inset)
         drawArc(
-            color = Color(0xFF8DD7FF).copy(alpha = 0.24f),
+            color = color.copy(alpha = 0.24f),
             startAngle = 0f,
             sweepAngle = 360f,
             useCenter = false,
@@ -408,7 +331,7 @@ private fun StartupSpinner(rotation: Float) {
             style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
         )
         drawArc(
-            color = Color(0xFF8DD7FF),
+            color = color,
             startAngle = rotation,
             sweepAngle = 88f,
             useCenter = false,
@@ -493,84 +416,3 @@ private fun pageChanged(itemId: String?, appState: com.ryanjames.lunar.ui.LunarA
 
 private fun pageCountResolved(itemId: String?, appState: com.ryanjames.lunar.ui.LunarAppState): (Int) -> Unit =
     itemId?.let { id -> { pageCount: Int -> appState.updateViewerPageCount(id, pageCount) } } ?: { _ -> }
-
-@Composable
-internal fun BottomNavigationPanel(
-    selectedSection: AppSection,
-    onSelectSection: (AppSection) -> Unit,
-) {
-    Surface(
-        tonalElevation = 8.dp,
-        shadowElevation = 8.dp,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            BottomNavItem(
-                title = "Sources",
-                selected = selectedSection == AppSection.IMPORT,
-                onClick = { onSelectSection(AppSection.IMPORT) },
-            )
-            BottomNavItem(
-                title = "Library",
-                selected = selectedSection == AppSection.LIBRARY,
-                onClick = { onSelectSection(AppSection.LIBRARY) },
-            )
-            BottomNavItem(
-                title = "Compose",
-                selected = selectedSection == AppSection.COMPOSE,
-                onClick = { onSelectSection(AppSection.COMPOSE) },
-            )
-            BottomNavItem(
-                title = "Settings",
-                selected = selectedSection == AppSection.SETTINGS,
-                onClick = { onSelectSection(AppSection.SETTINGS) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun RowScope.BottomNavItem(
-    title: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val containerColor = if (selected) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-    }
-
-    Box(modifier = Modifier.weight(1f)) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick),
-            color = containerColor,
-            shape = MaterialTheme.shapes.large,
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 12.dp),
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                    color = if (selected) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-            }
-        }
-    }
-}

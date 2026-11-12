@@ -1,28 +1,66 @@
 package com.ryanjames.lunar
 
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.doubleClick
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
+import com.ryanjames.lunar.ui.LibraryTestTags
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.isPopup
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.runDesktopComposeUiTest
 import com.ryanjames.lunar.composition.InMemoryCompositionDraftStore
 import com.ryanjames.lunar.library.data.CloudGoogleDriveSource
 import com.ryanjames.lunar.library.data.CloudPathStrategy
@@ -34,29 +72,39 @@ import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.library.model.ScoreMetadata
 import com.ryanjames.lunar.library.model.ScoreMetadataComposer
 import com.ryanjames.lunar.library.model.ScoreMetadataSource
-import com.ryanjames.lunar.platform.CompositionPdfImporter
 import com.ryanjames.lunar.platform.CompositionPdfImportRequest
+import com.ryanjames.lunar.platform.CompositionPdfImporter
 import com.ryanjames.lunar.platform.ImporterState
 import com.ryanjames.lunar.platform.LibraryCacheSnapshot
-import com.ryanjames.lunar.platform.LilyPondLiveRenderer
 import com.ryanjames.lunar.platform.LilyPondLiveRenderResult
+import com.ryanjames.lunar.platform.LilyPondLiveRenderer
 import com.ryanjames.lunar.platform.LilyPondSourceSnapshot
 import com.ryanjames.lunar.platform.PdfDocumentInfo
 import com.ryanjames.lunar.platform.PdfPageRenderer
 import com.ryanjames.lunar.platform.RenderedPdfPage
-import com.ryanjames.lunar.settings.AppColorTheme
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.AppSettingsStore
+import com.ryanjames.lunar.settings.AppSkin
+import com.ryanjames.lunar.settings.JsonAppSettingsStore
 import com.ryanjames.lunar.settings.ViewerKeybindings
 import com.ryanjames.lunar.sync.CloudSyncState
 import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.ComposeScreen
-import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.ImportScreen
+import com.ryanjames.lunar.ui.LibraryBrowseMode
 import com.ryanjames.lunar.ui.LibraryScreen
-import com.ryanjames.lunar.ui.LunarTooltip
 import com.ryanjames.lunar.ui.LunarTheme
+import com.ryanjames.lunar.ui.LunarTooltip
 import com.ryanjames.lunar.ui.SettingsScreen
+import com.ryanjames.lunar.ui.ViewerTarget
+import com.ryanjames.lunar.ui.design.LunarTestTags
+import java.nio.file.Files
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+import com.ryanjames.lunar.ui.shell.LunarAppShell
+import com.ryanjames.lunar.ui.shell.SidebarDrawerTag
+import com.ryanjames.lunar.ui.shell.SidebarPrimaryDestinations
+import com.ryanjames.lunar.ui.shell.sidebarNavTag
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,10 +113,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.runBlocking
+import okio.FileSystem
+import okio.Path.Companion.toPath
 import org.junit.Rule
 import org.junit.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 class ScreenSmokeTest {
 
@@ -81,7 +129,7 @@ class ScreenSmokeTest {
             val settingsGate = CompletableDeferred<Unit>()
             val repositoryGate = CompletableDeferred<Unit>()
             val loadedSettings = AppSettings(
-                theme = AppColorTheme.DARCULA,
+                skin = AppSkin.MOONLIGHT,
                 refreshOnLaunch = false,
             )
             val baseRuntime = createTestPlatformRuntime(
@@ -102,27 +150,29 @@ class ScreenSmokeTest {
                 LunarApp(runtime)
             }
 
+            rule.onNodeWithTag(LunarTestTags.STARTUP_SCREEN).assertIsDisplayed()
             rule.onNodeWithContentDescription("Lunar is starting").assertIsDisplayed()
-            assertTrue(rule.onAllNodesWithText("Moon River").fetchSemanticsNodes().isEmpty())
+            assertTrue(rule.onAllNodesWithTag(LunarTestTags.libraryRow("moon_river")).fetchSemanticsNodes().isEmpty())
 
             settingsGate.complete(Unit)
             rule.waitForIdle()
-            rule.onNodeWithContentDescription("Lunar is starting").assertIsDisplayed()
-            assertTrue(rule.onAllNodesWithText("Moon River").fetchSemanticsNodes().isEmpty())
+            rule.onNodeWithTag(LunarTestTags.STARTUP_SCREEN).assertIsDisplayed()
+            assertTrue(rule.onAllNodesWithTag(LunarTestTags.libraryRow("moon_river")).fetchSemanticsNodes().isEmpty())
 
             repositoryGate.complete(Unit)
             rule.waitUntil(timeoutMillis = 5_000) {
-                rule.onAllNodesWithText("Moon River").fetchSemanticsNodes().isNotEmpty()
+                rule.onAllNodesWithTag(LunarTestTags.libraryRow("moon_river")).fetchSemanticsNodes().isNotEmpty()
             }
-            assertTrue(rule.onAllNodesWithText("Loading Lunar").fetchSemanticsNodes().isEmpty())
-            rule.onNodeWithText("Moon River").assertIsDisplayed()
+            assertTrue(rule.onAllNodesWithTag(LunarTestTags.STARTUP_SCREEN).fetchSemanticsNodes().isEmpty())
+            rule.onNodeWithTag(LunarTestTags.libraryRow("moon_river")).assertIsDisplayed()
+            rule.onNodeWithTag(LunarTestTags.NAVIGATION).assertIsDisplayed()
         }
     }
 
     @Test
     fun lunarTooltipShowsFromLongClickSemantics() {
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 LunarTooltip("Open this score") {
                     Button(onClick = {}) {
                         Text("Open")
@@ -152,7 +202,7 @@ class ScreenSmokeTest {
             )
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.DARCULA) {
+                LunarTheme(skin = AppSkin.MOONLIGHT) {
                     LibraryScreen(
                         runtime = runtime,
                         snapshot = runtime.repository.library.value,
@@ -162,41 +212,29 @@ class ScreenSmokeTest {
                 }
             }
 
-            rule.onNodeWithContentDescription("Library search").performClick()
-            rule.onNodeWithContentDescription("Library search").performKeyInput {
+            rule.onNodeWithTag(LunarTestTags.LIBRARY_SEARCH).performClick()
+            rule.onNodeWithTag(LunarTestTags.LIBRARY_SEARCH).performKeyInput {
                 pressKey(Key.R)
             }
 
             rule.runOnIdle {
-                assertEquals(null, appState.previewTarget)
+                assertEquals(null, appState.fullscreenTarget)
             }
-            rule.onNodeWithContentDescription("Library search").performTextReplacement("R")
+            rule.onNodeWithTag(LunarTestTags.LIBRARY_SEARCH).performTextReplacement("R")
             rule.runOnIdle {
                 assertEquals("R", appState.query.searchText)
-                assertEquals(null, appState.previewTarget)
+                assertEquals(null, appState.fullscreenTarget)
             }
         }
     }
 
     @Test
     @OptIn(ExperimentalTestApi::class)
-    fun libraryScreenOpensRandomSetlistDialogAndSavedSetlistDetail() {
+    fun libraryToolbarOpensRandomScoreSortsAndSwitchesToGallery() {
         runBlocking {
             val items = listOf(
-                testSheetMusicItem(
-                    id = "moon_river",
-                    title = "Moon River",
-                    collection = "Standards",
-                    tags = listOf("jazz"),
-                    pageCount = 2,
-                ),
-                testSheetMusicItem(
-                    id = "clair_de_lune",
-                    title = "Clair de Lune",
-                    collection = "Recital",
-                    tags = listOf("piano"),
-                    pageCount = 4,
-                ),
+                testSheetMusicItem(id = "moon_river", title = "Moon River", collection = "Standards", pageCount = 2),
+                testSheetMusicItem(id = "clair_de_lune", title = "Clair de Lune", collection = "Recital", pageCount = 4),
             )
             val setlist = testLibrarySetlist(
                 id = "set_morning",
@@ -204,22 +242,12 @@ class ScreenSmokeTest {
                 itemIds = items.map { it.id },
                 updatedAtEpochMillis = 10L,
             )
-            val runtime = createTestPlatformRuntime(
-                initialItems = items,
-                initialSetlists = listOf(setlist),
-                pdfExporter = TestPdfDocumentExporter { _, suggestedFileName ->
-                    "Downloads/$suggestedFileName"
-                },
-                scoreDownloadSupported = true,
-            )
-            val appState = createTestLunarAppState(
-                scope = backgroundScope(),
-                runtime = runtime,
-            )
-            val snapshot = runtime.repository.library.value
+            val runtime = createTestPlatformRuntime(initialItems = items, initialSetlists = listOf(setlist))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.DARCULA) {
+                val snapshot by runtime.repository.library.collectAsState()
+                LunarTheme(skin = AppSkin.MOONLIGHT) {
                     LibraryScreen(
                         runtime = runtime,
                         snapshot = snapshot,
@@ -229,49 +257,32 @@ class ScreenSmokeTest {
                 }
             }
 
-            rule.onNodeWithText("Open random sheet").assertIsDisplayed()
-            rule.onNodeWithText("Random setlist").assertIsDisplayed()
+            rule.onNodeWithText("Open a random score").assertIsDisplayed()
             rule.onRoot().performKeyInput { pressKey(Key.R) }
             rule.waitUntil(timeoutMillis = 5_000) {
-                appState.previewTarget is ViewerTarget.Score
+                appState.fullscreenTarget is ViewerTarget.Score
             }
-            rule.onNodeWithContentDescription("Download Moon River").assertIsDisplayed()
-            rule.onNodeWithContentDescription("Download Moon River").performClick()
-            rule.waitUntil(timeoutMillis = 5_000) {
-                appState.bannerMessage == "Saved \"Moon River\" to Downloads/Moon River.pdf."
-            }
-            rule.onNodeWithContentDescription("Mark Moon River as favorite").assertIsDisplayed()
-            rule.onNodeWithContentDescription("Show info for Moon River").assertIsDisplayed()
-            rule.onNodeWithContentDescription("Edit Moon River").assertIsDisplayed()
-            rule.onNodeWithContentDescription("Delete Moon River").assertIsDisplayed()
-            rule.onNodeWithContentDescription("Show info for Moon River").performClick()
-            rule.onNodeWithText("Score info").assertIsDisplayed()
-            rule.onNodeWithText("Filename").assertIsDisplayed()
-            rule.onNodeWithText("Moon River.pdf").assertIsDisplayed()
-            rule.onNodeWithText("Close").performClick()
-            rule.onNodeWithContentDescription("Library search").assertIsDisplayed()
-            rule.runOnIdle {
-                assertTrue(
-                    rule.onAllNodesWithText("Browsing 2 scores. Filter by collection or tag when you need it.")
-                        .fetchSemanticsNodes()
-                        .isEmpty()
-                )
-            }
-            rule.onNodeWithContentDescription("Sort descending").assertIsDisplayed()
-            rule.onNodeWithContentDescription("Sort descending").performClick()
+            rule.runOnIdle { appState.closeFullscreen() }
+
+            rule.onNodeWithContentDescription("Sort by Date added").performClick()
+            rule.onNodeWithText("Ascending").performClick()
             rule.runOnIdle {
                 assertEquals(com.ryanjames.lunar.library.model.SortDirection.ASCENDING, appState.query.sortDirection)
             }
-            rule.onNodeWithContentDescription("Layout options (List)").assertIsDisplayed()
-            rule.onNodeWithContentDescription("Layout options (List)").performClick()
-            rule.onNodeWithText("Grid").performClick()
+            rule.onNodeWithContentDescription("Sort by Date added").performClick()
+            rule.onNodeWithText("Title").performClick()
+            rule.runOnIdle {
+                assertEquals(com.ryanjames.lunar.library.model.LibrarySortOption.TITLE, appState.query.sortOption)
+            }
+            assertTrue(rule.onAllNodes(isPopup()).fetchSemanticsNodes().isEmpty())
+
+            rule.onNodeWithContentDescription("Show as gallery").performClick()
             rule.runOnIdle {
                 assertEquals(com.ryanjames.lunar.ui.LibraryLayoutMode.GRID, appState.layoutMode)
             }
-            rule.onNodeWithText("Show filters").assertIsDisplayed()
-            rule.onNodeWithText("Show filters").performClick()
-            rule.onNodeWithText("All collections").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Show as list").performClick()
 
+            rule.runOnIdle { appState.selectSection(AppSection.SETLISTS) }
             rule.onDisplayedNodeWithText("Random setlist").performClick()
             rule.onNodeWithText("Shuffle a random set").assertIsDisplayed()
             rule.onNodeWithContentDescription("Scores in the mix: 2").assertIsDisplayed()
@@ -279,8 +290,6 @@ class ScreenSmokeTest {
             rule.runOnIdle {
                 assertEquals(false, appState.randomSetlistBuilderVisible)
             }
-
-            rule.onNodeWithText("Setlists").performClick()
             rule.onNodeWithText("Morning rehearsal").assertIsDisplayed()
             rule.onNodeWithText("Morning rehearsal").performClick()
             rule.onNodeWithText("Start the set").assertIsDisplayed()
@@ -288,47 +297,318 @@ class ScreenSmokeTest {
     }
 
     @Test
-    fun libraryScreenShowsLilyPondBadgeAndViewerSupportFilter() {
+    @OptIn(ExperimentalTestApi::class)
+    fun focusingARowShowsTheDetailPanelAndOpenGoesStraightToTheViewer() {
         runBlocking {
             val items = listOf(
-                testSheetMusicItem(
-                    id = "moon_river",
-                    title = "Moon River",
-                    pageCount = 2,
-                    originalFileName = "Moon River.pdf",
-                ),
-                testSheetMusicItem(
-                    id = "prelude",
-                    title = "Prelude",
-                    composer = "Bach",
-                    pageCount = 1,
-                    originalFileName = "Prelude.ly",
-                ),
+                testSheetMusicItem(id = "moon_river", title = "Moon River", collection = "Standards", pageCount = 6)
+                    .copy(lastViewedPage = 2, lastOpenedEpochMillis = 1L),
+                testSheetMusicItem(id = "clair_de_lune", title = "Clair de Lune", pageCount = 4),
             )
-            val runtime = createTestPlatformRuntime(initialItems = items)
-            val appState = createTestLunarAppState(
-                scope = backgroundScope(),
-                runtime = runtime,
+            val runtime = createTestPlatformRuntime(
+                initialItems = items,
+                pdfExporter = TestPdfDocumentExporter { _, suggestedFileName -> "Downloads/$suggestedFileName" },
+                scoreDownloadSupported = true,
             )
-            val snapshot = runtime.repository.library.value
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.OCEAN) {
-                    LibraryScreen(
-                        runtime = runtime,
-                        snapshot = snapshot,
-                        appState = appState,
-                    )
+                val snapshot by runtime.repository.library.collectAsState()
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
                 }
             }
 
-            rule.onNodeWithContentDescription("LilyPond viewer").assertIsDisplayed()
-            rule.onNodeWithContentDescription("PDF viewer").assertIsDisplayed()
-            rule.onNodeWithText("Show filters").assertIsDisplayed()
-            rule.onNodeWithText("Show filters").performClick()
-            rule.onNodeWithText("Viewer support").assertIsDisplayed()
-            rule.onNodeWithText("PDF Viewer").assertIsDisplayed()
-            rule.onNodeWithText("LilyPond Viewer").assertIsDisplayed()
+            rule.onNodeWithTag(LibraryTestTags.JumpBackIn).assertIsDisplayed()
+            assertTrue(rule.onAllNodesWithTag(LibraryTestTags.DetailPanel).fetchSemanticsNodes().isEmpty())
+
+            rule.onNodeWithTag(LibraryTestTags.row("moon_river")).performClick()
+            rule.runOnIdle { assertEquals("moon_river", appState.focusedScoreId) }
+            rule.onNodeWithTag(LibraryTestTags.DetailTitle, useUnmergedTree = true).assertTextEquals("Moon River")
+            rule.onNodeWithText("Last on page 3 of 6", substring = true).assertExists()
+            rule.onNodeWithText("From the top").assertExists()
+
+            rule.onNodeWithContentDescription("Download Moon River").performScrollTo().performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                appState.bannerMessage == "Saved \"Moon River\" to Downloads/Moon River.pdf."
+            }
+            rule.onNodeWithContentDescription("Show info for Moon River").performScrollTo().performClick()
+            rule.onNodeWithText("Filename").performScrollTo().assertIsDisplayed()
+            rule.onNodeWithText("Moon River.pdf").assertExists()
+
+            rule.onNodeWithText("Open at page 3").performScrollTo().performClick()
+            rule.runOnIdle {
+                assertEquals(ViewerTarget.Score("moon_river"), appState.fullscreenTarget)
+                assertEquals(2, appState.viewerStartPage)
+                appState.closeFullscreen()
+            }
+
+            rule.onNodeWithTag(LibraryTestTags.row("clair_de_lune")).performTouchInput { doubleClick() }
+            rule.runOnIdle {
+                assertEquals(ViewerTarget.Score("clair_de_lune"), appState.fullscreenTarget)
+                appState.closeFullscreen()
+            }
+
+            rule.onNodeWithTag(LibraryTestTags.row("moon_river")).performClick()
+            rule.onRoot().performKeyInput { pressKey(Key.Enter) }
+            rule.runOnIdle {
+                assertEquals(ViewerTarget.Score("moon_river"), appState.fullscreenTarget)
+            }
+        }
+    }
+
+    @Test
+    fun detailPanelEditsDetailsInlineAndHidesTheScore() {
+        runBlocking {
+            val item = testSheetMusicItem(id = "moon_river", title = "Moon River", composer = "Mancini")
+            val runtime = createTestPlatformRuntime(initialItems = listOf(item))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+
+            rule.setContent {
+                val snapshot by runtime.repository.library.collectAsState()
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
+                }
+            }
+
+            rule.onNodeWithTag(LibraryTestTags.row("moon_river")).performClick()
+            rule.onNodeWithContentDescription("Edit Moon River").performScrollTo().performClick()
+            rule.onNode(hasSetTextAction() and hasText("Mancini")).performScrollTo().performTextReplacement("Henry Mancini")
+            rule.onNodeWithText("Save").performScrollTo().performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.library.value.items.single().composer == "Henry Mancini"
+            }
+            rule.runOnIdle { assertEquals(null, appState.editingItemId) }
+
+            rule.onNodeWithContentDescription("Hide Moon River").performScrollTo().performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.library.value.items.single().isHidden
+            }
+            rule.runOnIdle { assertEquals(null, appState.focusedScoreId) }
+
+            rule.onNodeWithText("Hidden").performClick()
+            rule.onNodeWithTag(LibraryTestTags.row("moon_river")).performClick()
+            rule.onNodeWithContentDescription("Restore Moon River").performScrollTo().performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                !runtime.repository.library.value.items.single().isHidden
+            }
+        }
+    }
+
+    @Test
+    fun multiSelectAddsScoresToASetlistFromThePopover() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(id = "moon_river", title = "Moon River"),
+                testSheetMusicItem(id = "clair_de_lune", title = "Clair de Lune"),
+            )
+            val setlist = testLibrarySetlist(id = "set_morning", name = "Morning rehearsal", itemIds = emptyList())
+            val runtime = createTestPlatformRuntime(initialItems = items, initialSetlists = listOf(setlist))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+
+            rule.setContent {
+                val snapshot by runtime.repository.library.collectAsState()
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
+                }
+            }
+
+            rule.onNodeWithContentDescription("Select Moon River").performClick()
+            rule.onNodeWithContentDescription("Select Clair de Lune").performClick()
+            rule.onNodeWithTag(LibraryTestTags.SelectionBar).assertIsDisplayed()
+            rule.onNodeWithText("2 scores selected").assertIsDisplayed()
+            assertTrue(rule.onAllNodesWithTag(LibraryTestTags.Toolbar).fetchSemanticsNodes().isEmpty())
+
+            rule.onNodeWithText("Add to setlist").performClick()
+            rule.onNodeWithTag(LibraryTestTags.SetlistPopover).assertExists()
+            rule.onNodeWithText("Morning rehearsal").performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.library.value.setlists.single().itemIds.toSet() == items.map { it.id }.toSet()
+            }
+
+            rule.onNodeWithContentDescription("New setlist...").performTextInput("Evening")
+            rule.onNodeWithText("Create").performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.library.value.setlists.any { it.name == "Evening" && it.itemIds.size == 2 }
+            }
+
+            rule.runOnIdle { appState.dismissSetlistPicker() }
+            rule.onNodeWithText("Clear").performClick()
+            rule.runOnIdle { assertTrue(appState.selectedScoreIds.isEmpty()) }
+            rule.onNodeWithTag(LibraryTestTags.Toolbar).assertIsDisplayed()
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun searchShortcutClearsTheSelectionAndFocusesTheSearchField() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(id = "moon_river", title = "Moon River"),
+                testSheetMusicItem(id = "clair_de_lune", title = "Clair de Lune"),
+            )
+            val runtime = createTestPlatformRuntime(initialItems = items)
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+
+            rule.setContent {
+                val snapshot by runtime.repository.library.collectAsState()
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
+                }
+            }
+
+            rule.onNodeWithContentDescription("Select Moon River").performClick()
+            rule.onNodeWithTag(LibraryTestTags.SelectionBar).assertIsDisplayed()
+
+            rule.onRoot().performKeyInput {
+                keyDown(Key.CtrlLeft)
+                pressKey(Key.K)
+                keyUp(Key.CtrlLeft)
+            }
+
+            rule.runOnIdle { assertTrue(appState.selectedScoreIds.isEmpty()) }
+            rule.onNodeWithTag(LibraryTestTags.Toolbar).assertIsDisplayed()
+            // The only text field on screen is the library search.
+            rule.onNode(hasSetTextAction() and isFocused()).assertExists()
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun groupedListNavigatesAndRangeSelectsInDisplayedOrder() {
+        runBlocking {
+            // Sorted by title the order is Alpha, Beta, Gamma; grouped by composer it reads Beta | Alpha, Gamma.
+            val items = listOf(
+                testSheetMusicItem(id = "alpha", title = "Alpha", composer = "Zed"),
+                testSheetMusicItem(id = "beta", title = "Beta", composer = "Abe"),
+                testSheetMusicItem(id = "gamma", title = "Gamma", composer = "Zed"),
+            )
+            val runtime = createTestPlatformRuntime(initialItems = items)
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateBrowseMode(com.ryanjames.lunar.ui.LibraryBrowseMode.BY_COMPOSER)
+            appState.updateSortOption(com.ryanjames.lunar.library.model.LibrarySortOption.TITLE)
+            appState.updateSortDirection(com.ryanjames.lunar.library.model.SortDirection.ASCENDING)
+
+            rule.setContent {
+                val snapshot by runtime.repository.library.collectAsState()
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
+                }
+            }
+
+            rule.onNodeWithTag(LibraryTestTags.row("beta")).performClick()
+            rule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
+            rule.runOnIdle { assertEquals("alpha", appState.focusedScoreId) }
+            rule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
+            rule.runOnIdle { assertEquals("gamma", appState.focusedScoreId) }
+
+            rule.onNodeWithTag(LibraryTestTags.row("alpha")).performClick()
+            rule.onRoot().performKeyInput { keyDown(Key.ShiftLeft) }
+            rule.onNodeWithTag(LibraryTestTags.row("gamma")).performClick()
+            rule.onRoot().performKeyInput { keyUp(Key.ShiftLeft) }
+            rule.runOnIdle { assertEquals(setOf("alpha", "gamma"), appState.selectedScoreIds) }
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun keyboardNavigationScrollsTheFocusedRowIntoView() {
+        runBlocking {
+            val composers = listOf("Albeniz", "Bach", "Chopin", "Debussy", "Elgar", "Faure", "Grieg", "Haydn", "Ives", "Liszt")
+            val items = composers.flatMap { composer ->
+                (1..4).map { index -> testSheetMusicItem(id = "${composer}_$index", title = "$composer piece $index", composer = composer) }
+            }
+            val runtime = createTestPlatformRuntime(initialItems = items)
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateBrowseMode(com.ryanjames.lunar.ui.LibraryBrowseMode.BY_COMPOSER)
+            appState.updateSortOption(com.ryanjames.lunar.library.model.LibrarySortOption.TITLE)
+            appState.updateSortDirection(com.ryanjames.lunar.library.model.SortDirection.ASCENDING)
+
+            rule.setContent {
+                val snapshot by runtime.repository.library.collectAsState()
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
+                }
+            }
+
+            assertTrue(rule.onAllNodesWithTag(LibraryTestTags.row("Liszt_4")).fetchSemanticsNodes().isEmpty())
+            rule.onNodeWithTag(LibraryTestTags.row("Albeniz_1")).performClick()
+            repeat(items.size - 1) {
+                rule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
+                rule.waitForIdle()
+            }
+            rule.runOnIdle { assertEquals("Liszt_4", appState.focusedScoreId) }
+            rule.onNodeWithTag(LibraryTestTags.row("Liszt_4")).assertIsDisplayed()
+
+            repeat(items.size - 1) {
+                rule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
+                rule.waitForIdle()
+            }
+            rule.runOnIdle { assertEquals("Albeniz_1", appState.focusedScoreId) }
+            rule.onNodeWithTag(LibraryTestTags.row("Albeniz_1")).assertIsDisplayed()
+            rule.onNodeWithText("ALBENIZ").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun viewerPickerFromAFilteredSetlistStillShowsItsTarget() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(id = "moon_river", title = "Moon River", originalFileName = "Moon River.pdf"),
+                testSheetMusicItem(id = "prelude", title = "Prelude", originalFileName = "Prelude.ly"),
+            )
+            val morning = testLibrarySetlist(id = "set_morning", name = "Morning rehearsal", itemIds = listOf("moon_river"))
+            val evening = testLibrarySetlist(id = "set_evening", name = "Evening recital", itemIds = emptyList())
+            val runtime = createTestPlatformRuntime(initialItems = items, initialSetlists = listOf(morning, evening))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateViewerSupportFilter(com.ryanjames.lunar.library.model.ViewerSupportFilter.LILYPOND)
+            appState.selectSection(com.ryanjames.lunar.ui.AppSection.SETLISTS)
+            appState.openSetlist("set_morning")
+
+            rule.setContent {
+                val snapshot by runtime.repository.library.collectAsState()
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
+                }
+            }
+
+            rule.runOnIdle {
+                appState.openScore(runtime.repository.getItem("moon_river")!!)
+                appState.showSetlistPickerForScore("moon_river")
+            }
+            rule.runOnIdle {
+                assertEquals(com.ryanjames.lunar.ui.AppSection.SETLISTS, appState.selectedSection)
+                assertEquals("moon_river", appState.focusedScoreId)
+                assertTrue(appState.setlistPickerVisible)
+            }
+            rule.onNodeWithTag(LibraryTestTags.DetailTitle, useUnmergedTree = true).assertTextEquals("Moon River")
+            // The setlist index also lists "Evening recital"; the picker dialog's entry is the last one.
+            rule.onAllNodesWithText("Evening recital").onLast().performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.library.value.setlists.single { it.id == "set_evening" }.itemIds == listOf("moon_river")
+            }
+        }
+    }
+
+    @Test
+    fun filterPopoverNarrowsTheListAndChipsRemoveFilters() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(id = "moon_river", title = "Moon River", pageCount = 2, originalFileName = "Moon River.pdf"),
+                testSheetMusicItem(id = "prelude", title = "Prelude", composer = "Bach", pageCount = 1, originalFileName = "Prelude.ly"),
+            )
+            val runtime = createTestPlatformRuntime(initialItems = items)
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+
+            rule.setContent {
+                val snapshot by runtime.repository.library.collectAsState()
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
+                }
+            }
+
+            rule.onNodeWithContentDescription("Filter scores").performClick()
+            rule.onNodeWithTag(LibraryTestTags.FilterPopover).assertExists()
             rule.onNodeWithText("LilyPond Viewer").performClick()
             rule.runOnIdle {
                 assertEquals(
@@ -336,30 +616,368 @@ class ScreenSmokeTest {
                     appState.query.viewerSupport,
                 )
             }
-            assertTrue(rule.onAllNodesWithText("Moon River").fetchSemanticsNodes().isEmpty())
-            rule.onNodeWithText("Prelude").assertIsDisplayed()
+            rule.onNodeWithText("Done").performClick()
+            assertTrue(rule.onAllNodes(isPopup()).fetchSemanticsNodes().isEmpty())
+            assertTrue(rule.onAllNodesWithTag(LibraryTestTags.row("moon_river")).fetchSemanticsNodes().isEmpty())
+            rule.onNodeWithTag(LibraryTestTags.row("prelude")).assertIsDisplayed()
+
+            rule.onNodeWithTag(LibraryTestTags.row("prelude")).performClick()
+            rule.onNodeWithContentDescription("LilyPond viewer").assertExists()
+
+            rule.onNodeWithContentDescription("Remove filter Viewer: LilyPond Viewer").performClick()
+            rule.runOnIdle {
+                assertEquals(com.ryanjames.lunar.library.model.ViewerSupportFilter.ALL, appState.query.viewerSupport)
+            }
+            rule.onNodeWithTag(LibraryTestTags.row("moon_river")).assertIsDisplayed()
         }
     }
 
     @Test
-    fun libraryScreenShowsSongbookActionsAndSongbookOverview() {
+    @OptIn(ExperimentalTestApi::class)
+    fun detailPanelSitsBesideTheCatalogueOnWideWindowsAndBelowItOnNarrowOnes() = runBlocking {
+        val item = testSheetMusicItem(id = "moon_river", title = "Moon River")
+        listOf(1400 to true, 900 to false).forEach { (width, expectSide) ->
+            val runtime = createTestPlatformRuntime(initialItems = listOf(item))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.focusScore(item.id)
+            runDesktopComposeUiTest(width = width, height = 900) {
+                setContent {
+                    LunarTheme(skin = AppSkin.PAPER) {
+                        LibraryScreen(runtime = runtime, snapshot = runtime.repository.library.value, appState = appState)
+                    }
+                }
+                val panel = onNodeWithTag(LibraryTestTags.DetailPanel).fetchSemanticsNode().boundsInRoot
+                val catalogue = onNodeWithTag(LibraryTestTags.Catalogue).fetchSemanticsNode().boundsInRoot
+                if (expectSide) {
+                    assertTrue(panel.left >= catalogue.right, "Expected the panel beside the catalogue at $width px")
+                } else {
+                    assertTrue(panel.top >= catalogue.bottom, "Expected the panel below the catalogue at $width px")
+                }
+            }
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun detailEditorKeepsItsDraftWhenThePanelMovesAcrossTheBreakpoint() = runBlocking {
+        val item = testSheetMusicItem(id = "moon_river", title = "Moon River", composer = "Mancini")
+        val runtime = createTestPlatformRuntime(initialItems = listOf(item))
+        val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+        appState.focusScore(item.id)
+        var screenWidth by mutableStateOf(1400.dp)
+        runDesktopComposeUiTest(width = 1400, height = 900) {
+            setContent {
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(
+                        runtime = runtime,
+                        snapshot = runtime.repository.library.value,
+                        appState = appState,
+                        modifier = Modifier.width(screenWidth),
+                    )
+                }
+            }
+            fun panelIsBesideCatalogue(): Boolean {
+                val panel = onNodeWithTag(LibraryTestTags.DetailPanel).fetchSemanticsNode().boundsInRoot
+                val catalogue = onNodeWithTag(LibraryTestTags.Catalogue).fetchSemanticsNode().boundsInRoot
+                return panel.left >= catalogue.right
+            }
+
+            onNodeWithContentDescription("Edit Moon River").performScrollTo().performClick()
+            onNode(hasSetTextAction() and hasText("Mancini")).performScrollTo().performTextReplacement("Henry Mancini")
+            assertTrue(panelIsBesideCatalogue())
+
+            screenWidth = 900.dp
+            waitForIdle()
+            assertTrue(!panelIsBesideCatalogue())
+            assertEquals("moon_river", appState.editingItemId)
+            onNode(hasSetTextAction() and hasText("Henry Mancini")).assertExists()
+
+            screenWidth = 1400.dp
+            waitForIdle()
+            assertTrue(panelIsBesideCatalogue())
+            onNode(hasSetTextAction() and hasText("Henry Mancini")).performScrollTo()
+            onNodeWithText("Save").performScrollTo().performClick()
+            waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.library.value.items.single().composer == "Henry Mancini"
+            }
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun galleryKeepsItsScrollPositionAcrossAViewerVisit() {
+        runBlocking {
+            val items = (0 until 40).map { index ->
+                val label = index.toString().padStart(2, '0')
+                // Newest first under the default sort, so score_00 leads the list.
+                testSheetMusicItem(id = "score_$label", title = "Score $label", dateAddedEpochMillis = 100L - index)
+            }
+            val runtime = createTestPlatformRuntime(
+                initialItems = items,
+                initialSettings = AppSettings(
+                    defaultLibraryLayout = com.ryanjames.lunar.settings.LibraryLayoutPreference.GRID,
+                    refreshOnLaunch = false,
+                ),
+            )
+
+            rule.setContent {
+                LunarApp(runtime)
+            }
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithTag(LibraryTestTags.row("score_00")).fetchSemanticsNodes().isNotEmpty()
+            }
+
+            rule.onNode(hasScrollToIndexAction()).performScrollToIndex(30)
+            rule.onNodeWithTag(LibraryTestTags.row("score_30")).performClick()
+            rule.onNode(hasText("Open") and hasAnyAncestor(hasTestTag(LibraryTestTags.DetailPanel)))
+                .performScrollTo()
+                .performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithTag(LunarTestTags.LIBRARY_PANEL).fetchSemanticsNodes().isEmpty()
+            }
+            rule.onRoot().performKeyInput { pressKey(Key.F11) }
+
+            rule.onNodeWithTag(LibraryTestTags.row("score_30")).assertIsDisplayed()
+            assertTrue(rule.onAllNodesWithTag(LibraryTestTags.row("score_00")).fetchSemanticsNodes().isEmpty())
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun detailEditorKeepsItsDraftAcrossAViewerVisit() {
+        runBlocking {
+            val item = testSheetMusicItem(id = "moon_river", title = "Moon River", composer = "Mancini")
+            val runtime = createTestPlatformRuntime(
+                initialItems = listOf(item),
+                initialSettings = AppSettings(refreshOnLaunch = false),
+            )
+
+            rule.setContent {
+                LunarApp(runtime)
+            }
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithTag(LibraryTestTags.row("moon_river")).fetchSemanticsNodes().isNotEmpty()
+            }
+
+            rule.onNodeWithTag(LibraryTestTags.row("moon_river")).performClick()
+            rule.onNodeWithContentDescription("Edit Moon River").performScrollTo().performClick()
+            rule.onNode(hasSetTextAction() and hasText("Mancini")).performScrollTo().performTextReplacement("Henry Mancini")
+
+            rule.onNode(hasText("Open") and hasAnyAncestor(hasTestTag(LibraryTestTags.DetailPanel)))
+                .performScrollTo()
+                .performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithTag(LunarTestTags.LIBRARY_PANEL).fetchSemanticsNodes().isEmpty()
+            }
+            rule.onRoot().performKeyInput { pressKey(Key.F11) }
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithTag(LibraryTestTags.DetailPanel).fetchSemanticsNodes().isNotEmpty()
+            }
+
+            rule.onNode(hasSetTextAction() and hasText("Henry Mancini")).performScrollTo()
+            rule.onNodeWithText("Save").performScrollTo().performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.repository.library.value.items.single().composer == "Henry Mancini"
+            }
+        }
+    }
+
+    @Test
+    fun longCatalogueTitleIsEllipsizedButKeepsFullTextInSemantics() {
+        runBlocking {
+            val longTitle = "Sonata for Piano and Violin in A major, " + "an extremely long movement title ".repeat(12)
+            val item = testSheetMusicItem(id = "long", title = longTitle.trim())
+            val runtime = createTestPlatformRuntime(initialItems = listOf(item))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+
+            rule.setContent {
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(runtime = runtime, snapshot = runtime.repository.library.value, appState = appState)
+                }
+            }
+
+            val titleNode = rule.onNodeWithTag(LibraryTestTags.rowTitle("long"), useUnmergedTree = true)
+            titleNode.assertTextEquals(longTitle.trim())
+            val layouts = mutableListOf<TextLayoutResult>()
+            titleNode.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertTrue(layouts.single().hasVisualOverflow)
+            assertEquals(1, layouts.single().lineCount)
+        }
+    }
+
+    @Test
+    fun compactCatalogueRowKeepsTitleVisibleNextToLongCollection() {
+        runBlocking {
+            val item = testSheetMusicItem(
+                id = "compact",
+                title = "Clair de lune",
+                collection = "The Complete Collected Works for Solo Piano, Volume Three",
+                pageCount = 12,
+            ).copy(isFavorite = true)
+            val runtime = createTestPlatformRuntime(initialItems = listOf(item))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+
+            rule.setContent {
+                LunarTheme(skin = AppSkin.PAPER) {
+                    Box(modifier = Modifier.requiredSize(width = 360.dp, height = 640.dp)) {
+                        LibraryScreen(runtime = runtime, snapshot = runtime.repository.library.value, appState = appState)
+                    }
+                }
+            }
+
+            val title = rule.onNodeWithTag(LibraryTestTags.rowTitle("compact"), useUnmergedTree = true)
+            title.assertIsDisplayed()
+            val titleBounds = title.getBoundsInRoot()
+            assertTrue(titleBounds.right - titleBounds.left >= 60.dp, "Title was squeezed to ${titleBounds.right - titleBounds.left}")
+            rule.onNodeWithText("12 pp", useUnmergedTree = true).assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun alphabetIndexJumpsToTheFirstGroupForALetter() {
+        runBlocking {
+            val composers = listOf("Albeniz", "Bach", "Chopin", "Debussy", "Elgar", "Faure", "Grieg", "Haydn", "Ives", "Liszt")
+            val items = composers.flatMap { composer ->
+                (1..4).map { index -> testSheetMusicItem(id = "${composer}_$index", title = "$composer piece $index", composer = composer) }
+            }
+            val runtime = createTestPlatformRuntime(initialItems = items)
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateBrowseMode(com.ryanjames.lunar.ui.LibraryBrowseMode.BY_COMPOSER)
+
+            rule.setContent {
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(runtime = runtime, snapshot = runtime.repository.library.value, appState = appState)
+                }
+            }
+
+            assertTrue(rule.onAllNodesWithTag(LibraryTestTags.row("Liszt_1")).fetchSemanticsNodes().isEmpty())
+            rule.onNodeWithContentDescription("Jump to L").performClick()
+            rule.onNodeWithTag(LibraryTestTags.row("Liszt_1")).assertIsDisplayed()
+            rule.onNodeWithText("LISZT").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun galleryFocusDoesNotTickTheCardCheckbox() {
         runBlocking {
             val items = listOf(
-                testSheetMusicItem(
-                    id = "autumn_leaves",
-                    title = "Autumn Leaves",
-                    collection = "Standards",
-                ),
-                testSheetMusicItem(
-                    id = "all_the_things",
-                    title = "All The Things You Are",
-                    collection = "Standards",
-                ),
+                testSheetMusicItem(id = "alpha", title = "Alpha"),
+                testSheetMusicItem(id = "beta", title = "Beta"),
+            )
+            val runtime = createTestPlatformRuntime(initialItems = items)
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateLayoutMode(com.ryanjames.lunar.ui.LibraryLayoutMode.GRID)
+
+            rule.setContent {
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(runtime = runtime, snapshot = runtime.repository.library.value, appState = appState)
+                }
+            }
+
+            rule.onNodeWithTag(LibraryTestTags.row("alpha")).performClick()
+            rule.runOnIdle {
+                assertEquals("alpha", appState.focusedScoreId)
+                assertTrue(appState.selectedScoreIds.isEmpty())
+            }
+            rule.onNodeWithContentDescription("Select Alpha").assertIsOff()
+
+            rule.onNodeWithContentDescription("Select Beta").performClick()
+            rule.runOnIdle { assertEquals(setOf("beta"), appState.selectedScoreIds) }
+            rule.onNodeWithContentDescription("Select Alpha").assertIsOff()
+            rule.onNodeWithContentDescription("Select Beta").assertIsOn()
+
+            rule.onNodeWithContentDescription("Select Alpha").performClick()
+            rule.onNodeWithContentDescription("Select Alpha").performClick()
+            rule.runOnIdle { assertEquals(setOf("beta"), appState.selectedScoreIds) }
+        }
+    }
+
+    @Test
+    fun galleryEditAndInfoOnFocusedScoreClearMultiSelection() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(id = "alpha", title = "Alpha"),
+                testSheetMusicItem(id = "beta", title = "Beta"),
+            )
+            val runtime = createTestPlatformRuntime(initialItems = items)
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateLayoutMode(com.ryanjames.lunar.ui.LibraryLayoutMode.GRID)
+
+            rule.setContent {
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(runtime = runtime, snapshot = runtime.repository.library.value, appState = appState)
+                }
+            }
+
+            rule.onNodeWithTag(LibraryTestTags.row("alpha")).performClick()
+            rule.onNodeWithContentDescription("Select Beta").performClick()
+            rule.runOnIdle { assertEquals(setOf("beta"), appState.selectedScoreIds) }
+            assertTrue(rule.onAllNodesWithTag(LibraryTestTags.DetailPanel).fetchSemanticsNodes().isEmpty())
+
+            rule.onNodeWithContentDescription("Edit Alpha").performClick()
+            rule.runOnIdle {
+                assertEquals("alpha", appState.focusedScoreId)
+                assertEquals("alpha", appState.editingItemId)
+                assertTrue(appState.selectedScoreIds.isEmpty())
+            }
+            rule.onNodeWithTag(LibraryTestTags.DetailPanel).assertExists()
+            rule.onNodeWithText("Close editor").assertExists()
+
+            rule.onNodeWithContentDescription("Select Beta").performScrollTo().performClick()
+            rule.runOnIdle { assertEquals(setOf("beta"), appState.selectedScoreIds) }
+            assertTrue(rule.onAllNodesWithTag(LibraryTestTags.DetailPanel).fetchSemanticsNodes().isEmpty())
+
+            rule.onNodeWithContentDescription("Show info for Alpha").performClick()
+            rule.runOnIdle {
+                assertEquals("alpha", appState.focusedScoreId)
+                assertEquals("alpha", appState.infoItemId)
+                assertTrue(appState.selectedScoreIds.isEmpty())
+            }
+            rule.onNodeWithTag(LibraryTestTags.DetailPanel).assertExists()
+            rule.onNodeWithText("Fewer details").assertExists()
+        }
+    }
+
+    @Test
+    fun groupsNamedLikeTheUnnamedBucketRenderAlongsideIt() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(id = "named", title = "Named", composer = "No composer", collection = "No collection"),
+                testSheetMusicItem(id = "loose", title = "Loose", composer = ""),
+            )
+            val runtime = createTestPlatformRuntime(initialItems = items)
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            appState.updateBrowseMode(com.ryanjames.lunar.ui.LibraryBrowseMode.BY_COLLECTION)
+
+            rule.setContent {
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(runtime = runtime, snapshot = runtime.repository.library.value, appState = appState)
+                }
+            }
+
+            assertEquals(2, rule.onAllNodesWithText("NO COLLECTION").fetchSemanticsNodes().size)
+            rule.onNodeWithTag(LibraryTestTags.row("named")).assertIsDisplayed()
+            rule.onNodeWithTag(LibraryTestTags.row("loose")).assertIsDisplayed()
+
+            rule.runOnIdle { appState.updateBrowseMode(com.ryanjames.lunar.ui.LibraryBrowseMode.BY_COMPOSER) }
+            rule.waitForIdle()
+            assertEquals(2, rule.onAllNodesWithText("NO COMPOSER").fetchSemanticsNodes().size)
+            rule.onNodeWithTag(LibraryTestTags.row("named")).assertIsDisplayed()
+            rule.onNodeWithTag(LibraryTestTags.row("loose")).assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun libraryScreenShowsSongbookPopoverAndSongbookOverview() {
+        runBlocking {
+            val items = listOf(
+                testSheetMusicItem(id = "autumn_leaves", title = "Autumn Leaves", collection = "Standards"),
+                testSheetMusicItem(id = "all_the_things", title = "All The Things You Are", collection = "Standards"),
             )
             val songbook = testLibrarySongbook(
                 id = "songbook_standards",
                 name = "Standards Book",
-                itemIds = items.map { it.id },
+                itemIds = listOf("all_the_things"),
                 pageCount = 12,
             )
             val runtime = createTestPlatformRuntime(
@@ -368,35 +986,31 @@ class ScreenSmokeTest {
                 songbookCreationSupported = true,
                 songbookCoverImageSupported = true,
             )
-            val appState = createTestLunarAppState(
-                scope = backgroundScope(),
-                runtime = runtime,
-            )
-            val snapshot = runtime.repository.library.value
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.OCEAN) {
-                    LibraryScreen(
-                        runtime = runtime,
-                        snapshot = snapshot,
-                        appState = appState,
-                    )
+                val snapshot by runtime.repository.library.collectAsState()
+                LunarTheme(skin = AppSkin.PAPER) {
+                    LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
                 }
             }
 
             rule.onNodeWithContentDescription("Select Autumn Leaves").performClick()
-            rule.onNodeWithText("Add to songbook").assertIsDisplayed()
             rule.onNodeWithText("Add to songbook").performClick()
-            rule.onNodeWithText("Add 1 score to a songbook").assertIsDisplayed()
+            rule.onNodeWithTag(LibraryTestTags.SongbookPopover).assertExists()
+            rule.onNodeWithText("Standards Book").assertExists()
+            rule.onNodeWithText("New songbook...").performClick()
+            rule.onNodeWithText("Bind a new songbook").assertIsDisplayed()
             rule.onNodeWithText("Choose cover").assertIsDisplayed()
             rule.onNodeWithText("Cancel").performClick()
+            rule.runOnIdle { assertTrue(!appState.newSongbookDialogVisible) }
 
-            rule.onNodeWithText("Songbooks").performClick()
+            rule.runOnIdle { appState.selectSection(AppSection.SONGBOOKS) }
             rule.onNodeWithText("Standards Book").assertIsDisplayed()
             rule.onNodeWithText("Standards Book").performClick()
             rule.onNodeWithText("Open songbook").performClick()
             rule.runOnIdle {
-                assertEquals(ViewerTarget.Songbook(songbook.id), appState.previewTarget)
+                assertEquals(ViewerTarget.Songbook(songbook.id), appState.fullscreenTarget)
             }
         }
     }
@@ -430,7 +1044,7 @@ class ScreenSmokeTest {
             )
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     ImportScreen(
                         runtime = runtime,
                         importerState = ImporterState(statusMessage = "Ready to import PDFs."),
@@ -457,11 +1071,17 @@ class ScreenSmokeTest {
     }
 
     @Test
-    fun settingsScreenResetsThemeAndReturnsToLibrary() {
+    fun settingsScreenPicksMoonlightSkinAndPersistsIt() {
         runBlocking {
-            val runtime = createTestPlatformRuntime(
-                initialSettings = AppSettings(theme = AppColorTheme.DARCULA),
+            val settingsDir = Files.createTempDirectory("lunar-settings-test").toString().toPath()
+            val settingsPath = settingsDir / "app_settings.json"
+            val runtime = createTestPlatformRuntime().copy(
+                settingsStore = JsonAppSettingsStore(
+                    fileSystem = FileSystem.SYSTEM,
+                    settingsPath = settingsPath,
+                ),
             )
+            runtime.settingsStore.initialize()
             val appState = createTestLunarAppState(
                 scope = backgroundScope(),
                 runtime = runtime,
@@ -470,7 +1090,7 @@ class ScreenSmokeTest {
 
             rule.setContent {
                 val settings by runtime.settingsStore.settings.collectAsState()
-                LunarTheme(theme = settings.theme) {
+                LunarTheme(skin = settings.resolvedSkin) {
                     SettingsScreen(
                         settings = settings,
                         appState = appState,
@@ -478,9 +1098,24 @@ class ScreenSmokeTest {
                 }
             }
 
-            rule.onNodeWithText("Appearance").assertIsDisplayed()
-            rule.onNodeWithText("Color theme").assertIsDisplayed()
-            rule.onNodeWithText("Darcula").assertIsDisplayed()
+            rule.onNodeWithTag(LunarTestTags.SETTINGS_APPEARANCE_PANEL).performScrollTo().assertIsDisplayed()
+            rule.onNodeWithTag(LunarTestTags.skinOption(AppSkin.PAPER)).assertIsSelected()
+            rule.onNodeWithTag(LunarTestTags.skinOption(AppSkin.MOONLIGHT)).assertIsNotSelected()
+
+            rule.onNodeWithTag(LunarTestTags.skinOption(AppSkin.MOONLIGHT)).performClick()
+            rule.waitUntil(timeoutMillis = 5_000) {
+                runtime.settingsStore.settings.value.skin == AppSkin.MOONLIGHT
+            }
+            rule.onNodeWithTag(LunarTestTags.skinOption(AppSkin.MOONLIGHT)).assertIsSelected()
+            rule.onNodeWithTag(LunarTestTags.skinOption(AppSkin.PAPER)).assertIsNotSelected()
+
+            val reloaded = JsonAppSettingsStore(
+                fileSystem = FileSystem.SYSTEM,
+                settingsPath = settingsPath,
+            )
+            reloaded.initialize()
+            assertEquals(AppSkin.MOONLIGHT, reloaded.settings.value.skin)
+
             rule.onNodeWithText("Keybindings").performClick()
             rule.onNodeWithText("Viewer keybindings").assertIsDisplayed()
             rule.onNodeWithText("Toggle fullscreen").assertIsDisplayed()
@@ -490,7 +1125,7 @@ class ScreenSmokeTest {
                 appState.resetGlobalSettings()
             }
             rule.waitUntil(timeoutMillis = 5_000) {
-                runtime.settingsStore.settings.value.theme == AppColorTheme.OCEAN
+                runtime.settingsStore.settings.value.skin == AppSkin.PAPER
             }
             rule.runOnIdle {
                 appState.selectSection(AppSection.LIBRARY)
@@ -498,6 +1133,7 @@ class ScreenSmokeTest {
             rule.runOnIdle {
                 assertEquals(AppSection.LIBRARY, appState.selectedSection)
             }
+            FileSystem.SYSTEM.deleteRecursively(settingsDir)
         }
     }
 
@@ -531,7 +1167,7 @@ class ScreenSmokeTest {
             )
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     ImportScreen(
                         runtime = runtime,
                         importerState = ImporterState(statusMessage = "Ready to import PDFs."),
@@ -564,7 +1200,7 @@ class ScreenSmokeTest {
             val editedSource = "\\version \"2.24.0\"\n{ g'4 a' b' c'' }"
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     ComposeScreen(runtime = runtime)
                 }
             }
@@ -602,7 +1238,7 @@ class ScreenSmokeTest {
             val editedSource = "\\version \"2.24.0\"\n{ e'4 fis' gis' a' }"
 
             rule.setContent {
-                LunarTheme(theme = AppColorTheme.OCEAN) {
+                LunarTheme(skin = AppSkin.PAPER) {
                     ComposeScreen(runtime = runtime)
                 }
             }
@@ -642,20 +1278,156 @@ class ScreenSmokeTest {
     }
 
     @Test
-    fun bottomNavigationShowsComposeSection() {
-        rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
-                BottomNavigationPanel(
-                    selectedSection = AppSection.LIBRARY,
-                    onSelectSection = {},
-                )
+    fun expandedSidebarNavigatesEverySection() {
+        runBlocking {
+            val runtime = createTestPlatformRuntime(
+                initialItems = listOf(testSheetMusicItem(id = "moon_river", title = "Moon River", collection = "Standards")),
+            )
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            rule.setShellContent(runtime, appState, width = 1024.dp)
+
+            rule.onNodeWithText("Lunar").assertIsDisplayed()
+            rule.onNodeWithTag("sidebar-arrange-FAVOURITES").assertIsDisplayed()
+            rule.onNodeWithText("Standards").assertIsDisplayed()
+            rule.onNodeWithTag("sidebar-arrange-FAVOURITES").performClick()
+            rule.runOnIdle { assertTrue(appState.query.favoritesOnly) }
+
+            rule.navigateEverySection(appState)
+
+            // The contextual part is Library-only.
+            rule.runOnIdle { appState.selectSection(AppSection.SETLISTS) }
+            assertTrue(rule.onAllNodesWithTag("sidebar-arrange-ALL").fetchSemanticsNodes().isEmpty())
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun collapsedRailNavigatesEverySectionAndPersistsToggle() {
+        runBlocking {
+            val runtime = createTestPlatformRuntime(initialSettings = AppSettings(sidebarCollapsed = true))
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            rule.setShellContent(runtime, appState, width = 1024.dp)
+
+            assertTrue(rule.onAllNodesWithText("Lunar").fetchSemanticsNodes().isEmpty())
+            rule.onNodeWithContentDescription("Setlists").assertIsDisplayed()
+            rule.navigateEverySection(appState)
+
+            rule.onNodeWithContentDescription("Expand sidebar").performClick()
+            rule.waitUntil(timeoutMillis = 5_000) { !runtime.settingsStore.settings.value.sidebarCollapsed }
+            rule.onNodeWithText("Lunar").assertIsDisplayed()
+
+            rule.onNodeWithTag("shell-content").performSemanticsAction(SemanticsActions.RequestFocus)
+            rule.onNodeWithTag("shell-content").assertIsFocused()
+            rule.onRoot().performKeyInput {
+                keyDown(Key.CtrlLeft)
+                pressKey(Key.B)
+                keyUp(Key.CtrlLeft)
+            }
+            rule.waitUntil(timeoutMillis = 5_000) { runtime.settingsStore.settings.value.sidebarCollapsed }
+            rule.onNodeWithContentDescription("Expand sidebar").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun mediumWidthShowsRailWithoutExpandButton() {
+        runBlocking {
+            val runtime = createTestPlatformRuntime()
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            rule.setShellContent(runtime, appState, width = 800.dp)
+
+            rule.onNodeWithContentDescription("Songbooks").assertIsDisplayed()
+            assertTrue(rule.onAllNodesWithContentDescription("Expand sidebar").fetchSemanticsNodes().isEmpty())
+            rule.onNodeWithText("content:LIBRARY:inline").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun compactDrawerNavigatesEverySection() {
+        runBlocking {
+            val runtime = createTestPlatformRuntime()
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            rule.setShellContent(runtime, appState, width = 420.dp)
+
+            assertTrue(rule.onAllNodesWithTag(SidebarDrawerTag).fetchSemanticsNodes().isEmpty())
+            AppSection.entries.forEach { section ->
+                rule.onNodeWithContentDescription("Open navigation").performClick()
+                rule.onNodeWithTag(SidebarDrawerTag).assertIsDisplayed()
+                rule.onNodeWithTag(sidebarNavTag(section)).performClick()
+                rule.runOnIdle { assertEquals(section, appState.selectedSection) }
+                assertTrue(rule.onAllNodesWithTag(SidebarDrawerTag).fetchSemanticsNodes().isEmpty())
+                rule.onNodeWithText("content:${section.name}:", substring = true).assertIsDisplayed()
             }
         }
+    }
 
-        rule.onDisplayedNodeWithText("Sources").assertIsDisplayed()
-        rule.onDisplayedNodeWithText("Library").assertIsDisplayed()
-        rule.onDisplayedNodeWithText("Compose").assertIsDisplayed()
-        rule.onDisplayedNodeWithText("Settings").assertIsDisplayed()
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun compactDrawerClosesOnEscape() {
+        runBlocking {
+            val runtime = createTestPlatformRuntime()
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            rule.setShellContent(runtime, appState, width = 420.dp)
+
+            rule.onNodeWithContentDescription("Open navigation").performClick()
+            rule.onNodeWithTag(SidebarDrawerTag).assertIsDisplayed()
+            rule.onRoot().performKeyInput { pressKey(Key.Escape) }
+            rule.waitUntil(timeoutMillis = 5_000) {
+                rule.onAllNodesWithTag(SidebarDrawerTag).fetchSemanticsNodes().isEmpty()
+            }
+            rule.runOnIdle { assertEquals(AppSection.LIBRARY, appState.selectedSection) }
+        }
+    }
+
+    @Test
+    fun shortRailKeepsSettingsReachable() {
+        runBlocking {
+            val runtime = createTestPlatformRuntime()
+            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
+            // A landscape phone: medium width selects the rail, but six items cannot fit.
+            rule.setShellContent(runtime, appState, width = 800.dp, height = 240.dp)
+
+            val lastPrimary = SidebarPrimaryDestinations.last().section
+            rule.onNodeWithTag(sidebarNavTag(lastPrimary)).performScrollTo().performClick()
+            rule.runOnIdle { assertEquals(lastPrimary, appState.selectedSection) }
+
+            rule.onNodeWithTag(sidebarNavTag(AppSection.SETTINGS)).assertIsDisplayed().performClick()
+            rule.runOnIdle { assertEquals(AppSection.SETTINGS, appState.selectedSection) }
+        }
+    }
+}
+
+private fun ComposeContentTestRule.setShellContent(
+    runtime: com.ryanjames.lunar.platform.PlatformRuntime,
+    appState: com.ryanjames.lunar.ui.LunarAppState,
+    width: Dp,
+    height: Dp = 700.dp,
+) {
+    setContent {
+        val settings by runtime.settingsStore.settings.collectAsState()
+        val focusRequester = remember { FocusRequester() }
+        LaunchedEffect(Unit) { focusRequester.requestFocus() }
+        LunarTheme(skin = AppSkin.PAPER) {
+            Box(modifier = Modifier.requiredSize(width = width, height = height)) {
+                LunarAppShell(
+                    appState = appState,
+                    snapshot = runtime.repository.library.collectAsState().value,
+                    syncState = CloudSyncState(),
+                    settings = settings,
+                ) { sidebarContextVisible ->
+                    Box(modifier = Modifier.testTag("shell-content").focusRequester(focusRequester).focusable()) {
+                        val mode = if (sidebarContextVisible) "sidebar" else "inline"
+                        Text("content:${appState.selectedSection.name}:$mode")
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun ComposeContentTestRule.navigateEverySection(appState: com.ryanjames.lunar.ui.LunarAppState) {
+    AppSection.entries.forEach { section ->
+        onNodeWithTag(sidebarNavTag(section)).performClick()
+        runOnIdle { assertEquals(section, appState.selectedSection) }
     }
 }
 

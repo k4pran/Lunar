@@ -1,15 +1,25 @@
 package com.ryanjames.lunar
 
 import androidx.compose.ui.input.key.Key
+import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.pressKey
 import com.ryanjames.lunar.library.model.PdfDocumentReference
@@ -19,7 +29,7 @@ import com.ryanjames.lunar.platform.LilyPondSourceSnapshot
 import com.ryanjames.lunar.platform.PdfDocumentInfo
 import com.ryanjames.lunar.platform.PdfPageRenderer
 import com.ryanjames.lunar.platform.RenderedPdfPage
-import com.ryanjames.lunar.settings.AppColorTheme
+import com.ryanjames.lunar.settings.AppSkin
 import com.ryanjames.lunar.settings.ViewerKeybindings
 import com.ryanjames.lunar.ui.LunarTheme
 import com.ryanjames.lunar.ui.ViewerDocumentState
@@ -61,7 +71,7 @@ class ViewerShortcutTest {
         var openedRandomCount = 0
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
@@ -70,20 +80,22 @@ class ViewerShortcutTest {
                     onOpenRandomScore = { openedRandomCount += 1 },
                     onPageChanged = { _ -> },
                     onPageCountResolved = { _ -> },
+                    chromeAutoHideMillis = null,
                     viewerKeybindings = keybindings,
                     onEnterFullscreen = { enteredFullscreenCount += 1 },
                 )
             }
         }
 
-        rule.onNodeWithText("1 / 6").assertIsDisplayed()
+        rule.onNodeWithText("Page 1 of 6").assertIsDisplayed()
         rule.onNodeWithContentDescription("Single-page layout").assertIsDisplayed()
         rule.onRoot().performKeyInput { pressKey(Key.T) }
         rule.onNodeWithContentDescription("Two-page layout").assertIsDisplayed()
+        rule.onNodeWithText("Pages 1 and 2 of 6").assertIsDisplayed()
         rule.onRoot().performKeyInput { pressKey(Key.L) }
-        rule.onNodeWithText("3 / 6").assertIsDisplayed()
+        rule.onNodeWithText("Pages 3 and 4 of 6").assertIsDisplayed()
         rule.onRoot().performKeyInput { pressKey(Key.H) }
-        rule.onNodeWithText("1 / 6").assertIsDisplayed()
+        rule.onNodeWithText("Pages 1 and 2 of 6").assertIsDisplayed()
         rule.onRoot().performKeyInput { pressKey(Key.F) }
         rule.onRoot().performKeyInput { pressKey(Key.Q) }
         rule.onRoot().performKeyInput { pressKey(Key.R) }
@@ -96,7 +108,7 @@ class ViewerShortcutTest {
     }
 
     @Test
-    fun viewerScreenOpensMetronomeDialogFromToolbar() {
+    fun viewerScreenOpensMetronomePopoverFromToolbarAndKeepsTempo() {
         val runtime = createShortcutTestRuntime()
         val documentState = ViewerDocumentState(
             id = "moon_river",
@@ -106,21 +118,200 @@ class ViewerShortcutTest {
         )
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
                     onBack = {},
                     onPageChanged = { _ -> },
                     onPageCountResolved = { _ -> },
+                    chromeAutoHideMillis = null,
                 )
             }
         }
 
-        rule.onNodeWithText("\u2669").performClick()
+        assertTrue(rule.onAllNodesWithText("Tap Tempo").fetchSemanticsNodes().isEmpty())
+        rule.onNodeWithContentDescription("Metronome").performClick()
         rule.onNodeWithText("Tap Tempo").assertIsDisplayed()
         rule.onNodeWithText("Time: 4/4").assertIsDisplayed()
         rule.onNodeWithText("Start").assertIsDisplayed()
+        rule.onNodeWithText("120 BPM").assertIsDisplayed()
+        rule.onNodeWithText("+5").performClick()
+        rule.onNodeWithText("125 BPM").assertIsDisplayed()
+
+        rule.onNodeWithText("Close").performClick()
+        assertTrue(rule.onAllNodesWithText("Tap Tempo").fetchSemanticsNodes().isEmpty())
+
+        rule.onNodeWithContentDescription("Metronome").performClick()
+        rule.onNodeWithText("125 BPM").assertIsDisplayed()
+    }
+
+    @Test
+    fun viewerChromeHidesAfterDelayAndReturnsOnInput() {
+        val runtime = createShortcutTestRuntime()
+        val documentState = ViewerDocumentState(
+            id = "moon_river",
+            title = "Moon River",
+            document = testSheetMusicItem(id = "moon_river", title = "Moon River").document,
+            pageCount = 6,
+        )
+        rule.mainClock.autoAdvance = false
+
+        rule.setContent {
+            LunarTheme(skin = AppSkin.PAPER) {
+                ViewerScreen(
+                    runtime = runtime,
+                    documentState = documentState,
+                    onBack = {},
+                    onPageChanged = { _ -> },
+                    onPageCountResolved = { _ -> },
+                    chromeAutoHideMillis = 3_000L,
+                )
+            }
+        }
+
+        rule.mainClock.advanceTimeBy(2_000L)
+        rule.onNodeWithContentDescription("Zoom in").assertIsDisplayed()
+        rule.onNodeWithText("Page 1 of 6").assertIsDisplayed()
+
+        rule.mainClock.advanceTimeBy(ChromeHideSettleMillis)
+        assertChromeHidden()
+
+        rule.onRoot().performKeyInput { pressKey(Key.A) }
+        rule.mainClock.advanceTimeBy(ChromeShowSettleMillis)
+        rule.onNodeWithContentDescription("Zoom in").assertIsDisplayed()
+
+        rule.mainClock.advanceTimeBy(ChromeHideSettleMillis + 2_000L)
+        assertChromeHidden()
+
+        rule.onRoot().performMouseInput { moveTo(center) }
+        rule.mainClock.advanceTimeBy(ChromeShowSettleMillis)
+        rule.onNodeWithContentDescription("Zoom in").assertIsDisplayed()
+
+        rule.mainClock.advanceTimeBy(ChromeHideSettleMillis + 2_000L)
+        assertChromeHidden()
+
+        rule.onRoot().performTouchInput { click(center) }
+        rule.mainClock.advanceTimeBy(ChromeShowSettleMillis)
+        rule.onNodeWithContentDescription("Zoom in").assertIsDisplayed()
+    }
+
+    @Test
+    fun viewerChromeStaysVisibleWhenAutoHideIsOffOrAPopoverIsOpen() {
+        val runtime = createShortcutTestRuntime()
+        val documentState = ViewerDocumentState(
+            id = "moon_river",
+            title = "Moon River",
+            document = testSheetMusicItem(id = "moon_river", title = "Moon River").document,
+            pageCount = 6,
+        )
+        var autoHideMillis by mutableStateOf<Long?>(null)
+        rule.mainClock.autoAdvance = false
+
+        rule.setContent {
+            LunarTheme(skin = AppSkin.PAPER) {
+                ViewerScreen(
+                    runtime = runtime,
+                    documentState = documentState,
+                    onBack = {},
+                    onPageChanged = { _ -> },
+                    onPageCountResolved = { _ -> },
+                    chromeAutoHideMillis = autoHideMillis,
+                )
+            }
+        }
+
+        rule.mainClock.advanceTimeBy(30_000L)
+        rule.onNodeWithContentDescription("Zoom in").assertIsDisplayed()
+
+        rule.onNodeWithContentDescription("Metronome").performClick()
+        autoHideMillis = 3_000L
+        rule.mainClock.advanceTimeBy(30_000L)
+        rule.onNodeWithText("Tap Tempo").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Zoom in").assertIsDisplayed()
+    }
+
+    @Test
+    fun viewerFooterStripAndEdgeButtonsChangePages() {
+        val runtime = createShortcutTestRuntime()
+        val documentState = ViewerDocumentState(
+            id = "moon_river",
+            title = "Moon River",
+            document = testSheetMusicItem(id = "moon_river", title = "Moon River").document,
+            pageCount = 6,
+        )
+        var randomOpens = 0
+        var lastPage = -1
+
+        rule.setContent {
+            LunarTheme(skin = AppSkin.PAPER) {
+                ViewerScreen(
+                    runtime = runtime,
+                    documentState = documentState,
+                    onBack = {},
+                    onOpenRandomScore = { randomOpens += 1 },
+                    onPageChanged = { page -> lastPage = page },
+                    onPageCountResolved = { _ -> },
+                    chromeAutoHideMillis = null,
+                    nextInSetlist = { Text("Next: Autumn Leaves") },
+                )
+            }
+        }
+
+        rule.onNodeWithText("Next: Autumn Leaves").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Previous page").assertIsNotEnabled()
+        rule.onNodeWithContentDescription("Go to page 1").assertIsSelected()
+        rule.onNodeWithContentDescription("Go to page 4").performClick()
+        rule.onNodeWithText("Page 4 of 6").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Go to page 4").assertIsSelected()
+
+        rule.onNodeWithContentDescription("Next page").performClick()
+        rule.onNodeWithText("Page 5 of 6").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Previous page").performClick()
+        rule.onNodeWithContentDescription("Previous page").performClick()
+        rule.onNodeWithText("Page 3 of 6").assertIsDisplayed()
+
+        rule.onNodeWithText("Random score").performClick()
+        rule.runOnIdle {
+            assertEquals(1, randomOpens)
+            assertEquals(2, lastPage)
+        }
+    }
+
+    @Test
+    fun viewerToolbarBackButtonUsesLabel() {
+        val runtime = createShortcutTestRuntime()
+        val documentState = ViewerDocumentState(
+            id = "moon_river",
+            title = "Moon River",
+            document = testSheetMusicItem(id = "moon_river", title = "Moon River").document,
+            pageCount = 6,
+        )
+        var backs = 0
+
+        rule.setContent {
+            LunarTheme(skin = AppSkin.PAPER) {
+                ViewerScreen(
+                    runtime = runtime,
+                    documentState = documentState,
+                    onBack = { backs += 1 },
+                    onPageChanged = { _ -> },
+                    onPageCountResolved = { _ -> },
+                    chromeAutoHideMillis = null,
+                    backLabel = "Friday gig",
+                )
+            }
+        }
+
+        rule.onNodeWithContentDescription("Back to Friday gig").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Back to Friday gig").performClick()
+        rule.runOnIdle { assertEquals(1, backs) }
+    }
+
+    private fun assertChromeHidden() {
+        rule.onNodeWithContentDescription("Zoom in").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Next page").assertDoesNotExist()
+        rule.onNodeWithText("Page 1 of 6").assertDoesNotExist()
     }
 
     @Test
@@ -134,19 +325,20 @@ class ViewerShortcutTest {
         )
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
                     onBack = {},
                     onPageChanged = { _ -> },
                     onPageCountResolved = { _ -> },
+                    chromeAutoHideMillis = null,
                 )
             }
         }
 
         rule.onNodeWithContentDescription("PDF viewer").assertIsDisplayed()
-        rule.onNodeWithText("6 pages").assertIsDisplayed()
+        rule.onNodeWithText("Page 1 of 6").assertIsDisplayed()
         assertTrue(rule.onAllNodesWithText("PDF Viewer").fetchSemanticsNodes().isEmpty())
     }
 
@@ -164,7 +356,7 @@ class ViewerShortcutTest {
         var hiddenScores = 0
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
@@ -174,6 +366,7 @@ class ViewerShortcutTest {
                     onAddToSongbook = { songbookAdds += 1 },
                     onPageChanged = { _ -> },
                     onPageCountResolved = { _ -> },
+                    chromeAutoHideMillis = null,
                 )
             }
         }
@@ -211,7 +404,7 @@ class ViewerShortcutTest {
         )
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
@@ -219,6 +412,7 @@ class ViewerShortcutTest {
                     onToggleFavorite = {},
                     onPageChanged = { _ -> },
                     onPageCountResolved = { _ -> },
+                    chromeAutoHideMillis = null,
                 )
             }
         }
@@ -249,13 +443,14 @@ class ViewerShortcutTest {
         )
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
                     onBack = {},
                     onPageChanged = { _ -> },
                     onPageCountResolved = { _ -> },
+                    chromeAutoHideMillis = null,
                 )
             }
         }
@@ -294,24 +489,26 @@ class ViewerShortcutTest {
         val editedSource = "\\version \"2.24.0\"\n{ g'4 a' b' c'' }"
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
                     onBack = {},
                     onPageChanged = { _ -> },
                     onPageCountResolved = { _ -> },
+                    chromeAutoHideMillis = null,
                 )
             }
         }
 
         rule.waitUntil(timeoutMillis = 5_000) {
-            rule.onAllNodesWithText("Edit").fetchSemanticsNodes().isNotEmpty()
+            rule.onAllNodesWithContentDescription("More actions").fetchSemanticsNodes().isNotEmpty()
         }
         rule.runOnIdle {
             assertEquals(1, lilyPondRenderer.renderedSources.size)
         }
-        rule.onNodeWithText("Edit").performClick()
+        rule.onNodeWithContentDescription("More actions").performClick()
+        rule.onNodeWithText("Edit source").performClick()
         rule.onNodeWithText("LilyPond source").assertIsDisplayed()
         rule.waitForIdle()
         rule.runOnIdle {
@@ -349,21 +546,23 @@ class ViewerShortcutTest {
         val editedSource = "\\version \"2.24.0\"\n{ b'4 a' g' f' }"
 
         rule.setContent {
-            LunarTheme(theme = AppColorTheme.OCEAN) {
+            LunarTheme(skin = AppSkin.PAPER) {
                 ViewerScreen(
                     runtime = runtime,
                     documentState = documentState,
                     onBack = {},
                     onPageChanged = { _ -> },
                     onPageCountResolved = { _ -> },
+                    chromeAutoHideMillis = null,
                 )
             }
         }
 
         rule.waitUntil(timeoutMillis = 5_000) {
-            rule.onAllNodesWithText("Edit").fetchSemanticsNodes().isNotEmpty()
+            rule.onAllNodesWithContentDescription("More actions").fetchSemanticsNodes().isNotEmpty()
         }
-        rule.onNodeWithText("Edit").performClick()
+        rule.onNodeWithContentDescription("More actions").performClick()
+        rule.onNodeWithText("Edit source").performClick()
         rule.onNodeWithContentDescription("Toggle LilyPond auto refresh").performClick()
         rule.onNodeWithContentDescription("LilyPond source editor")
             .performTextReplacement(editedSource)
@@ -381,6 +580,10 @@ class ViewerShortcutTest {
         rule.onNodeWithText("LilyPond Editor").assertIsDisplayed()
     }
 }
+
+// Past the 3s auto-hide delay plus the fade-out, and long enough for the fade-in.
+private const val ChromeHideSettleMillis = 1_500L
+private const val ChromeShowSettleMillis = 500L
 
 private fun createShortcutTestRuntime() = runBlocking {
     createTestPlatformRuntime(

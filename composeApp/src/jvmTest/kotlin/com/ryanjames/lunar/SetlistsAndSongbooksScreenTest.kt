@@ -27,9 +27,9 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.performMouseInput
 import com.ryanjames.lunar.platform.PlatformRuntime
-import com.ryanjames.lunar.settings.AppColorTheme
+import com.ryanjames.lunar.settings.AppSkin
 import com.ryanjames.lunar.settings.AppSettings
-import com.ryanjames.lunar.ui.LibraryBrowseMode
+import com.ryanjames.lunar.ui.AppSection
 import com.ryanjames.lunar.ui.LibraryScreen
 import com.ryanjames.lunar.ui.LunarAppState
 import com.ryanjames.lunar.ui.LunarTheme
@@ -133,7 +133,7 @@ class SetlistsAndSongbooksScreenTest {
             val setlist = testLibrarySetlist(id = "set_drag", name = "Drag rehearsal", itemIds = originalOrder)
             val runtime = createTestPlatformRuntime(initialItems = items, initialSetlists = listOf(setlist))
             val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
-            appState.updateBrowseMode(LibraryBrowseMode.SETLISTS)
+            appState.selectSection(AppSection.SETLISTS)
             appState.openSetlist(setlist.id)
             rule.setLibraryContent(runtime, appState)
 
@@ -171,7 +171,7 @@ class SetlistsAndSongbooksScreenTest {
             val setlist = testLibrarySetlist(id = "set_pages", name = "Page rehearsal", itemIds = items.map { it.id })
             val runtime = createTestPlatformRuntime(initialItems = items, initialSetlists = listOf(setlist))
             val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
-            appState.updateBrowseMode(LibraryBrowseMode.SETLISTS)
+            appState.selectSection(AppSection.SETLISTS)
             appState.openSetlist(setlist.id)
             rule.setLibraryContent(runtime, appState)
             rule.onNodeWithText("Start the set").assertIsDisplayed()
@@ -183,7 +183,7 @@ class SetlistsAndSongbooksScreenTest {
             rule.waitUntil(timeoutMillis = 5_000) {
                 runtime.repository.getItem("autumn_leaves")?.pageCount == 7
             }
-            rule.runOnIdle { appState.closePreview() }
+            rule.runOnIdle { appState.closeFullscreen() }
 
             rule.waitUntil(timeoutMillis = 5_000) {
                 rule.onAllNodesWithText("7 pp.", substring = true).fetchSemanticsNodes().isNotEmpty()
@@ -203,7 +203,7 @@ class SetlistsAndSongbooksScreenTest {
             )
             val runtime = createTestPlatformRuntime(initialItems = items, initialSetlists = listOf(setlist))
             val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
-            appState.updateBrowseMode(LibraryBrowseMode.SETLISTS)
+            appState.selectSection(AppSection.SETLISTS)
             appState.openSetlist(setlist.id)
             val paneWidth = 320.dp
             rule.setLibraryContent(runtime, appState, Modifier.width(paneWidth))
@@ -230,7 +230,7 @@ class SetlistsAndSongbooksScreenTest {
             val setlist = testLibrarySetlist(id = "set_long", name = "Long credits", itemIds = items.map { it.id })
             val runtime = createTestPlatformRuntime(initialItems = items, initialSetlists = listOf(setlist))
             val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
-            appState.updateBrowseMode(LibraryBrowseMode.SETLISTS)
+            appState.selectSection(AppSection.SETLISTS)
             appState.openSetlist(setlist.id)
             rule.setLibraryContent(runtime, appState, Modifier.width(320.dp))
 
@@ -253,7 +253,7 @@ class SetlistsAndSongbooksScreenTest {
             )
             val runtime = createTestPlatformRuntime(initialItems = items)
             val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
-            appState.updateBrowseMode(LibraryBrowseMode.SETLISTS)
+            appState.selectSection(AppSection.SETLISTS)
             rule.setLibraryContent(runtime, appState)
 
             rule.onNodeWithText("Random setlist").performClick()
@@ -332,7 +332,7 @@ class SetlistsAndSongbooksScreenTest {
                 scoreDownloadSupported = true,
             )
             val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
-            appState.updateBrowseMode(LibraryBrowseMode.SONGBOOKS)
+            appState.selectSection(AppSection.SONGBOOKS)
             rule.setLibraryContent(runtime, appState)
 
             rule.onNodeWithText("Choose a songbook to see its contents.").assertIsDisplayed()
@@ -353,7 +353,7 @@ class SetlistsAndSongbooksScreenTest {
 
             rule.onNodeWithText("Open songbook").performClick()
             rule.runOnIdle {
-                assertEquals(ViewerTarget.Songbook(songbook.id), appState.previewTarget)
+                assertEquals(ViewerTarget.Songbook(songbook.id), appState.fullscreenTarget)
             }
             assertNotEquals(null, appState.selectedSongbookId)
         }
@@ -366,7 +366,7 @@ private fun ComposeContentTestRule.setLibraryContent(
     modifier: Modifier = Modifier,
 ) {
     setContent {
-        LunarTheme(theme = AppColorTheme.OCEAN) {
+        LunarTheme(skin = AppSkin.PAPER) {
             Box(modifier = modifier) {
                 val snapshot by runtime.repository.library.collectAsState()
                 LibraryScreen(

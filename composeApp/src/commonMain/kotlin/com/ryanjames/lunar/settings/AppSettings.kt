@@ -7,19 +7,35 @@ data class AppSettings(
     val defaultViewerPageMode: ViewerPageModePreference = ViewerPageModePreference.SINGLE_PAGE,
     val defaultLibraryLayout: LibraryLayoutPreference = LibraryLayoutPreference.LIST,
     val viewerKeybindings: ViewerKeybindings = ViewerKeybindings(),
+    /** Legacy colour theme, kept so older settings files still decode. Superseded by [skin]. */
     val theme: AppColorTheme = AppColorTheme.OCEAN,
+    val skin: AppSkin? = null,
     val refreshOnLaunch: Boolean = true,
     val autoRefreshSchedule: AutoRefreshSchedule = AutoRefreshSchedule.MINUTES_15,
     val cacheLimit: CacheLimitPreset = CacheLimitPreset.GB_2,
     val cloudConnectTimeoutSeconds: Int = 15,
     val cloudReadTimeoutSeconds: Int = 60,
+    val sidebarCollapsed: Boolean = false,
+    val viewerChromeAutoHideSeconds: Int? = DefaultViewerChromeAutoHideSeconds,
 ) {
     val cloudConnectTimeoutMillis: Int
         get() = cloudConnectTimeoutSeconds.coerceIn(5, 120) * 1000
 
     val cloudReadTimeoutMillis: Int
         get() = cloudReadTimeoutSeconds.coerceIn(15, 300) * 1000
+
+    /** The skin to render with, falling back to the legacy theme mapping before [normalize] runs. */
+    val resolvedSkin: AppSkin
+        get() = skin ?: theme.legacySkin()
+
+    /** Delay before the viewer toolbar and footer fade out, or null to keep them visible. */
+    val viewerChromeAutoHideMillis: Long?
+        get() = viewerChromeAutoHideSeconds?.coerceIn(1, 60)?.times(1000L)
 }
+
+const val DefaultViewerChromeAutoHideSeconds = 3
+
+val ViewerChromeAutoHideOptions: List<Int?> = listOf(3, 5, 10, null)
 
 @Serializable
 data class ViewerKeybindings(
@@ -86,10 +102,15 @@ internal val LegacyDefaultViewerKeybindings = ViewerKeybindings(
     openRandomScore = null,
 )
 
-internal fun AppSettings.normalize(): AppSettings = if (viewerKeybindings == LegacyDefaultViewerKeybindings) {
-    copy(viewerKeybindings = ViewerKeybindings())
-} else {
-    this
+internal fun AppSettings.normalize(): AppSettings {
+    var normalized = this
+    if (normalized.viewerKeybindings == LegacyDefaultViewerKeybindings) {
+        normalized = normalized.copy(viewerKeybindings = ViewerKeybindings())
+    }
+    if (normalized.skin == null) {
+        normalized = normalized.copy(skin = normalized.theme.legacySkin())
+    }
+    return normalized
 }
 
 @Serializable
@@ -113,6 +134,24 @@ enum class AppColorTheme {
     DARCULA,
     MIDNIGHT,
     EMBER,
+}
+
+@Serializable
+enum class AppSkin {
+    PAPER,
+    MOONLIGHT,
+}
+
+/** Maps a pre-skin colour theme onto the closest skin: light themes become Paper, dark ones Moonlight. */
+fun AppColorTheme.legacySkin(): AppSkin = when (this) {
+    AppColorTheme.OCEAN,
+    AppColorTheme.FOREST,
+    AppColorTheme.SUNSET,
+    AppColorTheme.AURORA -> AppSkin.PAPER
+
+    AppColorTheme.DARCULA,
+    AppColorTheme.MIDNIGHT,
+    AppColorTheme.EMBER -> AppSkin.MOONLIGHT
 }
 
 @Serializable
