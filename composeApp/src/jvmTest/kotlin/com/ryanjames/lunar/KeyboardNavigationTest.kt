@@ -136,7 +136,7 @@ class KeyboardNavigationTest {
     }
 
     @Test
-    fun narrowPhoneListCardFooterKeepsOpenButtonFullyVisible() {
+    fun narrowPhoneSetlistProgrammeKeepsRowActionsOnScreen() {
         val runtime = createKeyboardTestRuntime()
         rule.setContent {
             Box(modifier = Modifier.requiredSize(width = 360.dp, height = 800.dp)) {
@@ -145,26 +145,23 @@ class KeyboardNavigationTest {
         }
         awaitLibrary()
 
-        // Setlist details still list scores as cards with the quick-action and Open footer.
+        // On a phone the setlist index and programme are single panes reached from the nav sheet.
         rule.onNode(hasContentDescription("Open navigation")).performClick()
         rule.waitUntil(timeoutMillis = 5_000) {
             hasNode(hasTestTag(LunarTestTags.navigationItem(AppSection.SETLISTS)))
         }
         rule.onNodeWithTag(LunarTestTags.navigationItem(AppSection.SETLISTS)).performClick()
         rule.waitUntil(timeoutMillis = 5_000) { hasNode(hasTestTag(LunarTestTags.setlistRow("set_morning"))) }
+        val entry = rule.onNodeWithTag(LunarTestTags.setlistRow("set_morning")).getBoundsInRoot()
+        assertTrue(entry.right <= 360.dp, "Setlist entry overflows the phone width")
         rule.onNodeWithTag(LunarTestTags.setlistRow("set_morning")).performClick()
-        rule.waitUntil(timeoutMillis = 5_000) { hasNode(hasTestTag(LunarTestTags.libraryOpen("moon_river"))) }
 
-        val row = rule.onNodeWithTag(LunarTestTags.libraryRow("moon_river")).getBoundsInRoot()
-        val open = rule.onNodeWithTag(LunarTestTags.libraryOpen("moon_river"))
-        open.assertIsDisplayed()
-        val bounds = open.getBoundsInRoot()
-        assertTrue(bounds.right - bounds.left >= 58.dp, "Open button is squeezed below its minimum width")
-        assertTrue(bounds.bottom - bounds.top >= 40.dp, "Open button is shorter than its minimum height")
-        assertTrue(bounds.right <= row.right, "Open button overflows its library card")
-
-        val favourite = rule.onNode(hasContentDescription("Mark Moon River as favorite")).getBoundsInRoot()
-        assertTrue(favourite.bottom - favourite.top >= 44.dp, "Quick action is shorter than the touch target")
+        val remove = hasContentDescription("Remove Moon River from setlist")
+        rule.waitUntil(timeoutMillis = 5_000) { hasNode(remove) }
+        rule.onNode(remove).assertIsDisplayed()
+        val bounds = rule.onNode(remove).getBoundsInRoot()
+        assertTrue(bounds.right <= 360.dp, "Remove action overflows the phone width")
+        assertTrue(bounds.bottom - bounds.top >= 40.dp, "Remove action is shorter than its minimum height")
     }
 
     private fun awaitLibrary() {
