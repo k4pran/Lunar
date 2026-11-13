@@ -14,6 +14,7 @@ import com.ryanjames.lunar.library.model.HiddenScoreFilter
 import com.ryanjames.lunar.library.model.ImportedPdfDescriptor
 import com.ryanjames.lunar.library.model.PdfDocumentReference
 import com.ryanjames.lunar.library.model.LibraryQuery
+import com.ryanjames.lunar.library.model.LibrarySongbook
 import com.ryanjames.lunar.library.model.LibrarySortOption
 import com.ryanjames.lunar.library.model.ScoreMetadata
 import com.ryanjames.lunar.library.model.ScoreMetadataComposer
@@ -22,10 +23,17 @@ import com.ryanjames.lunar.library.model.ViewerSupportFilter
 import com.ryanjames.lunar.library.model.applyLibraryQuery
 import com.ryanjames.lunar.library.model.collectionDuplicateKey
 import com.ryanjames.lunar.library.model.composerDuplicateKey
+import com.ryanjames.lunar.library.model.contents
+import com.ryanjames.lunar.library.model.resolveHasCover
+import com.ryanjames.lunar.library.model.songbookStartPages
 import com.ryanjames.lunar.library.model.jumpBackInItems
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlin.time.Clock
+import kotlin.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -573,6 +581,293 @@ class SharedCommonTest {
     }
 
     @Test
+    fun repositoryReordersSetlistKeepingEveryItemExactlyOnce() = runBlocking {
+        val storage = InMemoryLibraryStorage()
+        val repository = DefaultSheetMusicRepository(storage)
+        repository.initialize()
+        val ids = repository.importSetlistFixtures()
+        val setlist = repository.createSetlist(name = "Programme", itemIds = ids)
+
+        val reordered = repository.reorderSetlist(setlist.id, listOf(ids[2], ids[0], ids[1]))
+
+        assertEquals(listOf(ids[2], ids[0], ids[1]), reordered.itemIds)
+        assertFailsWith<IllegalArgumentException> {
+            repository.reorderSetlist(setlist.id, listOf(ids[0], ids[1], "unknown"))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            repository.reorderSetlist(setlist.id, listOf(ids[0], ids[0], ids[1]))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            repository.reorderSetlist(setlist.id, listOf(ids[0], ids[1]))
+        }
+        assertFailsWith<IllegalStateException> {
+            repository.reorderSetlist("missing", ids)
+        }
+
+        val reloaded = DefaultSheetMusicRepository(storage)
+        reloaded.initialize()
+        assertEquals(listOf(ids[2], ids[0], ids[1]), reloaded.getSetlist(setlist.id)?.itemIds)
+    }
+
+    @Test
+    fun repositoryRenamesSetlistTrimmingAndRejectingBlankNames() = runBlocking {
+        val storage = InMemoryLibraryStorage()
+        val repository = DefaultSheetMusicRepository(storage)
+        repository.initialize()
+        val setlist = repository.createSetlist(name = "Draft", itemIds = repository.importSetlistFixtures())
+
+        val renamed = repository.renameSetlist(setlist.id, "  Spring recital  ")
+
+        assertEquals("Spring recital", renamed.name)
+        assertFailsWith<IllegalArgumentException> {
+            repository.renameSetlist(setlist.id, "   ")
+        }
+        assertEquals("Spring recital", repository.getSetlist(setlist.id)?.name)
+
+        val reloaded = DefaultSheetMusicRepository(storage)
+        reloaded.initialize()
+        assertEquals("Spring recital", reloaded.getSetlist(setlist.id)?.name)
+    }
+
+    @Test
+    fun repositoryRemovesItemsFromSetlistAndBumpsUpdatedAt() = runBlocking {
+        val storage = InMemoryLibraryStorage()
+        var now = 1_000L
+        val clock = object : Clock {
+            override fun now(): Instant = Instant.fromEpochMilliseconds(now)
+        }
+        val repository = DefaultSheetMusicRepository(storage, clock = clock)
+        repository.initialize()
+        val ids = repository.importSetlistFixtures()
+        val setlist = repository.createSetlist(name = "Programme", itemIds = ids)
+        now = 5_000L
+
+        val updated = repository.removeFromSetlist(setlist.id, listOf(ids[1], "not-in-setlist"))
+
+        assertEquals(listOf(ids[0], ids[2]), updated.itemIds)
+        assertEquals(1_000L, updated.createdAtEpochMillis)
+        assertEquals(5_000L, updated.updatedAtEpochMillis)
+
+        val reloaded = DefaultSheetMusicRepository(storage)
+        reloaded.initialize()
+        assertEquals(listOf(ids[0], ids[2]), reloaded.getSetlist(setlist.id)?.itemIds)
+        assertEquals(5_000L, reloaded.getSetlist(setlist.id)?.updatedAtEpochMillis)
+    }
+
+    @Test
+    fun songbookStartPagesAccumulatePageCounts() {
+        assertEquals(listOf(1, 3, 7), songbookStartPages(listOf(2, 4, 1)))
+        assertEquals(listOf(2, 4), songbookStartPages(listOf(2, 4), firstPage = 2))
+    }
+
+    @Test
+    fun songbookStartPagesBecomeUnknownAfterAnUnknownCount() {
+        assertEquals(listOf(1, 3, null, null), songbookStartPages(listOf(2, null, 3, 1)))
+        assertEquals(listOf(1, null), songbookStartPages(listOf(0, 3)))
+    }
+
+    @Test
+    fun songbookStartPagesForAnEmptySongbook() {
+        assertEquals(emptyList(), songbookStartPages(emptyList()))
+        val songbook = LibrarySongbook(
+            id = "empty",
+            name = "Empty",
+            document = PdfDocumentReference(storedPath = "/books/empty.pdf", originalFileName = "Empty.pdf"),
+            createdAtEpochMillis = 1L,
+            updatedAtEpochMillis = 1L,
+        )
+        assertEquals(emptyList(), songbook.contents(emptyMap()))
+    }
+
+    @Test
+    fun songbookContentsSkipTheCoverAndKeepMissingScores() {
+        val first = testItem(
+            id = "first",
+            title = "First",
+            composer = "Composer",
+            tags = emptyList(),
+            dateAddedEpochMillis = 1L,
+        ).copy(pageCount = 3)
+        val songbook = LibrarySongbook(
+            id = "book",
+            name = "Book",
+            itemIds = listOf("first", "gone", "last"),
+            document = PdfDocumentReference(storedPath = "/books/book.pdf", originalFileName = "Book.pdf"),
+            createdAtEpochMillis = 1L,
+            updatedAtEpochMillis = 1L,
+            hasCover = true,
+            boundItemIds = listOf("first", "gone", "last"),
+        )
+
+        val contents = songbook.contents(mapOf(first.id to first))
+
+        assertEquals(listOf("first", "gone", "last"), contents.map { it.itemId })
+        assertEquals(listOf(2, 5, null), contents.map { it.startPage })
+        assertNull(contents[1].item)
+    }
+
+    @Test
+    fun legacySongbooksDecodeWithUnknownCoverAndBoundOrder() {
+        val legacyJson = """
+            {"id":"book","name":"Book","itemIds":["a"],
+             "document":{"storedPath":"/books/book.pdf","originalFileName":"Book.pdf"},
+             "createdAtEpochMillis":1,"updatedAtEpochMillis":1,"pageCount":4}
+        """.trimIndent()
+
+        val songbook = Json { ignoreUnknownKeys = true }.decodeFromString<LibrarySongbook>(legacyJson)
+
+        assertNull(songbook.hasCover)
+        assertNull(songbook.boundItemIds)
+    }
+
+    @Test
+    fun legacySongbookCoverIsInferredOnlyWhenPageCountsAreUnambiguous() {
+        val items = listOf(
+            testItem(id = "a", title = "A", composer = "C", tags = emptyList(), dateAddedEpochMillis = 1L)
+                .copy(pageCount = 3),
+            testItem(id = "b", title = "B", composer = "C", tags = emptyList(), dateAddedEpochMillis = 1L)
+                .copy(pageCount = 2),
+        ).associateBy { it.id }
+        fun legacy(pageCount: Int?) = LibrarySongbook(
+            id = "book",
+            name = "Book",
+            itemIds = listOf("a", "b"),
+            document = PdfDocumentReference(storedPath = "/books/book.pdf", originalFileName = "Book.pdf"),
+            createdAtEpochMillis = 1L,
+            updatedAtEpochMillis = 1L,
+            pageCount = pageCount,
+        )
+
+        // One surplus page could be a cover or a one-page score bound twice.
+        assertNull(legacy(6).resolveHasCover(items))
+        assertEquals(listOf(null, null), legacy(6).contents(items).map { it.startPage })
+        // With the bound order known, the surplus page can only be a cover.
+        val ordered = legacy(6).copy(boundItemIds = listOf("a", "b"))
+        assertEquals(true, ordered.resolveHasCover(items))
+        assertEquals(listOf(2, 5), ordered.contents(items).map { it.startPage })
+        assertEquals(false, legacy(5).resolveHasCover(items))
+        assertEquals(listOf(1, 4), legacy(5).contents(items).map { it.startPage })
+        // Extra pages, such as a score that was bound twice, leave the layout unknown.
+        assertNull(legacy(8).resolveHasCover(items))
+        assertEquals(listOf(null, null), legacy(8).contents(items).map { it.startPage })
+        assertNull(legacy(null).resolveHasCover(items))
+        assertEquals(listOf(null, null), legacy(null).contents(items).map { it.startPage })
+        assertNull(legacy(6).resolveHasCover(emptyMap()))
+        assertEquals(listOf(null, null), legacy(6).contents(emptyMap()).map { it.startPage })
+    }
+
+    @Test
+    fun songbookContentsFollowTheBoundOrderWhenAScoreIsAppendedTwice() = runBlocking {
+        val storage = InMemoryLibraryStorage()
+        val repository = DefaultSheetMusicRepository(storage)
+        repository.initialize()
+        val items = listOf("a" to 3, "b" to 2, "c" to 4).associate { (id, pages) ->
+            id to testItem(id = id, title = id.uppercase(), composer = "C", tags = emptyList(), dateAddedEpochMillis = 1L)
+                .copy(pageCount = pages)
+        }
+        val created = repository.createSongbook(
+            name = "Book",
+            itemIds = listOf("a", "b"),
+            document = PdfDocumentReference(storedPath = "/books/v1.pdf", originalFileName = "Book.pdf"),
+            pageCount = 6,
+            hasCover = true,
+        )
+        val appended = repository.addItemsToSongbook(
+            songbookId = created.id,
+            itemIds = listOf("a", "c"),
+            document = PdfDocumentReference(storedPath = "/books/v2.pdf", originalFileName = "Book.pdf"),
+            pageCount = 13,
+        )
+
+        assertEquals(listOf("a", "b", "c"), appended.itemIds)
+        assertEquals(listOf("a", "b", "a", "c"), appended.boundItemIds)
+        val contents = appended.contents(items)
+        assertEquals(listOf("a", "b", "a", "c"), contents.map { it.itemId })
+        assertEquals(listOf(2, 5, 7, 10), contents.map { it.startPage })
+
+        val reloaded = DefaultSheetMusicRepository(storage)
+        reloaded.initialize()
+        assertEquals(listOf("a", "b", "a", "c"), reloaded.getSongbook(created.id)?.boundItemIds)
+    }
+
+    @Test
+    fun songbookContentsHideStartPagesWhenScorePagesContradictTheBoundPdf() {
+        val items = listOf(
+            testItem(id = "a", title = "A", composer = "C", tags = emptyList(), dateAddedEpochMillis = 1L)
+                .copy(pageCount = 3),
+        ).associateBy { it.id }
+        val songbook = LibrarySongbook(
+            id = "book",
+            name = "Book",
+            itemIds = listOf("a"),
+            document = PdfDocumentReference(storedPath = "/books/book.pdf", originalFileName = "Book.pdf"),
+            createdAtEpochMillis = 1L,
+            updatedAtEpochMillis = 1L,
+            pageCount = 9,
+            hasCover = false,
+            boundItemIds = listOf("a"),
+        )
+
+        assertEquals(listOf<Int?>(null), songbook.contents(items).map { it.startPage })
+    }
+
+    @Test
+    fun repositoryAppendToALegacySongbookKeepsItsBoundOrderUnknown() = runBlocking {
+        val storage = InMemoryLibraryStorage()
+        val repository = DefaultSheetMusicRepository(storage)
+        repository.initialize()
+        val created = repository.createSongbook(
+            name = "Book",
+            itemIds = listOf("a"),
+            document = PdfDocumentReference(storedPath = "/books/v1.pdf", originalFileName = "Book.pdf"),
+        )
+        storage.writeLibraryData(
+            storage.readLibraryData().let { data ->
+                data.copy(songbooks = data.songbooks.map { it.copy(hasCover = null, boundItemIds = null) })
+            },
+        )
+        val legacyRepository = DefaultSheetMusicRepository(storage)
+        legacyRepository.initialize()
+
+        val appended = legacyRepository.addItemsToSongbook(
+            songbookId = created.id,
+            itemIds = listOf("b"),
+            document = PdfDocumentReference(storedPath = "/books/v2.pdf", originalFileName = "Book.pdf"),
+        )
+
+        assertNull(appended.boundItemIds)
+        assertNull(appended.hasCover)
+    }
+
+    @Test
+    fun repositoryReplacesSongbookDocumentAndRecordsCover() = runBlocking {
+        val storage = InMemoryLibraryStorage()
+        val repository = DefaultSheetMusicRepository(storage)
+        repository.initialize()
+        val songbook = repository.createSongbook(
+            name = "Book",
+            itemIds = listOf("a"),
+            document = PdfDocumentReference(storedPath = "/books/v1.pdf", originalFileName = "Book.pdf"),
+            pageCount = 3,
+        )
+        assertEquals(false, songbook.hasCover)
+
+        val rebound = repository.replaceSongbookDocument(
+            songbookId = songbook.id,
+            document = PdfDocumentReference(storedPath = "/books/v2.pdf", originalFileName = "Book.pdf"),
+            pageCount = 4,
+            hasCover = true,
+        )
+
+        assertEquals("/books/v2.pdf", rebound.document.storedPath)
+        assertEquals(4, rebound.pageCount)
+        assertEquals(true, rebound.hasCover)
+        val reloaded = DefaultSheetMusicRepository(storage)
+        reloaded.initialize()
+        assertEquals(true, reloaded.getSongbook(songbook.id)?.hasCover)
+    }
+
+    @Test
     fun repositoryPersistsSongbooksAcrossInitializations() = runBlocking {
         val storage = InMemoryLibraryStorage()
         val firstRepository = DefaultSheetMusicRepository(storage)
@@ -919,3 +1214,12 @@ private fun testItem(
     dateAddedEpochMillis = dateAddedEpochMillis,
     lastOpenedEpochMillis = lastOpenedEpochMillis,
 )
+
+private suspend fun DefaultSheetMusicRepository.importSetlistFixtures(): List<String> = importDocuments(
+    listOf("one", "two", "three").map { name ->
+        ImportedPdfDescriptor(
+            storedPath = "/scores/$name.pdf",
+            originalFileName = "$name.pdf",
+        )
+    }
+).importedItems.map { it.id }

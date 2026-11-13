@@ -4,6 +4,7 @@ import org.apache.pdfbox.Loader
 import org.apache.pdfbox.cos.COSName
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
+import org.apache.pdfbox.pdmodel.common.PDRectangle
 import org.apache.pdfbox.pdmodel.common.PDStream
 import org.apache.pdfbox.pdmodel.font.PDType1Font
 import org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName
@@ -193,6 +194,43 @@ class DesktopScoreImportTest {
     }
 
     @Test
+    fun songbookCoverChangeKeepsRepeatedScorePagesAndReplacesTheOldCover() {
+        runBlocking {
+            val root = Files.createTempDirectory("lunar-songbook-cover-test").toFile()
+            try {
+                val scoresDirectory = File(root, "scores").apply { mkdirs() }
+                val scoreA = File(root, "a.pdf").also { writeTestPdf(it, PDRectangle(100f, 200f)) }
+                val scoreB = File(root, "b.pdf").also { writeTestPdf(it, PDRectangle(300f, 400f)) }
+                val coverFile = File(root, "cover.png").also { writeTestImage(it, width = 60, height = 80) }
+                val cover = SelectedCoverImage(displayName = "cover.png", bytes = coverFile.readBytes())
+                val builder = DesktopSongbookPdfBuilder(scoresDirectory)
+
+                // Bound as cover + a + b + a: the repeated score can't be recovered from distinct item ids.
+                val original = builder.buildSongbook(
+                    songbookName = "Gig book",
+                    appendedDocumentPaths = listOf(scoreA, scoreB, scoreA).map(File::getAbsolutePath),
+                    coverImage = cover,
+                )
+                val recovered = builder.buildSongbook(
+                    songbookName = "Gig book",
+                    appendedDocumentPaths = emptyList(),
+                    existingSongbookPath = original.document.storedPath,
+                    coverImage = cover,
+                    dropExistingCoverPage = true,
+                )
+
+                assertEquals(4, recovered.pageCount)
+                Loader.loadPDF(File(recovered.document.storedPath)).use { document ->
+                    val widths = (0 until document.numberOfPages).map { document.getPage(it).mediaBox.width }
+                    assertEquals(listOf(PDRectangle.LETTER.width, 100f, 300f, 100f), widths)
+                }
+            } finally {
+                root.deleteRecursively()
+            }
+        }
+    }
+
+    @Test
     fun importDesktopScoreFileRendersLilyPondIntoManagedPdf() {
         val root = Files.createTempDirectory("lunar-desktop-import-lilypond-test").toFile()
         try {
@@ -355,9 +393,12 @@ private fun writeTestImage(
     ImageIO.write(image, "png", destination)
 }
 
-private fun writeTestPdf(destination: File) {
+private fun writeTestPdf(
+    destination: File,
+    mediaBox: PDRectangle = PDRectangle.LETTER,
+) {
     PDDocument().use { document ->
-        document.addPage(PDPage())
+        document.addPage(PDPage(mediaBox))
         document.save(destination)
     }
 }

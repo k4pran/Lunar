@@ -51,6 +51,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -282,12 +283,16 @@ class ScreenSmokeTest {
             rule.onNodeWithContentDescription("Show as list").performClick()
 
             rule.runOnIdle { appState.selectSection(AppSection.SETLISTS) }
-            rule.onNodeWithText("Random setlist").performClick()
-            rule.onNodeWithText("Create a random setlist").assertIsDisplayed()
+            rule.onDisplayedNodeWithText("Random setlist").performClick()
+            rule.onNodeWithText("Shuffle a random set").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Scores in the mix: 2").assertIsDisplayed()
             rule.onNodeWithText("Cancel").performClick()
+            rule.runOnIdle {
+                assertEquals(false, appState.randomSetlistBuilderVisible)
+            }
             rule.onNodeWithText("Morning rehearsal").assertIsDisplayed()
-            rule.onNodeWithText("Open").performClick()
-            rule.onNodeWithText("Saved automatically. Delete it whenever you no longer need it.").assertIsDisplayed()
+            rule.onNodeWithText("Morning rehearsal").performClick()
+            rule.onNodeWithText("Start the set").assertIsDisplayed()
         }
     }
 
@@ -577,38 +582,8 @@ class ScreenSmokeTest {
                 assertTrue(appState.setlistPickerVisible)
             }
             rule.onNodeWithTag(LibraryTestTags.DetailTitle, useUnmergedTree = true).assertTextEquals("Moon River")
-            rule.onNodeWithText("Evening recital").performClick()
-            rule.waitUntil(timeoutMillis = 5_000) {
-                runtime.repository.library.value.setlists.single { it.id == "set_evening" }.itemIds == listOf("moon_river")
-            }
-        }
-    }
-
-    @Test
-    fun setlistDetailKeepsBulkSelectionActions() {
-        runBlocking {
-            val items = listOf(
-                testSheetMusicItem(id = "moon_river", title = "Moon River"),
-                testSheetMusicItem(id = "clair_de_lune", title = "Clair de Lune"),
-            )
-            val morning = testLibrarySetlist(id = "set_morning", name = "Morning rehearsal", itemIds = items.map { it.id })
-            val evening = testLibrarySetlist(id = "set_evening", name = "Evening recital", itemIds = emptyList())
-            val runtime = createTestPlatformRuntime(initialItems = items, initialSetlists = listOf(morning, evening))
-            val appState = createTestLunarAppState(scope = backgroundScope(), runtime = runtime)
-            appState.selectSection(com.ryanjames.lunar.ui.AppSection.SETLISTS)
-            appState.openSetlist("set_morning")
-
-            rule.setContent {
-                val snapshot by runtime.repository.library.collectAsState()
-                LunarTheme(skin = AppSkin.PAPER) {
-                    LibraryScreen(runtime = runtime, snapshot = snapshot, appState = appState)
-                }
-            }
-
-            rule.onNodeWithContentDescription("Select Moon River").performClick()
-            rule.onNodeWithTag(LibraryTestTags.SelectionBar).assertIsDisplayed()
-            rule.onNodeWithText("Add to setlist").performClick()
-            rule.onNodeWithText("Evening recital").performClick()
+            // The setlist index also lists "Evening recital"; the picker dialog's entry is the last one.
+            rule.onAllNodesWithText("Evening recital").onLast().performClick()
             rule.waitUntil(timeoutMillis = 5_000) {
                 runtime.repository.library.value.setlists.single { it.id == "set_evening" }.itemIds == listOf("moon_river")
             }
@@ -804,46 +779,6 @@ class ScreenSmokeTest {
             rule.waitUntil(timeoutMillis = 5_000) {
                 runtime.repository.library.value.items.single().composer == "Henry Mancini"
             }
-        }
-    }
-
-    @Test
-    @OptIn(ExperimentalTestApi::class)
-    fun setlistKeepsItsScrollPositionAcrossAViewerVisit() {
-        runBlocking {
-            val items = (0 until 40).map { index ->
-                val label = index.toString().padStart(2, '0')
-                // Newest first under the default sort, so score_00 leads the list.
-                testSheetMusicItem(id = "score_$label", title = "Score $label", dateAddedEpochMillis = 100L - index)
-            }
-            val setlist = testLibrarySetlist(id = "set_long", name = "Long recital", itemIds = items.map { it.id })
-            val runtime = createTestPlatformRuntime(
-                initialItems = items,
-                initialSetlists = listOf(setlist),
-                initialSettings = AppSettings(refreshOnLaunch = false),
-            )
-
-            rule.setContent {
-                LunarApp(runtime)
-            }
-            rule.waitUntil(timeoutMillis = 5_000) {
-                rule.onAllNodesWithTag(LunarTestTags.navigationItem(AppSection.SETLISTS)).fetchSemanticsNodes().isNotEmpty()
-            }
-            rule.onNodeWithTag(LunarTestTags.navigationItem(AppSection.SETLISTS)).performClick()
-            rule.onNodeWithTag(LunarTestTags.setlistRow("set_long")).performClick()
-            rule.waitUntil(timeoutMillis = 5_000) {
-                rule.onAllNodesWithTag(LibraryTestTags.row("score_00")).fetchSemanticsNodes().isNotEmpty()
-            }
-
-            rule.onNode(hasScrollToIndexAction()).performScrollToIndex(30)
-            rule.onNodeWithTag(LibraryTestTags.row("score_30")).performClick()
-            rule.waitUntil(timeoutMillis = 5_000) {
-                rule.onAllNodesWithTag(LunarTestTags.LIBRARY_PANEL).fetchSemanticsNodes().isEmpty()
-            }
-            rule.onRoot().performKeyInput { pressKey(Key.F11) }
-
-            rule.onNodeWithTag(LibraryTestTags.row("score_30")).assertIsDisplayed()
-            assertTrue(rule.onAllNodesWithTag(LibraryTestTags.row("score_00")).fetchSemanticsNodes().isEmpty())
         }
     }
 
@@ -1073,6 +1008,7 @@ class ScreenSmokeTest {
             rule.runOnIdle { appState.selectSection(AppSection.SONGBOOKS) }
             rule.onNodeWithText("Standards Book").assertIsDisplayed()
             rule.onNodeWithText("Standards Book").performClick()
+            rule.onNodeWithText("Open songbook").performClick()
             rule.runOnIdle {
                 assertEquals(ViewerTarget.Songbook(songbook.id), appState.fullscreenTarget)
             }

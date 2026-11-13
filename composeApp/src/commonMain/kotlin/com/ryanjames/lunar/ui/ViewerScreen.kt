@@ -1129,6 +1129,21 @@ private fun ViewerFooter(
     }
 }
 
+/** Footer action for stepping through a setlist programme; hosted via [ViewerScreen]'s `nextInSetlist` slot. */
+@Composable
+fun NextInSetlistButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val themePalette = lunarThemePalette()
+    TextButton(onClick = onClick, enabled = enabled) {
+        Text(
+            text = "Next in setlist",
+            color = themePalette.viewerForeground.copy(alpha = if (enabled) 1f else 0.4f),
+        )
+    }
+}
+
 @Composable
 private fun ViewerPageStrip(
     runtime: PlatformRuntime,

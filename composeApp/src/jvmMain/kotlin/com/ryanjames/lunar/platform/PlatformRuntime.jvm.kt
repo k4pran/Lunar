@@ -807,6 +807,7 @@ internal class DesktopSongbookPdfBuilder(
         appendedDocumentPaths: List<String>,
         existingSongbookPath: String?,
         coverImage: SelectedCoverImage?,
+        dropExistingCoverPage: Boolean,
     ): SongbookBuildResult = withContext(Dispatchers.IO) {
         val normalizedName = songbookName.trim().ifEmpty { "Songbook" }
         val sourcePaths = appendedDocumentPaths
@@ -822,7 +823,7 @@ internal class DesktopSongbookPdfBuilder(
             existingSongbookPath
                 ?.trim()
                 ?.takeIf(String::isNotEmpty)
-                ?.let { appendPdf(mergedDocument, it) }
+                ?.let { appendPdf(mergedDocument, it, skipFirstPage = dropExistingCoverPage) }
             sourcePaths.forEach { path ->
                 appendPdf(mergedDocument, path)
             }
@@ -857,13 +858,20 @@ internal class DesktopSongbookPdfBuilder(
         }
     }
 
-    private fun appendPdf(target: PDDocument, documentPath: String) {
+    private fun appendPdf(
+        target: PDDocument,
+        documentPath: String,
+        skipFirstPage: Boolean = false,
+    ) {
         val source = File(documentPath)
         if (!source.exists()) {
             throw IllegalStateException("A source PDF is unavailable: ${source.name}")
         }
 
         Loader.loadPDF(source).use { incoming ->
+            if (skipFirstPage && incoming.numberOfPages > 0) {
+                incoming.removePage(0)
+            }
             PDFMergerUtility().appendDocument(target, incoming)
         }
     }

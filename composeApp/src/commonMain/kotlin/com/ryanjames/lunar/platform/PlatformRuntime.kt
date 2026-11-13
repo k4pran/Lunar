@@ -196,6 +196,8 @@ interface SongbookPdfBuilder {
         appendedDocumentPaths: List<String>,
         existingSongbookPath: String? = null,
         coverImage: SelectedCoverImage? = null,
+        /** Drops the first page of [existingSongbookPath], i.e. the cover it was bound with. */
+        dropExistingCoverPage: Boolean = false,
     ): SongbookBuildResult
 }
 
@@ -257,6 +259,7 @@ object UnsupportedSongbookPdfBuilder : SongbookPdfBuilder {
         appendedDocumentPaths: List<String>,
         existingSongbookPath: String?,
         coverImage: SelectedCoverImage?,
+        dropExistingCoverPage: Boolean,
     ): SongbookBuildResult = throw UnsupportedOperationException(
         "Songbook creation is unavailable on this target."
     )
