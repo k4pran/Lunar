@@ -1,25 +1,22 @@
 package com.ryanjames.lunar.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,12 +26,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ryanjames.lunar.library.data.CloudGoogleDriveSource
@@ -43,14 +40,31 @@ import com.ryanjames.lunar.library.data.CloudSupabaseSource
 import com.ryanjames.lunar.library.data.LibrarySource
 import com.ryanjames.lunar.library.data.LocalFilesSource
 import com.ryanjames.lunar.library.data.LocalFolderSource
-import com.ryanjames.lunar.platform.formatStorageSize
 import com.ryanjames.lunar.platform.ImporterState
 import com.ryanjames.lunar.platform.LibraryCacheSnapshot
 import com.ryanjames.lunar.platform.PlatformRuntime
+import com.ryanjames.lunar.platform.formatStorageSize
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.CacheLimitPreset
 import com.ryanjames.lunar.settings.limitBytes
 import com.ryanjames.lunar.sync.CloudSyncState
+import com.ryanjames.lunar.sync.supportedCloudProviders
+import com.ryanjames.lunar.ui.design.LunarButton
+import com.ryanjames.lunar.ui.design.LunarButtonStyle
+import com.ryanjames.lunar.ui.design.LunarIcon
+import com.ryanjames.lunar.ui.design.LunarIconKind
+import com.ryanjames.lunar.ui.design.LunarTestTags
+import com.ryanjames.lunar.ui.design.PageHeading
+import com.ryanjames.lunar.ui.design.Popover
+import com.ryanjames.lunar.ui.design.SmallCapsLabel
+import com.ryanjames.lunar.ui.design.TruncatedText
+import com.ryanjames.lunar.ui.design.lunarTokens
+import kotlin.time.Clock
+
+/** The side column sits beside the source list once there is room for both. */
+private val SourcesSideColumnMinWindow = 900.dp
+private val SourcesSideColumnWidth = 320.dp
+private val SourceRowStackWidth = 560.dp
 
 @Composable
 fun ImportScreen(
@@ -63,11 +77,9 @@ fun ImportScreen(
     modifier: Modifier = Modifier,
 ) {
     val sources by runtime.sourceRegistry.sources.collectAsState()
-    val clipboardManager = LocalClipboardManager.current
-    val themePalette = lunarThemePalette()
+    val tokens = lunarTokens()
 
-    var showLocalDialog by remember { mutableStateOf(false) }
-    var showCloudDialog by remember { mutableStateOf(false) }
+    var addingCloudProviderId by remember { mutableStateOf<String?>(null) }
     var editingCloudSource by remember { mutableStateOf<CloudLibrarySource?>(null) }
     var cacheSnapshot by remember { mutableStateOf<LibraryCacheSnapshot?>(null) }
     var cacheInspectionError by remember { mutableStateOf<String?>(null) }
@@ -83,447 +95,81 @@ fun ImportScreen(
             }
     }
 
-    Column(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .background(tokens.colors.bg)
+            .testTag(LunarTestTags.SOURCES_PANEL),
     ) {
-        // Hero header
-        Surface(
-            color = Color.Transparent,
-            tonalElevation = 0.dp,
-            shape = MaterialTheme.shapes.extraLarge,
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                themePalette.headerGradientStart,
-                                themePalette.headerGradientEnd,
-                            )
-                        ),
-                        shape = MaterialTheme.shapes.extraLarge,
-                    )
-                    .padding(22.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "Sources",
-                    style = MaterialTheme.typography.headlineMedium.copy(
-                        fontFamily = FontFamily.Serif,
-                        fontWeight = FontWeight.SemiBold,
-                    ),
-                    color = themePalette.headerForeground,
-                )
-                Text(
-                    text = "Add local or cloud sources to build your library. Each source contributes scores that are combined into a single browsable collection.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = themePalette.headerForeground.copy(alpha = 0.82f),
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    ImportSummaryPill("$libraryCount scores in library")
-                    ImportSummaryPill("${sources.size} source${if (sources.size == 1) "" else "s"}")
-                }
-                importerState.statusMessage?.let { message ->
-                    Text(
-                        text = message,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = themePalette.headerForeground.copy(alpha = 0.75f),
-                    )
-                }
-            }
+        val sourceList: @Composable (Modifier) -> Unit = { columnModifier ->
+            SourceListColumn(
+                runtime = runtime,
+                importerState = importerState,
+                syncState = syncState,
+                sources = sources,
+                libraryCount = libraryCount,
+                appState = appState,
+                onAddCloudSource = { providerId -> addingCloudProviderId = providerId },
+                onEditCloudSource = { source -> editingCloudSource = source },
+                modifier = columnModifier,
+            )
+        }
+        val sideColumn: @Composable (Modifier) -> Unit = { columnModifier ->
+            SourcesSideColumn(
+                syncState = syncState,
+                settings = settings,
+                cacheSnapshot = cacheSnapshot,
+                cacheInspectionError = cacheInspectionError,
+                appState = appState,
+                modifier = columnModifier,
+            )
         }
 
-        // Add source buttons
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Box(modifier = Modifier.weight(1f)) {
-                Button(
-                    onClick = { showLocalDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = runtime.capabilities.fileImportSupported && !appState.importInProgress,
-                ) {
-                    Text("Add local source")
-                }
-            }
-            Box(modifier = Modifier.weight(1f)) {
-                Button(
-                    onClick = { showCloudDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondary,
-                        contentColor = MaterialTheme.colorScheme.onSecondary,
-                    ),
-                ) {
-                    Text("Add cloud source")
-                }
-            }
-        }
-
-        cacheSnapshot?.let { snapshot ->
-            Surface(
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                shape = MaterialTheme.shapes.large,
-            ) {
-                Column(
+        if (maxWidth >= SourcesSideColumnMinWindow) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                sourceList(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = tokens.spacing.xxl, vertical = tokens.spacing.xl),
+                )
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = "On-device cache",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontFamily = FontFamily.Serif,
-                            fontWeight = FontWeight.SemiBold,
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "Lunar uses a local-first filesystem cache. Library metadata stays on disk, and imported or synced PDFs are kept in managed storage for offline browsing and viewing.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        ImportSummaryPillDark("${snapshot.cachedPdfCount} cached PDF${if (snapshot.cachedPdfCount == 1) "" else "s"}")
-                        ImportSummaryPillDark(snapshot.cachedPdfBytesLabel)
-                        ImportSummaryPillDark("Budget ${settings.cacheLimit.label()}")
-                    }
-                    Text(
-                        text = buildString {
-                            append(if (snapshot.offlineLibraryReady) "Library metadata cached locally" else "Library metadata not cached yet")
-                            append(" • ")
-                            append(if (snapshot.offlineViewerReady) "Offline viewing ready for cached scores" else "Add or sync scores to enable offline viewing")
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        text = "Storage: ${snapshot.storageLabel}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    snapshot.cacheRootPath?.takeIf(String::isNotBlank)?.let { cachePath ->
-                        Text(
-                            text = cachePath,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Text(
-                        text = "Unchanged cloud PDFs are reused from the local cache instead of being downloaded again.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    settings.cacheLimit.limitBytes?.let { limitBytes ->
-                        if (snapshot.cachedPdfBytes > limitBytes) {
-                            Text(
-                                text = "Current cache is ${formatStorageSize(snapshot.cachedPdfBytes - limitBytes)} over the preferred budget.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                    }
-                    TextButton(
-                        onClick = {
-                            clipboardManager.setText(
-                                AnnotatedString(buildCacheDetails(snapshot, settings))
-                            )
-                        },
-                    ) {
-                        Text("Copy cache details")
-                    }
-                }
-            }
-        }
-
-        cacheInspectionError?.takeIf(String::isNotBlank)?.let { error ->
-            Surface(
-                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
-                shape = MaterialTheme.shapes.medium,
-            ) {
-                Text(
-                    text = error,
-                    modifier = Modifier.padding(12.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
+                        .width(1.dp)
+                        .fillMaxHeight()
+                        .background(tokens.colors.rule),
                 )
-            }
-        }
-
-        // Configured sources list
-        if (sources.isEmpty()) {
-            Card(
-                shape = MaterialTheme.shapes.large,
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = "No sources configured",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontFamily = FontFamily.Serif,
-                            fontWeight = FontWeight.SemiBold,
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "Add a local or cloud source above to start building your library.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                sideColumn(
+                    Modifier
+                        .width(SourcesSideColumnWidth)
+                        .fillMaxHeight()
+                        .background(tokens.colors.panel)
+                        .verticalScroll(rememberScrollState())
+                        .padding(tokens.spacing.xl),
+                )
             }
         } else {
-            sources.forEach { source ->
-                SourceCard(
-                    source = source,
-                    itemCount = runtime.repository.itemCountForSource(source.id),
-                    onRemove = { appState.removeSource(source.id) },
-                    onEdit = if (source is CloudLibrarySource) {
-                        { editingCloudSource = source }
-                    } else null,
-                    onRefresh = if (source is CloudLibrarySource) {
-                        { appState.refreshCloudSource(source) }
-                    } else null,
-                    isSyncing = syncState.isRefreshing,
-                )
-            }
-        }
-
-        // Sync status
-        if (sources.any { it is CloudLibrarySource }) {
-            val hasErrors = syncState.syncErrors.isNotEmpty()
-            val statusBg = when {
-                hasErrors -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f)
-                syncState.isRefreshing -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.48f)
-                !syncState.lastMessage.isNullOrBlank() -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.48f)
-                else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.82f)
-            }
-            Surface(color = statusBg, shape = MaterialTheme.shapes.medium) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        text = when {
-                            syncState.isRefreshing -> syncState.currentStep ?: "Refreshing..."
-                            hasErrors -> "Sync completed with errors"
-                            !syncState.lastMessage.isNullOrBlank() -> syncState.lastMessage.orEmpty()
-                            else -> "Cloud sources are configured. Press refresh to sync."
-                        },
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = if (hasErrors) {
-                            MaterialTheme.colorScheme.onErrorContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                    )
-                    if (syncState.activeSourceLabels.isNotEmpty()) {
-                        Text(
-                            text = "Active sources: ${syncState.activeSourceLabels.joinToString()}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    if (
-                        syncState.isRefreshing ||
-                        syncState.discoveredResources > 0 ||
-                        syncState.processedResources > 0 ||
-                        syncState.visitedFolders > 0
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            ImportSummaryPill("Folders ${syncState.visitedFolders}")
-                            ImportSummaryPill("Found ${syncState.discoveredResources}")
-                            ImportSummaryPill("Ready ${syncState.processedResources}")
-                            if (syncState.skippedResources > 0) {
-                                ImportSummaryPill("Skipped ${syncState.skippedResources}")
-                            }
-                        }
-                    }
-                    if (hasErrors) {
-                        syncState.syncErrors.forEach { error ->
-                            Text(
-                                error,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                            )
-                        }
-                    }
-                    if (syncState.activityLog.isNotEmpty()) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                            shape = MaterialTheme.shapes.medium,
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
-                            ) {
-                                Text(
-                                    text = "Activity log",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                                syncState.activityLog.takeLast(12).forEach { entry ->
-                                    Text(
-                                        text = entry,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    if (hasErrors || syncState.activityLog.isNotEmpty()) {
-                        TextButton(
-                            onClick = {
-                                clipboardManager.setText(
-                                    AnnotatedString(buildSyncDetails(syncState))
-                                )
-                            },
-                        ) {
-                            Text(if (hasErrors) "Copy sync details" else "Copy activity log")
-                        }
-                    }
-                }
-            }
-
-            Button(
-                onClick = appState::refreshAllCloudSources,
-                enabled = !syncState.isRefreshing,
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = tokens.spacing.lg, vertical = tokens.spacing.lg),
+                verticalArrangement = Arrangement.spacedBy(tokens.spacing.xl),
             ) {
-                Text(if (syncState.isRefreshing) "Refreshing..." else "Refresh all cloud sources")
+                sourceList(Modifier.fillMaxWidth())
+                sideColumn(Modifier.fillMaxWidth())
             }
-        }
-
-        if (appState.importActivityLog.isNotEmpty() || appState.importInProgress) {
-            Surface(
-                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f),
-                shape = MaterialTheme.shapes.medium,
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        text = appState.importActivityStep ?: if (appState.importInProgress) "Importing..." else "Import activity",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    if (
-                        appState.importInProgress ||
-                        appState.importDiscoveredResources > 0 ||
-                        appState.importProcessedResources > 0 ||
-                        appState.importSkippedResources > 0
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            ImportSummaryPill("Found ${appState.importDiscoveredResources}")
-                            ImportSummaryPill("Imported ${appState.importProcessedResources}")
-                            if (appState.importSkippedResources > 0) {
-                                ImportSummaryPill("Skipped ${appState.importSkippedResources}")
-                            }
-                        }
-                    }
-                    Surface(
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                        shape = MaterialTheme.shapes.medium,
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Text(
-                                text = "Import log",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            appState.importActivityLog.takeLast(12).forEach { entry ->
-                                Text(
-                                    text = entry,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
-                    TextButton(
-                        onClick = {
-                            clipboardManager.setText(
-                                AnnotatedString(buildImportDetails(appState))
-                            )
-                        },
-                    ) {
-                        Text("Copy import activity")
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        OutlinedButton(
-            onClick = { appState.selectSection(AppSection.LIBRARY) },
-            modifier = Modifier.widthIn(max = 240.dp),
-        ) {
-            Text("Go to library")
         }
     }
 
-    // Dialogs
-    if (showLocalDialog) {
-        AddLocalSourceDialog(
-            folderImportSupported = runtime.capabilities.folderImportSupported,
-            localImageImportSupported = runtime.capabilities.localImageImportSupported,
-            lilyPondImportSupported = runtime.capabilities.lilyPondImportSupported,
-            museScoreImportSupported = runtime.capabilities.museScoreImportSupported,
-            onDismiss = { showLocalDialog = false },
-            onConfirm = { type, label ->
-                showLocalDialog = false
-                when (type) {
-                    LocalSourceType.FILES -> appState.addLocalFilesSource(label)
-                    LocalSourceType.FOLDER -> appState.addLocalFolderSource(label)
-                }
-            },
-        )
-    }
-
-    if (showCloudDialog) {
+    addingCloudProviderId?.let { providerId ->
         AddCloudSourceDialog(
             googleDriveOAuthSupported = runtime.googleDriveOAuth.isSupported,
-            onDismiss = { showCloudDialog = false },
+            initialProviderId = providerId,
+            onDismiss = { addingCloudProviderId = null },
             onConfirm = { source ->
-                showCloudDialog = false
+                addingCloudProviderId = null
                 appState.addCloudSource(source)
             },
         )
@@ -543,131 +189,193 @@ fun ImportScreen(
 }
 
 @Composable
-private fun SourceCard(
-    source: LibrarySource,
-    itemCount: Int,
-    onRemove: () -> Unit,
-    onEdit: (() -> Unit)?,
-    onRefresh: (() -> Unit)?,
-    isSyncing: Boolean,
+private fun SourceListColumn(
+    runtime: PlatformRuntime,
+    importerState: ImporterState,
+    syncState: CloudSyncState,
+    sources: List<LibrarySource>,
+    libraryCount: Int,
+    appState: LunarAppState,
+    onAddCloudSource: (providerId: String) -> Unit,
+    onEditCloudSource: (CloudLibrarySource) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val typeLabel = when (source) {
-        is LocalFilesSource -> "Local files"
-        is LocalFolderSource -> "Local folder"
-        is CloudSupabaseSource -> "Supabase"
-        is CloudGoogleDriveSource -> "Google Drive"
-    }
+    val tokens = lunarTokens()
+    val nowEpochMillis = remember(syncState, sources) { Clock.System.now().toEpochMilliseconds() }
+    val hasCloudSources = sources.any { it is CloudLibrarySource }
 
-    Card(
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(tokens.spacing.lg),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(tokens.spacing.md),
+            verticalAlignment = Alignment.Bottom,
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    text = source.label,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontFamily = FontFamily.Serif,
-                        fontWeight = FontWeight.SemiBold,
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = typeLabel,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.secondary,
-                )
-            }
-
-            Text(
-                text = "$itemCount score${if (itemCount == 1) "" else "s"}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            PageHeading(
+                title = "Sources",
+                subtitle = "$libraryCount ${plural(libraryCount, "score")} from " +
+                    "${sources.size} ${plural(sources.size, "source")}",
+                modifier = Modifier.weight(1f),
             )
-
-            when (source) {
-                is CloudSupabaseSource -> {
-                    if (source.settings.projectUrl.isNotBlank()) {
-                        Text(
-                            text = "${source.settings.projectUrl} / ${source.settings.bucketName}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-
-                is CloudGoogleDriveSource -> {
-                    Text(
-                        text = "${source.settings.roots.size} Drive root${if (source.settings.roots.size == 1) "" else "s"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        text = if (source.settings.refreshToken.isNotBlank()) {
-                            "OAuth connected"
-                        } else {
-                            "Desktop sign-in required"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    val uploadRoot = source.settings.uploadRoot
-                    if (source.settings.uploadEnabled && uploadRoot != null) {
-                        Text(
-                            text = "Upload-sync: ${uploadRoot.label.ifBlank { uploadRoot.folderId }}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.secondary,
-                        )
-                    }
-                    source.settings.roots.take(2).forEach { root ->
-                        Text(
-                            text = root.label.ifBlank { root.folderId },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-
-                else -> Unit
+            if (hasCloudSources) {
+                LunarButton(
+                    text = if (syncState.isRefreshing) "Refreshing..." else "Refresh all",
+                    onClick = appState::refreshAllCloudSources,
+                    style = LunarButtonStyle.SECONDARY,
+                    enabled = !syncState.isRefreshing,
+                )
             }
+            AddSourceMenu(
+                runtime = runtime,
+                localImportEnabled = !appState.importInProgress,
+                onAddFiles = { appState.addLocalFilesSource("") },
+                onAddFolder = { appState.addLocalFolderSource("") },
+                onAddCloudSource = onAddCloudSource,
+            )
+        }
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (onEdit != null) {
-                    OutlinedButton(
-                        onClick = onEdit,
-                        enabled = !isSyncing,
-                    ) {
-                        Text("Edit")
-                    }
-                }
-                if (onRefresh != null) {
-                    OutlinedButton(
-                        onClick = onRefresh,
-                        enabled = !isSyncing,
-                    ) {
-                        Text(if (isSyncing) "Syncing..." else "Refresh")
-                    }
-                }
-                TextButton(
-                    onClick = onRemove,
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error,
-                    ),
+        importerState.statusMessage?.takeIf(String::isNotBlank)?.let { message ->
+            Text(
+                text = message,
+                style = tokens.typography.bodySmall,
+                color = tokens.colors.muted,
+            )
+        }
+
+        Column(modifier = Modifier.fillMaxWidth()) {
+            HorizontalDivider(color = tokens.colors.strong)
+            if (sources.isEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = tokens.spacing.xl),
+                    verticalArrangement = Arrangement.spacedBy(tokens.spacing.xs),
                 ) {
-                    Text("Remove")
+                    Text(
+                        text = "No sources yet",
+                        style = tokens.typography.heading,
+                        color = tokens.colors.ink,
+                    )
+                    Text(
+                        text = "Use Add a source to bring in files or a folder from this device, or connect Supabase or Google Drive.",
+                        style = tokens.typography.bodySmall,
+                        color = tokens.colors.muted,
+                    )
+                }
+            } else {
+                sources.forEachIndexed { index, source ->
+                    if (index > 0) HorizontalDivider(color = tokens.colors.rule)
+                    SourceRow(
+                        source = source,
+                        itemCount = runtime.repository.itemCountForSource(source.id),
+                        status = sourceStatusLine(source, syncState, nowEpochMillis),
+                        actionsEnabled = !syncState.isRefreshing,
+                        onRefresh = (source as? CloudLibrarySource)?.let { cloud ->
+                            { appState.refreshCloudSource(cloud) }
+                        },
+                        onEdit = (source as? CloudLibrarySource)?.let { cloud ->
+                            { onEditCloudSource(cloud) }
+                        },
+                        onRemove = { appState.removeSource(source.id) },
+                    )
+                }
+            }
+            HorizontalDivider(color = tokens.colors.rule)
+        }
+    }
+}
+
+/**
+ * "Add a source": Files and Folder go straight to the system picker; the cloud providers open
+ * their connection form.
+ */
+@Composable
+private fun AddSourceMenu(
+    runtime: PlatformRuntime,
+    localImportEnabled: Boolean,
+    onAddFiles: () -> Unit,
+    onAddFolder: () -> Unit,
+    onAddCloudSource: (providerId: String) -> Unit,
+) {
+    val tokens = lunarTokens()
+    val capabilities = runtime.capabilities
+    var expanded by remember { mutableStateOf(false) }
+
+    Box {
+        LunarButton(
+            text = "Add a source",
+            onClick = { expanded = true },
+            icon = LunarIconKind.CHEVRON_DOWN,
+            modifier = Modifier.testTag(LunarTestTags.SOURCES_ADD_MENU),
+        )
+        Popover(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            // The popup is bounded by the window, so on short windows (landscape phones) the
+            // trailing cloud entries must scroll into view rather than be clipped.
+            Column(
+                modifier = Modifier
+                    .testTag(LunarTestTags.SOURCES_ADD_MENU_LIST)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                SmallCapsLabel(
+                    text = "On this device",
+                    modifier = Modifier.padding(horizontal = tokens.spacing.lg, vertical = tokens.spacing.xs),
+                )
+                AddSourceMenuItem(
+                    key = "files",
+                    title = "Files",
+                    subtitle = localFileImportDescription(
+                        localImageImportSupported = capabilities.localImageImportSupported,
+                        lilyPondImportSupported = capabilities.lilyPondImportSupported,
+                        museScoreImportSupported = capabilities.museScoreImportSupported,
+                    ),
+                    icon = LunarIconKind.FOLDER,
+                    enabled = capabilities.fileImportSupported && localImportEnabled,
+                    onClick = {
+                        expanded = false
+                        onAddFiles()
+                    },
+                )
+                AddSourceMenuItem(
+                    key = "folder",
+                    title = "Folder",
+                    subtitle = localFolderImportDescription(
+                        folderImportSupported = capabilities.folderImportSupported,
+                        localImageImportSupported = capabilities.localImageImportSupported,
+                        lilyPondImportSupported = capabilities.lilyPondImportSupported,
+                        museScoreImportSupported = capabilities.museScoreImportSupported,
+                    ),
+                    icon = LunarIconKind.FOLDER,
+                    enabled = capabilities.folderImportSupported && localImportEnabled,
+                    onClick = {
+                        expanded = false
+                        onAddFolder()
+                    },
+                )
+                HorizontalDivider(
+                    color = tokens.colors.rule,
+                    modifier = Modifier.padding(vertical = tokens.spacing.xs),
+                )
+                SmallCapsLabel(
+                    text = "Cloud",
+                    modifier = Modifier.padding(horizontal = tokens.spacing.lg, vertical = tokens.spacing.xs),
+                )
+                supportedCloudProviders().forEach { provider ->
+                    AddSourceMenuItem(
+                        key = provider.id,
+                        title = provider.displayName,
+                        subtitle = provider.description,
+                        icon = LunarIconKind.CLOUD,
+                        enabled = true,
+                        onClick = {
+                            expanded = false
+                            onAddCloudSource(provider.id)
+                        },
+                    )
                 }
             }
         }
@@ -675,36 +383,448 @@ private fun SourceCard(
 }
 
 @Composable
-private fun ImportSummaryPill(text: String) {
-    val themePalette = lunarThemePalette()
-
-    Surface(
-        color = themePalette.headerForeground.copy(alpha = 0.18f),
-        shape = MaterialTheme.shapes.large,
+private fun AddSourceMenuItem(
+    key: String,
+    title: String,
+    subtitle: String,
+    icon: LunarIconKind,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val tokens = lunarTokens()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(LunarTestTags.addSourceOption(key))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = tokens.spacing.lg, vertical = tokens.spacing.sm),
+        horizontalArrangement = Arrangement.spacedBy(tokens.spacing.md),
+        verticalAlignment = Alignment.Top,
     ) {
+        LunarIcon(
+            kind = icon,
+            contentDescription = null,
+            size = 16.dp,
+            tint = if (enabled) tokens.colors.ink2 else tokens.colors.faint,
+            modifier = Modifier.padding(top = tokens.spacing.xxs),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(tokens.spacing.xxs)) {
+            Text(
+                text = title,
+                style = tokens.typography.body,
+                color = if (enabled) tokens.colors.ink else tokens.colors.muted,
+            )
+            Text(
+                text = subtitle,
+                style = tokens.typography.bodySmall,
+                color = tokens.colors.muted,
+            )
+        }
+    }
+}
+
+/**
+ * One ruled row per source: type, location, score count, its own status line, and actions. On a
+ * narrow row the actions drop below the details so the name, location and errors keep their width.
+ */
+@Composable
+private fun SourceRow(
+    source: LibrarySource,
+    itemCount: Int,
+    status: SourceStatusLine,
+    actionsEnabled: Boolean,
+    onRefresh: (() -> Unit)?,
+    onEdit: (() -> Unit)?,
+    onRemove: () -> Unit,
+) {
+    val tokens = lunarTokens()
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(LunarTestTags.sourceRow(source.id))
+            .padding(vertical = tokens.spacing.md),
+    ) {
+        val stacked = maxWidth < SourceRowStackWidth
+        val summary: @Composable (Modifier) -> Unit = { summaryModifier ->
+            Row(
+                modifier = summaryModifier,
+                horizontalArrangement = Arrangement.spacedBy(tokens.spacing.md),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                LunarIcon(
+                    kind = source.iconKind(),
+                    contentDescription = null,
+                    tint = tokens.colors.muted,
+                )
+                SourceRowDetails(
+                    source = source,
+                    status = status,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "$itemCount ${plural(itemCount, "score")}",
+                    style = tokens.typography.bodySmall,
+                    color = tokens.colors.ink2,
+                )
+            }
+        }
+        val actions: @Composable (Modifier) -> Unit = { actionsModifier ->
+            SourceRowActions(
+                actionsEnabled = actionsEnabled,
+                onRefresh = onRefresh,
+                onEdit = onEdit,
+                onRemove = onRemove,
+                modifier = actionsModifier,
+            )
+        }
+        if (stacked) {
+            Column(verticalArrangement = Arrangement.spacedBy(tokens.spacing.xs)) {
+                summary(Modifier.fillMaxWidth())
+                actions(Modifier.testTag(LunarTestTags.sourceRowActions(source.id)))
+            }
+        } else {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(tokens.spacing.md),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                summary(Modifier.weight(1f))
+                actions(Modifier.testTag(LunarTestTags.sourceRowActions(source.id)))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SourceRowDetails(
+    source: LibrarySource,
+    status: SourceStatusLine,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = lunarTokens()
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(tokens.spacing.xxs),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(tokens.spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TruncatedText(
+                text = source.label,
+                style = tokens.typography.body.copy(fontWeight = FontWeight.SemiBold),
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            SmallCapsLabel(text = source.typeLabel())
+        }
+        TruncatedText(
+            text = source.locationLabel(),
+            style = tokens.typography.bodySmall,
+            color = tokens.colors.ink2,
+        )
         Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.labelLarge,
-            color = themePalette.headerForeground,
+            text = status.text,
+            style = tokens.typography.bodySmall,
+            color = when (status.tone) {
+                SourceStatusTone.NEUTRAL -> tokens.colors.muted
+                SourceStatusTone.ACTIVE -> tokens.colors.accent
+                SourceStatusTone.ERROR -> tokens.colors.danger
+            },
+            modifier = Modifier.testTag(LunarTestTags.sourceStatus(source.id)),
         )
     }
 }
 
 @Composable
-private fun ImportSummaryPillDark(text: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
-        shape = MaterialTheme.shapes.large,
+private fun SourceRowActions(
+    actionsEnabled: Boolean,
+    onRefresh: (() -> Unit)?,
+    onEdit: (() -> Unit)?,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = lunarTokens()
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(tokens.spacing.xxs),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        onRefresh?.let {
+            LunarButton(
+                text = "Refresh",
+                onClick = it,
+                style = LunarButtonStyle.TEXT,
+                enabled = actionsEnabled,
+            )
+        }
+        onEdit?.let {
+            LunarButton(
+                text = "Edit",
+                onClick = it,
+                style = LunarButtonStyle.TEXT,
+                enabled = actionsEnabled,
+            )
+        }
+        TextButton(
+            onClick = onRemove,
+            shape = tokens.shapes.medium,
+            colors = ButtonDefaults.textButtonColors(contentColor = tokens.colors.danger),
+        ) {
+            Text(text = "Remove", style = tokens.typography.button)
+        }
+    }
+}
+
+@Composable
+private fun SourcesSideColumn(
+    syncState: CloudSyncState,
+    settings: AppSettings,
+    cacheSnapshot: LibraryCacheSnapshot?,
+    cacheInspectionError: String?,
+    appState: LunarAppState,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = lunarTokens()
+    Column(
+        modifier = modifier.testTag(LunarTestTags.SOURCES_SIDE_PANEL),
+        verticalArrangement = Arrangement.spacedBy(tokens.spacing.xl),
+    ) {
+        CacheUsageSection(
+            snapshot = cacheSnapshot,
+            settings = settings,
+            inspectionError = cacheInspectionError,
+        )
+        cacheSnapshot?.let { OfflineReadinessSection(it) }
+        ActivitySection(syncState = syncState, appState = appState)
+    }
+}
+
+@Composable
+private fun CacheUsageSection(
+    snapshot: LibraryCacheSnapshot?,
+    settings: AppSettings,
+    inspectionError: String?,
+) {
+    val tokens = lunarTokens()
+    val clipboardManager = LocalClipboardManager.current
+    SideSection(title = "On-device cache") {
+        inspectionError?.takeIf(String::isNotBlank)?.let { error ->
+            Text(text = error, style = tokens.typography.bodySmall, color = tokens.colors.danger)
+        }
+        if (snapshot == null) {
+            if (inspectionError.isNullOrBlank()) {
+                Text(text = "Checking the cache...", style = tokens.typography.bodySmall, color = tokens.colors.muted)
+            }
+            return@SideSection
+        }
+        val limitBytes = settings.cacheLimit.limitBytes
+        val overBudget = limitBytes != null && snapshot.cachedPdfBytes > limitBytes
         Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            text = if (limitBytes == null) {
+                "${snapshot.cachedPdfBytesLabel} used, no budget"
+            } else {
+                "${snapshot.cachedPdfBytesLabel} of ${settings.cacheLimit.label()}"
+            },
+            style = tokens.typography.body,
+            color = tokens.colors.ink,
+        )
+        if (limitBytes != null) {
+            CacheBudgetBar(
+                fraction = (snapshot.cachedPdfBytes.toDouble() / limitBytes.toDouble()).toFloat(),
+                overBudget = overBudget,
+            )
+        }
+        Text(
+            text = "${snapshot.cachedPdfCount} cached ${plural(snapshot.cachedPdfCount, "PDF")} in ${snapshot.storageLabel}",
+            style = tokens.typography.bodySmall,
+            color = tokens.colors.muted,
+        )
+        snapshot.cacheRootPath?.takeIf(String::isNotBlank)?.let { cachePath ->
+            TruncatedText(text = cachePath, style = tokens.typography.bodySmall, color = tokens.colors.muted)
+        }
+        if (overBudget && limitBytes != null) {
+            Text(
+                text = "${formatStorageSize(snapshot.cachedPdfBytes - limitBytes)} over the preferred budget.",
+                style = tokens.typography.bodySmall,
+                color = tokens.colors.danger,
+            )
+        }
+        LunarButton(
+            text = "Copy cache details",
+            onClick = { clipboardManager.setText(AnnotatedString(buildCacheDetails(snapshot, settings))) },
+            style = LunarButtonStyle.TEXT,
         )
     }
 }
+
+@Composable
+private fun CacheBudgetBar(
+    fraction: Float,
+    overBudget: Boolean,
+) {
+    val tokens = lunarTokens()
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(6.dp)
+            .background(tokens.colors.faint, tokens.shapes.extraSmall),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(fraction.coerceIn(0f, 1f))
+                .height(6.dp)
+                .background(
+                    color = if (overBudget) tokens.colors.danger else tokens.colors.accent,
+                    shape = tokens.shapes.extraSmall,
+                ),
+        )
+    }
+}
+
+@Composable
+private fun OfflineReadinessSection(snapshot: LibraryCacheSnapshot) {
+    SideSection(title = "Offline") {
+        ReadinessLine(
+            ready = snapshot.offlineLibraryReady,
+            readyText = "Library metadata cached locally",
+            notReadyText = "Library metadata not cached yet",
+        )
+        ReadinessLine(
+            ready = snapshot.offlineViewerReady,
+            readyText = "Offline viewing ready for cached scores",
+            notReadyText = "Add or sync scores to enable offline viewing",
+        )
+    }
+}
+
+@Composable
+private fun ReadinessLine(
+    ready: Boolean,
+    readyText: String,
+    notReadyText: String,
+) {
+    val tokens = lunarTokens()
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(tokens.spacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (ready) {
+            LunarIcon(kind = LunarIconKind.CHECK, contentDescription = null, size = 14.dp, tint = tokens.colors.accent)
+        } else {
+            Box(
+                modifier = Modifier
+                    .width(14.dp)
+                    .height(1.dp)
+                    .background(tokens.colors.muted),
+            )
+        }
+        Text(
+            text = if (ready) readyText else notReadyText,
+            style = tokens.typography.bodySmall,
+            color = if (ready) tokens.colors.ink2 else tokens.colors.muted,
+        )
+    }
+}
+
+@Composable
+private fun ActivitySection(
+    syncState: CloudSyncState,
+    appState: LunarAppState,
+) {
+    val tokens = lunarTokens()
+    val clipboardManager = LocalClipboardManager.current
+    val hasSyncActivity = syncState.isRefreshing || syncState.activityLog.isNotEmpty()
+    val hasImportActivity = appState.importInProgress || appState.importActivityLog.isNotEmpty()
+
+    SideSection(title = "Activity") {
+        if (!hasSyncActivity && !hasImportActivity) {
+            Text(text = "No activity yet.", style = tokens.typography.bodySmall, color = tokens.colors.muted)
+            return@SideSection
+        }
+        if (hasSyncActivity) {
+            ActivityLog(
+                heading = when {
+                    syncState.isRefreshing -> syncState.currentStep ?: "Refreshing..."
+                    else -> syncState.lastMessage ?: "Sync"
+                },
+                counts = if (
+                    syncState.isRefreshing ||
+                    syncState.discoveredResources > 0 ||
+                    syncState.visitedFolders > 0
+                ) {
+                    buildList {
+                        add("Folders ${syncState.visitedFolders}")
+                        add("found ${syncState.discoveredResources}")
+                        add("ready ${syncState.processedResources}")
+                        if (syncState.skippedResources > 0) add("skipped ${syncState.skippedResources}")
+                    }.joinToString(", ")
+                } else {
+                    null
+                },
+                entries = syncState.activityLog,
+            )
+            LunarButton(
+                text = if (syncState.syncErrors.isNotEmpty()) "Copy sync details" else "Copy activity log",
+                onClick = { clipboardManager.setText(AnnotatedString(buildSyncDetails(syncState))) },
+                style = LunarButtonStyle.TEXT,
+            )
+        }
+        if (hasImportActivity) {
+            ActivityLog(
+                heading = appState.importActivityStep ?: if (appState.importInProgress) "Importing..." else "Import",
+                counts = buildList {
+                    add("Found ${appState.importDiscoveredResources}")
+                    add("imported ${appState.importProcessedResources}")
+                    if (appState.importSkippedResources > 0) add("skipped ${appState.importSkippedResources}")
+                }.joinToString(", "),
+                entries = appState.importActivityLog,
+            )
+            LunarButton(
+                text = "Copy import activity",
+                onClick = { clipboardManager.setText(AnnotatedString(buildImportDetails(appState))) },
+                style = LunarButtonStyle.TEXT,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ActivityLog(
+    heading: String,
+    counts: String?,
+    entries: List<String>,
+) {
+    val tokens = lunarTokens()
+    Column(verticalArrangement = Arrangement.spacedBy(tokens.spacing.xs)) {
+        Text(text = heading, style = tokens.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold), color = tokens.colors.ink)
+        counts?.let { Text(text = it, style = tokens.typography.bodySmall, color = tokens.colors.muted) }
+        entries.takeLast(MaxActivityEntries).forEach { entry ->
+            Text(text = entry, style = tokens.typography.bodySmall, color = tokens.colors.ink2)
+        }
+    }
+}
+
+@Composable
+private fun SideSection(
+    title: String,
+    content: @Composable () -> Unit,
+) {
+    val tokens = lunarTokens()
+    Column(verticalArrangement = Arrangement.spacedBy(tokens.spacing.sm)) {
+        SmallCapsLabel(text = title)
+        HorizontalDivider(color = tokens.colors.rule)
+        content()
+    }
+}
+
+private const val MaxActivityEntries = 12
+
+private fun LibrarySource.iconKind(): LunarIconKind = when (this) {
+    is LocalFilesSource, is LocalFolderSource -> LunarIconKind.FOLDER
+    is CloudSupabaseSource -> LunarIconKind.CLOUD
+    is CloudGoogleDriveSource -> LunarIconKind.DRIVE
+}
+
+private fun plural(count: Int, noun: String): String = if (count == 1) noun else "${noun}s"
 
 private fun buildSyncDetails(syncState: CloudSyncState): String = buildString {
     syncState.currentStep?.takeIf(String::isNotBlank)?.let { step ->
@@ -753,7 +873,7 @@ private fun buildCacheDetails(
     appendLine("Offline viewer ready: ${cacheSnapshot.offlineViewerReady}")
 }
 
-private fun CacheLimitPreset.label(): String = when (this) {
+internal fun CacheLimitPreset.label(): String = when (this) {
     CacheLimitPreset.MB_512 -> "512 MB"
     CacheLimitPreset.GB_1 -> "1 GB"
     CacheLimitPreset.GB_2 -> "2 GB"

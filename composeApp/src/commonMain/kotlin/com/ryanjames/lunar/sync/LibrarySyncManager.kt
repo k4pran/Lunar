@@ -51,6 +51,18 @@ data class CloudSyncState(
     val skippedResources: Int = 0,
     val visitedFolders: Int = 0,
     val activityLog: List<String> = emptyList(),
+    /** Last sync outcome per source id, so each source can report its own status. */
+    val sourceStatuses: Map<String, SourceSyncStatus> = emptyMap(),
+)
+
+/**
+ * The most recent sync outcome for one source. [lastSyncedEpochMillis] only moves forward when a
+ * refresh completes; [lastError] holds the first problem from the latest attempt, or null.
+ */
+data class SourceSyncStatus(
+    val lastSyncedEpochMillis: Long? = null,
+    val lastAttemptEpochMillis: Long? = null,
+    val lastError: String? = null,
 )
 
 data class GoogleDriveUploadSummary(
@@ -168,6 +180,7 @@ private data class CachedAccessToken(
 )
 
 private data class SourceRefreshOutcome(
+    val sourceId: String,
     val sourceLabel: String,
     val syncedCount: Int,
     val errors: List<String> = emptyList(),
@@ -227,6 +240,15 @@ class LibrarySyncManager(
 
     fun clearGoogleAccessToken(sourceId: String) {
         googleAccessTokens.remove(sourceId)
+    }
+
+    /** Drops cached tokens and the recorded sync status for a source that has been removed. */
+    fun forgetSource(sourceId: String) {
+        clearGoogleAccessToken(sourceId)
+        val statuses = stateFlow.value.sourceStatuses
+        if (sourceId in statuses) {
+            stateFlow.value = stateFlow.value.copy(sourceStatuses = statuses - sourceId)
+        }
     }
 
     suspend fun uploadImportedItemsToGoogleDrive(
@@ -340,6 +362,7 @@ class LibrarySyncManager(
         } catch (error: Throwable) {
             val message = "${source.label}: ${error.describeSyncFailure()}"
             repository.updateSyncStatus(SyncStatus.Error(source.label, message, refreshedAt))
+            recordSourceFailure(source.id, refreshedAt, error.describeSyncFailure())
             stateFlow.value = stateFlow.value.copy(
                 isRefreshing = false,
                 lastMessage = message,
@@ -402,6 +425,7 @@ class LibrarySyncManager(
             } catch (error: Throwable) {
                 val message = "${source.label}: ${error.describeSyncFailure()}"
                 topLevelErrors += message
+                recordSourceFailure(source.id, refreshedAt, error.describeSyncFailure())
                 appendActivity(
                     message = message,
                     currentStep = "Refresh failed",
@@ -433,6 +457,13 @@ class LibrarySyncManager(
             else -> SyncStatus.Error("Cloud sources", syncErrors.first(), refreshedAt)
         }
         repository.updateSyncStatus(status)
+        outcomes.forEach { outcome ->
+            recordSourceOutcome(
+                sourceId = outcome.sourceId,
+                attemptedAt = refreshedAt,
+                error = outcome.errors.firstOrNull()?.removePrefix("${outcome.sourceLabel}: "),
+            )
+        }
 
         stateFlow.value = stateFlow.value.copy(
             isRefreshing = false,
@@ -442,6 +473,45 @@ class LibrarySyncManager(
             lastRefreshEpochMillis = refreshedAt,
             activeSourceLabels = sourceLabels,
             activityLog = (stateFlow.value.activityLog + summary).takeLast(MAX_ACTIVITY_LOG_ENTRIES),
+        )
+    }
+
+    /** A refresh that completed: the source counts as synced, with its first issue if any. */
+    private fun recordSourceOutcome(
+        sourceId: String,
+        attemptedAt: Long,
+        error: String?,
+    ) {
+        updateSourceStatus(sourceId) {
+            SourceSyncStatus(
+                lastSyncedEpochMillis = attemptedAt,
+                lastAttemptEpochMillis = attemptedAt,
+                lastError = error,
+            )
+        }
+    }
+
+    /** A refresh that failed outright: keep the previous sync time and record why. */
+    private fun recordSourceFailure(
+        sourceId: String,
+        attemptedAt: Long,
+        error: String,
+    ) {
+        updateSourceStatus(sourceId) { previous ->
+            (previous ?: SourceSyncStatus()).copy(
+                lastAttemptEpochMillis = attemptedAt,
+                lastError = error,
+            )
+        }
+    }
+
+    private inline fun updateSourceStatus(
+        sourceId: String,
+        transform: (SourceSyncStatus?) -> SourceSyncStatus,
+    ) {
+        val current = stateFlow.value
+        stateFlow.value = current.copy(
+            sourceStatuses = current.sourceStatuses + (sourceId to transform(current.sourceStatuses[sourceId])),
         )
     }
 
@@ -469,6 +539,7 @@ class LibrarySyncManager(
         )
         if (!config.isComplete()) {
             return SourceRefreshOutcome(
+                sourceId = source.id,
                 sourceLabel = source.label,
                 syncedCount = 0,
                 errors = listOf("${source.label}: configure the project URL and bucket name."),
@@ -561,6 +632,7 @@ class LibrarySyncManager(
         )
 
         return SourceRefreshOutcome(
+            sourceId = source.id,
             sourceLabel = source.label,
             syncedCount = descriptors.size,
             errors = scoreErrors,
@@ -583,6 +655,7 @@ class LibrarySyncManager(
         )
         if (!config.isComplete()) {
             return SourceRefreshOutcome(
+                sourceId = source.id,
                 sourceLabel = source.label,
                 syncedCount = 0,
                 errors = listOf(
@@ -664,6 +737,7 @@ class LibrarySyncManager(
         )
 
         return SourceRefreshOutcome(
+            sourceId = source.id,
             sourceLabel = source.label,
             syncedCount = descriptorsById.size,
             errors = scoreErrors,

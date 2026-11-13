@@ -289,6 +289,14 @@ class LunarAppState(
         }
     }
 
+    fun updateStartSidebarCollapsed(collapsed: Boolean) {
+        updateStoredSettings { settings -> settings.copy(sidebarCollapsed = collapsed) }
+    }
+
+    fun updateViewerChromeAutoHideSeconds(seconds: Int?) {
+        updateStoredSettings { settings -> settings.copy(viewerChromeAutoHideSeconds = seconds) }
+    }
+
     fun updateSearchText(searchText: String) {
         if (query.searchText == searchText) {
             return
@@ -933,10 +941,6 @@ class LunarAppState(
         bannerMessage = "Viewer keybindings reset to defaults."
     }
 
-    fun updateViewerChromeAutoHideSeconds(seconds: Int?) {
-        updateStoredSettings { settings -> settings.copy(viewerChromeAutoHideSeconds = seconds) }
-    }
-
     fun updateSkin(skin: AppSkin) {
         updateStoredSettings { settings -> settings.copy(skin = skin) }
     }
@@ -1037,7 +1041,7 @@ class LunarAppState(
     fun removeSource(sourceId: String) {
         scope.launch {
             runtime.repository.removeItemsBySource(sourceId)
-            runtime.syncManager.clearGoogleAccessToken(sourceId)
+            runtime.syncManager.forgetSource(sourceId)
             runtime.sourceRegistry.removeSource(sourceId)
             bannerMessage = "Source removed."
         }

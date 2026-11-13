@@ -5,19 +5,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,9 +25,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ryanjames.lunar.library.data.CloudGoogleDriveSource
 import com.ryanjames.lunar.library.data.CloudLibrarySource
@@ -42,12 +36,14 @@ import com.ryanjames.lunar.library.data.SupabasePublicStorageSettings
 import com.ryanjames.lunar.library.data.SyncProviderIds
 import com.ryanjames.lunar.library.data.generateSourceId
 import com.ryanjames.lunar.sync.supportedCloudProviders
+import com.ryanjames.lunar.ui.design.LunarButton
+import com.ryanjames.lunar.ui.design.LunarButtonStyle
+import com.ryanjames.lunar.ui.design.LunarDialog
+import com.ryanjames.lunar.ui.design.SmallCapsLabel
+import com.ryanjames.lunar.ui.design.TextToggle
+import com.ryanjames.lunar.ui.design.TextToggleOption
+import com.ryanjames.lunar.ui.design.lunarTokens
 import kotlin.time.Clock
-
-enum class LocalSourceType {
-    FILES,
-    FOLDER,
-}
 
 private data class EditableGoogleDriveRoot(
     val id: String,
@@ -56,107 +52,7 @@ private data class EditableGoogleDriveRoot(
     val folderStrategy: CloudPathStrategy = CloudPathStrategy.FLAT,
 )
 
-@Composable
-fun AddLocalSourceDialog(
-    folderImportSupported: Boolean,
-    localImageImportSupported: Boolean,
-    lilyPondImportSupported: Boolean,
-    museScoreImportSupported: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: (type: LocalSourceType, label: String) -> Unit,
-) {
-    var selectedType by remember { mutableStateOf(LocalSourceType.FILES) }
-    var label by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "Add local source",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.SemiBold,
-                ),
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    text = localImportDialogDescription(
-                        localImageImportSupported = localImageImportSupported,
-                        lilyPondImportSupported = lilyPondImportSupported,
-                        museScoreImportSupported = museScoreImportSupported,
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                OutlinedTextField(
-                    value = label,
-                    onValueChange = { label = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("Label (optional)") },
-                    placeholder = { Text("e.g. My sheet music") },
-                )
-
-                LocalSourceOption(
-                    selected = selectedType == LocalSourceType.FILES,
-                    enabled = true,
-                    title = "Individual files",
-                    subtitle = localFileImportDescription(
-                        localImageImportSupported = localImageImportSupported,
-                        lilyPondImportSupported = lilyPondImportSupported,
-                        museScoreImportSupported = museScoreImportSupported,
-                    ),
-                    onSelect = { selectedType = LocalSourceType.FILES },
-                )
-
-                LocalSourceOption(
-                    selected = selectedType == LocalSourceType.FOLDER,
-                    enabled = folderImportSupported,
-                    title = "Folder",
-                    subtitle = localFolderImportDescription(
-                        folderImportSupported = folderImportSupported,
-                        localImageImportSupported = localImageImportSupported,
-                        lilyPondImportSupported = lilyPondImportSupported,
-                        museScoreImportSupported = museScoreImportSupported,
-                    ),
-                    onSelect = {
-                        if (folderImportSupported) selectedType = LocalSourceType.FOLDER
-                    },
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onConfirm(selectedType, label) },
-            ) {
-                Text("Choose files")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        },
-    )
-}
-
-private fun localImportDialogDescription(
-    localImageImportSupported: Boolean,
-    lilyPondImportSupported: Boolean,
-    museScoreImportSupported: Boolean,
-): String {
-    val supportedInputs = localImportInputGroups(
-        localImageImportSupported = localImageImportSupported,
-        lilyPondImportSupported = lilyPondImportSupported,
-        museScoreImportSupported = museScoreImportSupported,
-    )
-    return "Choose how to import local ${supportedInputs.toNaturalList()} into your library. Matching .json metadata sidecars are imported automatically."
-}
-
-private fun localFileImportDescription(
+internal fun localFileImportDescription(
     localImageImportSupported: Boolean,
     lilyPondImportSupported: Boolean,
     museScoreImportSupported: Boolean,
@@ -170,7 +66,7 @@ private fun localFileImportDescription(
     return "Pick ${supportedExtensions.toNaturalList()}. Matching .json sidecars are detected automatically."
 }
 
-private fun localFolderImportDescription(
+internal fun localFolderImportDescription(
     folderImportSupported: Boolean,
     localImageImportSupported: Boolean,
     lilyPondImportSupported: Boolean,
@@ -207,55 +103,23 @@ private fun List<String>.toNaturalList(finalSeparator: String = "or"): String = 
 }
 
 @Composable
-private fun LocalSourceOption(
-    selected: Boolean,
-    enabled: Boolean,
-    title: String,
-    subtitle: String,
-    onSelect: () -> Unit,
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        RadioButton(
-            selected = selected,
-            onClick = onSelect,
-            enabled = enabled,
-        )
-        Column(modifier = Modifier.padding(start = 8.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (enabled) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
 fun AddCloudSourceDialog(
     googleDriveOAuthSupported: Boolean,
     existingSource: CloudLibrarySource? = null,
+    initialProviderId: String = SyncProviderIds.SUPABASE_PUBLIC_STORAGE,
     onDismiss: () -> Unit,
     onConfirm: (CloudLibrarySource) -> Unit,
 ) {
     val providers = remember { supportedCloudProviders() }
-    val initialProviderId = remember(existingSource) {
+    val startingProviderId = remember(existingSource, initialProviderId) {
         when (existingSource) {
             is CloudGoogleDriveSource -> SyncProviderIds.GOOGLE_DRIVE
             is CloudSupabaseSource -> SyncProviderIds.SUPABASE_PUBLIC_STORAGE
-            null -> SyncProviderIds.SUPABASE_PUBLIC_STORAGE
+            null -> initialProviderId
         }
     }
     val isEditing = existingSource != null
-    var selectedProviderId by remember(existingSource) { mutableStateOf(initialProviderId) }
-    var providerMenuExpanded by remember { mutableStateOf(false) }
+    var selectedProviderId by remember(existingSource, startingProviderId) { mutableStateOf(startingProviderId) }
     var label by remember(existingSource) { mutableStateOf(existingSource?.label.orEmpty()) }
 
     val existingSupabaseSource = existingSource as? CloudSupabaseSource
@@ -324,181 +188,151 @@ fun AddCloudSourceDialog(
             (!driveUploadEnabled || validDriveUploadRoot != null)
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = if (isEditing) "Edit cloud source" else "Add cloud source",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.SemiBold,
+    val tokens = lunarTokens()
+
+    fun buildSource(): CloudLibrarySource {
+        return if (isSupabaseSelected) {
+            CloudSupabaseSource(
+                id = existingSource?.id ?: generateSourceId(),
+                label = label.ifBlank { "Supabase: $bucketName" },
+                addedAtEpochMillis = existingSource?.addedAtEpochMillis ?: Clock.System.now().toEpochMilliseconds(),
+                settings = SupabasePublicStorageSettings(
+                    projectUrl = projectUrl.trim(),
+                    bucketName = bucketName.trim(),
+                    rootDirectory = rootDirectory.trim().trim('/'),
+                    folderStrategy = supabaseStrategy,
+                    anonKey = anonKey.trim(),
                 ),
             )
-        },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    text = if (isEditing) {
-                        "Update this cloud source and save the new settings for future syncs."
-                    } else {
-                        "Connect a cloud source and merge its PDFs into the shared library."
+        } else {
+            CloudGoogleDriveSource(
+                id = existingSource?.id ?: generateSourceId(),
+                label = label.ifBlank { "Google Drive" },
+                addedAtEpochMillis = existingSource?.addedAtEpochMillis ?: Clock.System.now().toEpochMilliseconds(),
+                settings = GoogleDriveStorageSettings(
+                    apiKey = driveApiKey.trim(),
+                    clientId = driveClientId.trim(),
+                    clientSecret = driveClientSecret.trim(),
+                    refreshToken = driveRefreshToken.trim(),
+                    accessToken = "",
+                    roots = validDriveRoots.map { (root, folderId) ->
+                        GoogleDriveImportRoot(
+                            id = root.id,
+                            label = root.label.trim(),
+                            folderId = folderId,
+                            folderStrategy = root.folderStrategy,
+                        )
                     },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                if (isEditing) {
-                    Text(
-                        text = "Provider: ${providers.firstOrNull { it.id == selectedProviderId }?.displayName.orEmpty()}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    Box {
-                        OutlinedButton(
-                            onClick = { providerMenuExpanded = true },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(
-                                providers.firstOrNull { it.id == selectedProviderId }?.displayName ?: "Choose a provider",
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = providerMenuExpanded,
-                            onDismissRequest = { providerMenuExpanded = false },
-                        ) {
-                            providers.forEach { provider ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Text(provider.displayName)
-                                            Text(
-                                                provider.description,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                    },
-                                    onClick = {
-                                        selectedProviderId = provider.id
-                                        providerMenuExpanded = false
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = label,
-                    onValueChange = { label = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("Label (optional)") },
-                    placeholder = {
-                        Text(if (isSupabaseSelected) "e.g. Shared cloud bucket" else "e.g. Main Drive library")
-                    },
-                )
-
-                if (isSupabaseSelected) {
-                    SupabaseFields(
-                        projectUrl = projectUrl,
-                        onProjectUrlChange = { projectUrl = it },
-                        bucketName = bucketName,
-                        onBucketNameChange = { bucketName = it },
-                        anonKey = anonKey,
-                        onAnonKeyChange = { anonKey = it },
-                        rootDirectory = rootDirectory,
-                        onRootDirectoryChange = { rootDirectory = it },
-                        folderStrategy = supabaseStrategy,
-                        onFolderStrategyChange = { supabaseStrategy = it },
-                    )
-                } else {
-                    GoogleDriveFields(
-                        apiKey = driveApiKey,
-                        onApiKeyChange = { driveApiKey = it },
-                        clientId = driveClientId,
-                        onClientIdChange = { driveClientId = it },
-                        clientSecret = driveClientSecret,
-                        onClientSecretChange = { driveClientSecret = it },
-                        refreshToken = driveRefreshToken,
-                        onRefreshTokenChange = { driveRefreshToken = it },
-                        oauthSupported = googleDriveOAuthSupported,
-                        allowManualRefreshTokenEdit = isEditing,
-                        roots = driveRoots,
-                        uploadEnabled = driveUploadEnabled,
-                        onUploadEnabledChange = { driveUploadEnabled = it },
-                        uploadRoot = driveUploadRoot,
-                        onUploadRootChange = { driveUploadRoot = it },
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val source = if (isSupabaseSelected) {
-                        CloudSupabaseSource(
-                            id = existingSource?.id ?: generateSourceId(),
-                            label = label.ifBlank { "Supabase: $bucketName" },
-                            addedAtEpochMillis = existingSource?.addedAtEpochMillis ?: Clock.System.now().toEpochMilliseconds(),
-                            settings = SupabasePublicStorageSettings(
-                                projectUrl = projectUrl.trim(),
-                                bucketName = bucketName.trim(),
-                                rootDirectory = rootDirectory.trim().trim('/'),
-                                folderStrategy = supabaseStrategy,
-                                anonKey = anonKey.trim(),
-                            ),
+                    uploadEnabled = driveUploadEnabled,
+                    uploadRoot = if (driveUploadEnabled && validDriveUploadRoot != null) {
+                        GoogleDriveImportRoot(
+                            id = driveUploadRoot.id,
+                            label = driveUploadRoot.label.trim(),
+                            folderId = validDriveUploadRoot,
+                            folderStrategy = driveUploadRoot.folderStrategy,
                         )
                     } else {
-                        CloudGoogleDriveSource(
-                            id = existingSource?.id ?: generateSourceId(),
-                            label = label.ifBlank { "Google Drive" },
-                            addedAtEpochMillis = existingSource?.addedAtEpochMillis ?: Clock.System.now().toEpochMilliseconds(),
-                            settings = GoogleDriveStorageSettings(
-                                apiKey = driveApiKey.trim(),
-                                clientId = driveClientId.trim(),
-                                clientSecret = driveClientSecret.trim(),
-                                refreshToken = driveRefreshToken.trim(),
-                                accessToken = "",
-                                roots = validDriveRoots.map { (root, folderId) ->
-                                    GoogleDriveImportRoot(
-                                        id = root.id,
-                                        label = root.label.trim(),
-                                        folderId = folderId,
-                                        folderStrategy = root.folderStrategy,
-                                    )
-                                },
-                                uploadEnabled = driveUploadEnabled,
-                                uploadRoot = if (driveUploadEnabled && validDriveUploadRoot != null) {
-                                    GoogleDriveImportRoot(
-                                        id = driveUploadRoot.id,
-                                        label = driveUploadRoot.label.trim(),
-                                        folderId = validDriveUploadRoot,
-                                        folderStrategy = driveUploadRoot.folderStrategy,
-                                    )
-                                } else {
-                                    null
-                                },
-                            ),
-                        )
-                    }
-                    onConfirm(source)
-                },
+                        null
+                    },
+                ),
+            )
+        }
+    }
+
+    LunarDialog(
+        title = if (isEditing) "Edit cloud source" else "Add cloud source",
+        onDismissRequest = onDismiss,
+        actions = {
+            LunarButton(
+                text = "Cancel",
+                onClick = onDismiss,
+                style = LunarButtonStyle.TEXT,
+            )
+            LunarButton(
+                text = if (isEditing) "Save" else "Connect",
+                onClick = { onConfirm(buildSource()) },
                 enabled = isValid,
-            ) {
-                Text(if (isEditing) "Save" else "Connect")
-            }
+            )
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+    ) {
+        Column(
+            // Weighted so LunarDialog measures the action row first: on short windows the form
+            // shrinks and scrolls instead of pushing Cancel / Connect out of the dialog.
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .heightIn(max = 520.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(tokens.spacing.md),
+        ) {
+            Text(
+                text = if (isEditing) {
+                    "Update this cloud source and save the new settings for future syncs."
+                } else {
+                    "Connect a cloud source and merge its PDFs into the shared library."
+                },
+                style = tokens.typography.bodySmall,
+                color = tokens.colors.muted,
+            )
+
+            if (isEditing) {
+                Text(
+                    text = "Provider: ${providers.firstOrNull { it.id == selectedProviderId }?.displayName.orEmpty()}",
+                    style = tokens.typography.bodySmall,
+                    color = tokens.colors.muted,
+                )
+            } else {
+                TextToggle(
+                    options = providers.map { provider -> TextToggleOption(provider.displayName, provider.id) },
+                    selected = selectedProviderId,
+                    onSelect = { selectedProviderId = it },
+                )
             }
-        },
-    )
+
+            OutlinedTextField(
+                value = label,
+                onValueChange = { label = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Label (optional)") },
+                placeholder = {
+                    Text(if (isSupabaseSelected) "e.g. Shared cloud bucket" else "e.g. Main Drive library")
+                },
+            )
+
+            if (isSupabaseSelected) {
+                SupabaseFields(
+                    projectUrl = projectUrl,
+                    onProjectUrlChange = { projectUrl = it },
+                    bucketName = bucketName,
+                    onBucketNameChange = { bucketName = it },
+                    anonKey = anonKey,
+                    onAnonKeyChange = { anonKey = it },
+                    rootDirectory = rootDirectory,
+                    onRootDirectoryChange = { rootDirectory = it },
+                    folderStrategy = supabaseStrategy,
+                    onFolderStrategyChange = { supabaseStrategy = it },
+                )
+            } else {
+                GoogleDriveFields(
+                    apiKey = driveApiKey,
+                    onApiKeyChange = { driveApiKey = it },
+                    clientId = driveClientId,
+                    onClientIdChange = { driveClientId = it },
+                    clientSecret = driveClientSecret,
+                    onClientSecretChange = { driveClientSecret = it },
+                    refreshToken = driveRefreshToken,
+                    onRefreshTokenChange = { driveRefreshToken = it },
+                    oauthSupported = googleDriveOAuthSupported,
+                    allowManualRefreshTokenEdit = isEditing,
+                    roots = driveRoots,
+                    uploadEnabled = driveUploadEnabled,
+                    onUploadEnabledChange = { driveUploadEnabled = it },
+                    uploadRoot = driveUploadRoot,
+                    onUploadRootChange = { driveUploadRoot = it },
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -516,8 +350,8 @@ private fun SupabaseFields(
 ) {
     Text(
         text = "Supabase scans a Storage bucket and infers metadata from folder layout.",
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = lunarTokens().typography.bodySmall,
+        color = lunarTokens().colors.muted,
     )
 
     OutlinedTextField(
@@ -587,8 +421,8 @@ private fun GoogleDriveFields(
         } else {
             "Google Drive uses a desktop OAuth sign-in. Add one or more read roots, paste your desktop OAuth client details, and Lunar will open the browser when you press Connect."
         },
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = lunarTokens().typography.bodySmall,
+        color = lunarTokens().colors.muted,
     )
 
     OutlinedTextField(
@@ -626,8 +460,8 @@ private fun GoogleDriveFields(
         } else {
             "Google Drive sign-in is currently available on the desktop build. Add this source from Windows or Linux to complete the OAuth connection."
         },
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = lunarTokens().typography.bodySmall,
+        color = lunarTokens().colors.muted,
     )
 
     if (allowManualRefreshTokenEdit) {
@@ -655,12 +489,12 @@ private fun GoogleDriveFields(
             )
         }
 
-        OutlinedButton(
+        LunarButton(
+            text = "Add Google Drive root",
             onClick = { roots += EditableGoogleDriveRoot(id = generateSourceId()) },
+            style = LunarButtonStyle.SECONDARY,
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Add Google Drive root")
-        }
+        )
     }
 
     Row(
@@ -675,18 +509,14 @@ private fun GoogleDriveFields(
             Text("Upload-sync new local imports")
             Text(
                 "Use a dedicated writable Drive folder when you want Lunar to publish a cleaned layout.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = lunarTokens().typography.bodySmall,
+                color = lunarTokens().colors.muted,
             )
         }
     }
 
     if (uploadEnabled) {
-        Text(
-            text = "Upload root",
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
+        SmallCapsLabel(text = "Upload root")
         GoogleDriveRootEditor(
             root = uploadRoot,
             onRootChange = onUploadRootChange,
@@ -735,9 +565,9 @@ private fun GoogleDriveRootEditor(
 
         TextButton(
             onClick = onRemove,
-            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            colors = ButtonDefaults.textButtonColors(contentColor = lunarTokens().colors.danger),
         ) {
-            Text(removeLabel)
+            Text(removeLabel, style = lunarTokens().typography.button)
         }
     }
 }
@@ -765,11 +595,11 @@ private fun StrategyPicker(
                 DropdownMenuItem(
                     text = {
                         Column {
-                            Text(option.displayLabel(), style = MaterialTheme.typography.bodyMedium)
+                            Text(option.displayLabel(), style = lunarTokens().typography.body)
                             Text(
                                 option.displayExample(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = lunarTokens().typography.bodySmall,
+                                color = lunarTokens().colors.muted,
                             )
                         }
                     },

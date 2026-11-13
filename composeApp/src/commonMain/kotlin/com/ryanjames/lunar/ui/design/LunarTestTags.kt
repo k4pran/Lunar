@@ -15,6 +15,11 @@ object LunarTestTags {
     const val LIBRARY_PANEL = "library_panel"
     const val SETTINGS_PANEL = "settings_panel"
     const val SETTINGS_APPEARANCE_PANEL = "settings_appearance_panel"
+    const val SOURCES_PANEL = "sources_panel"
+    const val SOURCES_ADD_MENU = "sources_add_menu"
+    const val SOURCES_ADD_MENU_LIST = "sources_add_menu_list"
+    const val SOURCES_SIDE_PANEL = "sources_side_panel"
+    const val COMPOSE_SAVE_TO_LIBRARY = "compose_save_to_library"
 
     fun navigationItem(section: AppSection): String = "navigation_item_${section.name.lowercase()}"
 
@@ -28,4 +33,16 @@ object LunarTestTags {
     fun songbookRow(songbookId: String): String = "songbook_row_$songbookId"
 
     fun skinOption(skin: AppSkin): String = "skin_option_${skin.name.lowercase()}"
+
+    fun addSourceOption(option: String): String = "add_source_option_${option.lowercase()}"
+
+    fun sourceRow(sourceId: String): String = "source_row_$sourceId"
+
+    fun sourceStatus(sourceId: String): String = "source_status_$sourceId"
+
+    fun sourceRowActions(sourceId: String): String = "source_row_actions_$sourceId"
+
+    fun settingsTab(tab: String): String = "settings_tab_${tab.lowercase()}"
+
+    fun settingsRow(key: String): String = "settings_row_$key"
 }

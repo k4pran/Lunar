@@ -6,29 +6,25 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,15 +37,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.AppSkin
@@ -58,23 +51,37 @@ import com.ryanjames.lunar.settings.CacheLimitPreset
 import com.ryanjames.lunar.settings.ViewerChromeAutoHideOptions
 import com.ryanjames.lunar.settings.ViewerPageModePreference
 import com.ryanjames.lunar.settings.ViewerShortcutAction
+import com.ryanjames.lunar.ui.design.LunarButton
+import com.ryanjames.lunar.ui.design.LunarButtonStyle
 import com.ryanjames.lunar.ui.design.LunarIcon
 import com.ryanjames.lunar.ui.design.LunarIconKind
 import com.ryanjames.lunar.ui.design.LunarTestTags
+import com.ryanjames.lunar.ui.design.PageHeading
+import com.ryanjames.lunar.ui.design.SmallCapsLabel
+import com.ryanjames.lunar.ui.design.TextToggle
+import com.ryanjames.lunar.ui.design.TextToggleOption
 import com.ryanjames.lunar.ui.design.lunarColors
 import com.ryanjames.lunar.ui.design.lunarTokens
 
-private enum class SettingsPage {
-    GENERAL,
-    KEYBINDINGS,
+private enum class SettingsPage(val label: String) {
+    GENERAL("General"),
+    KEYBINDINGS("Keybindings"),
 }
 
+/** Below this width a settings row stacks its control under the label. */
+private val SettingsRowStackWidth = 560.dp
+
+/**
+ * Settings as inline rows. Every change goes straight to the settings store through
+ * [LunarAppState], so there is no Save button and no confirmation dialog.
+ */
 @Composable
 fun SettingsScreen(
     settings: AppSettings,
     appState: LunarAppState,
     modifier: Modifier = Modifier,
 ) {
+    val tokens = lunarTokens()
     var selectedPage by rememberSaveable { mutableStateOf(SettingsPage.GENERAL) }
     var pendingBindingAction by remember { mutableStateOf<ViewerShortcutAction?>(null) }
     var bindingFeedback by remember { mutableStateOf<String?>(null) }
@@ -89,6 +96,7 @@ fun SettingsScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .background(tokens.colors.bg)
             .testTag(LunarTestTags.SETTINGS_PANEL)
             .focusRequester(focusRequester)
             .focusable()
@@ -116,43 +124,15 @@ fun SettingsScreen(
                 true
             }
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = tokens.spacing.xxl, vertical = tokens.spacing.xl),
+        verticalArrangement = Arrangement.spacedBy(tokens.spacing.xl),
     ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.linearGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.primary,
-                                MaterialTheme.colorScheme.tertiary,
-                            )
-                        )
-                    )
-                    .padding(horizontal = 18.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(
-                    text = "Global settings",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontFamily = FontFamily.Serif,
-                        fontWeight = FontWeight.SemiBold,
-                    ),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                )
-                Text(
-                    text = "Choose how Lunar looks, refreshes, and behaves across desktop and Android.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f),
-                )
-            }
-        }
+        PageHeading(
+            title = "Settings",
+            subtitle = "Changes are saved as soon as you make them.",
+        )
 
-        SettingsPageSwitcher(
+        SettingsTabs(
             selectedPage = selectedPage,
             onSelect = { page ->
                 selectedPage = page
@@ -180,62 +160,53 @@ fun SettingsScreen(
                     pendingBindingAction = null
                     bindingFeedback = "Key capture cancelled."
                 },
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            OutlinedButton(
-                onClick = {
-                    if (selectedPage == SettingsPage.KEYBINDINGS) {
-                        pendingBindingAction = null
-                        bindingFeedback = null
-                        appState.resetViewerKeybindings()
-                    } else {
-                        appState.resetGlobalSettings()
-                    }
+                onReset = {
+                    pendingBindingAction = null
+                    bindingFeedback = null
+                    appState.resetViewerKeybindings()
                 },
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(if (selectedPage == SettingsPage.KEYBINDINGS) "Reset keybindings" else "Reset defaults")
-            }
-            Button(
-                onClick = { appState.selectSection(AppSection.LIBRARY) },
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("Back to library")
-            }
+            )
         }
     }
 }
 
 @Composable
-private fun SettingsPageSwitcher(
+private fun SettingsTabs(
     selectedPage: SettingsPage,
     onSelect: (SettingsPage) -> Unit,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        shape = MaterialTheme.shapes.large,
+    val tokens = lunarTokens()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(tokens.spacing.xl),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FilterChip(
-                selected = selectedPage == SettingsPage.GENERAL,
-                onClick = { onSelect(SettingsPage.GENERAL) },
-                label = { Text("General") },
-            )
-            FilterChip(
-                selected = selectedPage == SettingsPage.KEYBINDINGS,
-                onClick = { onSelect(SettingsPage.KEYBINDINGS) },
-                label = { Text("Keybindings") },
-            )
+        SettingsPage.entries.forEach { page ->
+            val selected = page == selectedPage
+            Column(
+                modifier = Modifier
+                    .width(IntrinsicSize.Max)
+                    .testTag(LunarTestTags.settingsTab(page.name))
+                    .selectable(
+                        selected = selected,
+                        role = Role.Tab,
+                        onClick = { onSelect(page) },
+                    ),
+                verticalArrangement = Arrangement.spacedBy(tokens.spacing.xs),
+            ) {
+                Text(
+                    text = page.label,
+                    style = tokens.typography.button,
+                    color = if (selected) tokens.colors.ink else tokens.colors.muted,
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .background(if (selected) tokens.colors.accent else tokens.colors.bg),
+                )
+            }
         }
     }
 }
@@ -245,132 +216,126 @@ private fun GeneralSettingsPage(
     settings: AppSettings,
     appState: LunarAppState,
 ) {
-    SettingsSection(
-        title = "Viewer",
-        description = "Set the default page layout and how long the viewer controls stay on screen.",
-    ) {
-        SettingsChoiceRow(
-            label = "Default page view",
-            selected = settings.defaultViewerPageMode,
-            options = listOf(
-                ChoiceOption("1 page", ViewerPageModePreference.SINGLE_PAGE),
-                ChoiceOption("2 pages", ViewerPageModePreference.TWO_PAGE),
-            ),
-            onSelect = appState::updateDefaultViewerPageMode,
-        )
-        SettingsChoiceRow(
-            label = "Hide viewer controls",
-            selected = settings.viewerChromeAutoHideSeconds,
-            options = ViewerChromeAutoHideOptions.map { seconds ->
-                ChoiceOption(if (seconds == null) "Never" else "After ${seconds}s", seconds)
-            },
-            onSelect = appState::updateViewerChromeAutoHideSeconds,
-            supportingText = "Moving the pointer, tapping or pressing a key brings the controls back.",
-        )
+    val tokens = lunarTokens()
+    SettingsSection(title = "Appearance") {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(LunarTestTags.SETTINGS_APPEARANCE_PANEL)
+                .padding(vertical = tokens.spacing.md),
+        ) {
+            SkinPicker(
+                selected = settings.resolvedSkin,
+                onSelect = appState::updateSkin,
+            )
+        }
     }
 
-    SettingsSection(
-        title = "Library",
-        description = "Choose the layout Lunar should use when you browse your scores.",
-    ) {
+    SettingsSection(title = "Layout") {
         SettingsChoiceRow(
-            label = "Default layout",
+            key = "start_sidebar_collapsed",
+            label = "Start with the sidebar collapsed",
+            supportingText = "Compose collapses it while you write and restores it when you leave.",
+            selected = settings.sidebarCollapsed,
+            options = listOf(
+                TextToggleOption("On", true),
+                TextToggleOption("Off", false),
+            ),
+            onSelect = appState::updateStartSidebarCollapsed,
+        )
+        SettingsChoiceRow(
+            key = "library_layout",
+            label = "Library layout",
             selected = appState.layoutMode,
             options = listOf(
-                ChoiceOption("List", LibraryLayoutMode.LIST),
-                ChoiceOption("Gallery", LibraryLayoutMode.GRID),
+                TextToggleOption("List", LibraryLayoutMode.LIST),
+                TextToggleOption("Gallery", LibraryLayoutMode.GRID),
             ),
             onSelect = appState::updateLayoutMode,
         )
     }
 
-    SettingsSection(
-        title = "Appearance",
-        description = "Choose a skin. Your library, layout and settings stay the same.",
-        modifier = Modifier.testTag(LunarTestTags.SETTINGS_APPEARANCE_PANEL),
-    ) {
-        SkinPicker(
-            selected = settings.resolvedSkin,
-            onSelect = appState::updateSkin,
+    SettingsSection(title = "Viewer") {
+        SettingsChoiceRow(
+            key = "default_page_view",
+            label = "Default page view",
+            selected = settings.defaultViewerPageMode,
+            options = listOf(
+                TextToggleOption("1 page", ViewerPageModePreference.SINGLE_PAGE),
+                TextToggleOption("2 pages", ViewerPageModePreference.TWO_PAGE),
+            ),
+            onSelect = appState::updateDefaultViewerPageMode,
+        )
+        SettingsChoiceRow(
+            key = "viewer_toolbar_auto_hide",
+            label = "Hide the viewer toolbar after",
+            supportingText = "Moving the pointer, tapping or pressing a key brings it back.",
+            selected = settings.viewerChromeAutoHideSeconds,
+            options = ViewerChromeAutoHideOptions.map { seconds ->
+                TextToggleOption(if (seconds == null) "Never" else "${seconds}s", seconds)
+            },
+            onSelect = appState::updateViewerChromeAutoHideSeconds,
         )
     }
 
-    SettingsSection(
-        title = "Sync",
-        description = "Control how aggressively Lunar checks cloud sources for updates.",
-    ) {
+    SettingsSection(title = "Sync") {
         SettingsChoiceRow(
+            key = "refresh_on_launch",
             label = "Refresh on launch",
-            supportingText = "Useful to disable when you want a faster offline startup.",
+            supportingText = "Turn off for a faster offline start.",
             selected = settings.refreshOnLaunch,
             options = listOf(
-                ChoiceOption("On", true),
-                ChoiceOption("Off", false),
+                TextToggleOption("On", true),
+                TextToggleOption("Off", false),
             ),
             onSelect = appState::updateRefreshOnLaunch,
         )
         SettingsChoiceRow(
+            key = "auto_refresh",
             label = "Auto refresh",
             selected = settings.autoRefreshSchedule,
             options = listOf(
-                ChoiceOption("Off", AutoRefreshSchedule.DISABLED),
-                ChoiceOption("5 min", AutoRefreshSchedule.MINUTES_5),
-                ChoiceOption("15 min", AutoRefreshSchedule.MINUTES_15),
-                ChoiceOption("30 min", AutoRefreshSchedule.MINUTES_30),
-                ChoiceOption("Hourly", AutoRefreshSchedule.HOURLY),
-                ChoiceOption("Daily", AutoRefreshSchedule.DAILY),
+                TextToggleOption("Off", AutoRefreshSchedule.DISABLED),
+                TextToggleOption("5 min", AutoRefreshSchedule.MINUTES_5),
+                TextToggleOption("15 min", AutoRefreshSchedule.MINUTES_15),
+                TextToggleOption("30 min", AutoRefreshSchedule.MINUTES_30),
+                TextToggleOption("Hourly", AutoRefreshSchedule.HOURLY),
+                TextToggleOption("Daily", AutoRefreshSchedule.DAILY),
             ),
             onSelect = appState::updateAutoRefreshSchedule,
         )
-    }
-
-    SettingsSection(
-        title = "Network",
-        description = "Tune how long Lunar waits for cloud APIs before timing out.",
-    ) {
         SettingsChoiceRow(
+            key = "connect_timeout",
             label = "Connect timeout",
             selected = settings.cloudConnectTimeoutSeconds,
-            options = listOf(
-                ChoiceOption("10s", 10),
-                ChoiceOption("15s", 15),
-                ChoiceOption("30s", 30),
-                ChoiceOption("60s", 60),
-            ),
+            options = listOf(10, 15, 30, 60).map { seconds -> TextToggleOption("${seconds}s", seconds) },
             onSelect = appState::updateCloudConnectTimeout,
         )
         SettingsChoiceRow(
+            key = "read_timeout",
             label = "Read timeout",
             selected = settings.cloudReadTimeoutSeconds,
-            options = listOf(
-                ChoiceOption("30s", 30),
-                ChoiceOption("60s", 60),
-                ChoiceOption("120s", 120),
-                ChoiceOption("300s", 300),
-            ),
+            options = listOf(30, 60, 120, 300).map { seconds -> TextToggleOption("${seconds}s", seconds) },
             onSelect = appState::updateCloudReadTimeout,
         )
     }
 
-    SettingsSection(
-        title = "Storage",
-        description = "Set a preferred cache budget for the local PDF store.",
-    ) {
+    SettingsSection(title = "Storage") {
         SettingsChoiceRow(
+            key = "cache_budget",
             label = "Cache budget",
-            supportingText = "This is a soft cap for now. Lunar keeps managed scores on disk for offline viewing and warns when you go over budget.",
+            supportingText = "A soft cap: Lunar keeps scores on disk for offline viewing and warns when you go over.",
             selected = settings.cacheLimit,
-            options = listOf(
-                ChoiceOption("512 MB", CacheLimitPreset.MB_512),
-                ChoiceOption("1 GB", CacheLimitPreset.GB_1),
-                ChoiceOption("2 GB", CacheLimitPreset.GB_2),
-                ChoiceOption("4 GB", CacheLimitPreset.GB_4),
-                ChoiceOption("8 GB", CacheLimitPreset.GB_8),
-                ChoiceOption("Unlimited", CacheLimitPreset.UNLIMITED),
-            ),
+            options = CacheLimitPreset.entries.map { preset -> TextToggleOption(preset.label(), preset) },
             onSelect = appState::updateCacheLimit,
         )
     }
+
+    LunarButton(
+        text = "Reset to defaults",
+        onClick = appState::resetGlobalSettings,
+        style = LunarButtonStyle.TEXT,
+    )
 }
 
 @Composable
@@ -381,30 +346,25 @@ private fun KeybindingsSettingsPage(
     bindingFeedback: String?,
     onStartBinding: (ViewerShortcutAction) -> Unit,
     onCancelBinding: () -> Unit,
+    onReset: () -> Unit,
 ) {
-    SettingsSection(
-        title = "Viewer keybindings",
-        description = "Choose the keyboard shortcuts Lunar should use while a score viewer has focus, plus the random-score shortcut available from the library.",
-    ) {
-        bindingFeedback?.let { message ->
-            Surface(
-                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
-                shape = MaterialTheme.shapes.large,
-            ) {
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                )
-            }
-        }
-
+    val tokens = lunarTokens()
+    SettingsSection(title = "Viewer keybindings") {
         Text(
-            text = "Supported keys include letters, numbers, arrows, function keys, Home/End, Page Up/Down, minus, equals, Space, and Enter.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            text = "Shortcuts used while a score viewer has focus, plus the random-score shortcut in the library. " +
+                "Supported keys include letters, numbers, arrows, function keys, Home/End, Page Up/Down, minus, equals, Space, and Enter.",
+            style = tokens.typography.bodySmall,
+            color = tokens.colors.muted,
+            modifier = Modifier.padding(vertical = tokens.spacing.sm),
         )
+        bindingFeedback?.let { message ->
+            Text(
+                text = message,
+                style = tokens.typography.bodySmall,
+                color = tokens.colors.accent,
+                modifier = Modifier.padding(bottom = tokens.spacing.sm),
+            )
+        }
 
         ViewerShortcutAction.entries.forEach { action ->
             ViewerKeybindingRow(
@@ -417,6 +377,12 @@ private fun KeybindingsSettingsPage(
             )
         }
     }
+
+    LunarButton(
+        text = "Reset keybindings",
+        onClick = onReset,
+        style = LunarButtonStyle.TEXT,
+    )
 }
 
 @Composable
@@ -428,146 +394,134 @@ private fun ViewerKeybindingRow(
     onClear: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.18f),
-                shape = MaterialTheme.shapes.large,
-            )
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+    val tokens = lunarTokens()
+    SettingsRow(
+        key = "keybinding_${action.name.lowercase()}",
+        label = action.displayLabel(),
+        supportingText = action.supportingText(),
     ) {
-        Text(
-            text = action.displayLabel(),
-            style = MaterialTheme.typography.labelLarge,
-        )
-        action.supportingText()?.let { note ->
-            Text(
-                text = note,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(tokens.spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Surface(
-                color = if (isCapturing) {
-                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
-                } else {
-                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f)
-                },
-                shape = MaterialTheme.shapes.medium,
+            Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .sizeIn(minHeight = 44.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 12.dp),
-                ) {
-                    Text(
-                        text = if (isCapturing) "Press any supported key..." else keyLabel,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (isCapturing) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
+                    .widthIn(min = 72.dp)
+                    .border(
+                        width = 1.dp,
+                        color = if (isCapturing) tokens.colors.accent else tokens.colors.rule,
+                        shape = tokens.shapes.small,
                     )
-                }
+                    .background(tokens.colors.field, tokens.shapes.small)
+                    .padding(horizontal = tokens.spacing.sm, vertical = tokens.spacing.xs),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = if (isCapturing) "Press a key..." else keyLabel,
+                    style = tokens.typography.bodySmall,
+                    color = if (isCapturing) tokens.colors.accent else tokens.colors.ink,
+                )
             }
-            OutlinedButton(
+            LunarButton(
+                text = if (isCapturing) "Cancel" else "Bind",
                 onClick = if (isCapturing) onCancel else onBind,
-            ) {
-                Text(if (isCapturing) "Cancel" else "Bind")
-            }
-            TextButton(
+                style = LunarButtonStyle.TEXT,
+            )
+            LunarButton(
+                text = "Clear",
                 onClick = onClear,
+                style = LunarButtonStyle.TEXT,
                 enabled = keyLabel != "Unbound",
-            ) {
-                Text("Clear")
-            }
+            )
         }
     }
 }
 
+/** A titled group of ruled rows. */
 @Composable
 private fun SettingsSection(
     title: String,
-    description: String,
-    modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
+    val tokens = lunarTokens()
+    Column(modifier = Modifier.fillMaxWidth()) {
+        SmallCapsLabel(text = title, modifier = Modifier.padding(bottom = tokens.spacing.xs))
+        HorizontalDivider(color = tokens.colors.strong)
+        content()
+    }
+}
+
+/** An inline choice that saves as soon as a different option is picked. */
+@Composable
+private fun <T> SettingsChoiceRow(
+    key: String,
+    label: String,
+    selected: T,
+    options: List<TextToggleOption<T>>,
+    onSelect: (T) -> Unit,
+    supportingText: String? = null,
+) {
+    SettingsRow(
+        key = key,
+        label = label,
+        supportingText = supportingText,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            content = {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontFamily = FontFamily.Serif,
-                        fontWeight = FontWeight.SemiBold,
-                    ),
-                )
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                content()
-            },
+        // Long option lists (auto refresh, cache budget) can outgrow a phone-width row, so
+        // keep every option reachable by scrolling the toggle sideways.
+        TextToggle(
+            options = options,
+            selected = selected,
+            onSelect = { value -> if (value != selected) onSelect(value) },
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
         )
     }
 }
 
+/**
+ * A ruled row with a label (and optional supporting text) beside its control, stacking the
+ * control underneath when the window is narrow.
+ */
 @Composable
-private fun <T> SettingsChoiceRow(
+private fun SettingsRow(
+    key: String,
     label: String,
-    selected: T,
-    options: List<ChoiceOption<T>>,
-    onSelect: (T) -> Unit,
-    supportingText: String? = null,
+    supportingText: String?,
+    control: @Composable () -> Unit,
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+    val tokens = lunarTokens()
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(LunarTestTags.settingsRow(key))
+            .padding(vertical = tokens.spacing.md),
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-        )
-        supportingText?.let { hint ->
-            Text(
-                text = hint,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        val labelBlock: @Composable (Modifier) -> Unit = { labelModifier ->
+            Column(
+                modifier = labelModifier,
+                verticalArrangement = Arrangement.spacedBy(tokens.spacing.xxs),
+            ) {
+                Text(text = label, style = tokens.typography.body, color = tokens.colors.ink)
+                supportingText?.let { hint ->
+                    Text(text = hint, style = tokens.typography.bodySmall, color = tokens.colors.muted)
+                }
+            }
         }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            options.forEach { option ->
-                FilterChip(
-                    selected = option.value == selected,
-                    onClick = { onSelect(option.value) },
-                    label = { Text(option.label) },
-                )
+        if (maxWidth < SettingsRowStackWidth) {
+            Column(verticalArrangement = Arrangement.spacedBy(tokens.spacing.sm)) {
+                labelBlock(Modifier.fillMaxWidth())
+                control()
+            }
+        } else {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(tokens.spacing.lg),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                labelBlock(Modifier.weight(1f))
+                control()
             }
         }
     }
+    HorizontalDivider(color = tokens.colors.rule)
 }
 
 private data class SkinDescription(
@@ -698,8 +652,3 @@ private fun SkinPreviewCard(
         )
     }
 }
-
-private data class ChoiceOption<T>(
-    val label: String,
-    val value: T,
-)
