@@ -8,6 +8,7 @@ import okio.ByteString.Companion.encodeUtf8
 import okio.FileSystem
 import okio.Path
 import okio.buffer
+import okio.use
 
 interface ScoreMetadataStorage {
     suspend fun readMetadata(itemId: String): ScoreMetadata?

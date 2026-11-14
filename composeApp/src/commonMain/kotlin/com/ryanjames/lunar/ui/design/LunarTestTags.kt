@@ -22,6 +22,8 @@ object LunarTestTags {
     const val COMPOSE_SAVE_TO_LIBRARY = "compose_save_to_library"
     const val QUICK_FIND_PANEL = "quick_find_panel"
     const val QUICK_FIND_INPUT = "quick_find_input"
+    const val POPOVER = "popover"
+    const val POPOVER_SHEET = "popover_sheet"
 
     fun navigationItem(section: AppSection): String = "navigation_item_${section.name.lowercase()}"
 
@@ -29,6 +31,8 @@ object LunarTestTags {
         "library_arrangement_tab_${arrangement.name.lowercase()}"
 
     fun libraryRow(itemId: String): String = "library_row_$itemId"
+
+    fun libraryOpen(itemId: String): String = "library_open_$itemId"
 
     fun setlistRow(setlistId: String): String = "setlist_row_$setlistId"
 

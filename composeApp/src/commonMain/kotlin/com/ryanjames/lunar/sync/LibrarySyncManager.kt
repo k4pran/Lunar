@@ -710,7 +710,9 @@ class LibrarySyncManager(
                     acceptedCollectionKeys = acceptedCollectionKeys,
                 )
                 descriptors.descriptors.forEach { descriptor ->
-                    descriptorsById.putIfAbsent(descriptor.remoteId, descriptor)
+                    if (descriptor.remoteId !in descriptorsById) {
+                        descriptorsById[descriptor.remoteId] = descriptor
+                    }
                 }
                 scoreErrors += descriptors.errors
                 appendActivity(

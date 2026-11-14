@@ -77,6 +77,25 @@ data class LunarShapes(
     val extraLarge: CornerBasedShape = RoundedCornerShape(8.dp),
 )
 
+/** Durations, in milliseconds, shared by every animated surface so motion feels of a piece. */
+@Immutable
+data class LunarMotion(
+    /** Popovers, sheets and focus feedback. */
+    val quickMillis: Int = 120,
+    /** Viewer chrome and other overlays that fade over content. */
+    val standardMillis: Int = 200,
+    /** Layout changes such as the sidebar opening or closing. */
+    val layoutMillis: Int = 240,
+)
+
+/** Keyboard focus indication. The ring is drawn in [LunarColors.accent]. */
+@Immutable
+data class LunarFocus(
+    val ringWidth: Dp = 2.dp,
+    /** Smallest hit area for anything tappable, per the platform accessibility guidelines. */
+    val minTouchTarget: Dp = 44.dp,
+)
+
 @Immutable
 data class LunarTokens(
     val skin: AppSkin,
@@ -84,6 +103,8 @@ data class LunarTokens(
     val typography: LunarTypography,
     val spacing: LunarSpacing = LunarSpacing(),
     val shapes: LunarShapes = LunarShapes(),
+    val motion: LunarMotion = LunarMotion(),
+    val focus: LunarFocus = LunarFocus(),
 )
 
 internal val LocalLunarTokens = staticCompositionLocalOf<LunarTokens> {

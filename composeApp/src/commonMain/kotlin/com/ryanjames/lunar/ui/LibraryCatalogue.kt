@@ -45,6 +45,7 @@ import androidx.compose.ui.input.pointer.isMetaPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -54,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import com.ryanjames.lunar.ui.design.LunarTestTags
+import com.ryanjames.lunar.ui.design.lunarFocusRing
 import androidx.compose.ui.unit.sp
 import com.ryanjames.lunar.library.model.LibrarySortOption
 import com.ryanjames.lunar.library.model.SheetMusicItem
@@ -421,6 +423,7 @@ private fun CatalogueRow(
             .background(band)
             .testTag(LibraryTestTags.row(item.id))
             .semantics { this.selected = focused }
+            .lunarFocusRing(RectangleShape)
             .catalogueRowClicks(onClick = onClick, onDoubleClick = onOpen)
             .padding(end = 12.dp),
         verticalAlignment = Alignment.CenterVertically,

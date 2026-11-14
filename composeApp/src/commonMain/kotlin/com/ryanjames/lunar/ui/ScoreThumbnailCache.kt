@@ -2,6 +2,8 @@ package com.ryanjames.lunar.ui
 
 import com.ryanjames.lunar.library.model.SheetMusicItem
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 
 const val ThumbnailTargetWidthPx = 256
 
@@ -25,13 +27,15 @@ class ScoreThumbnailCache<T>(
     private val renderer: suspend (SheetMusicItem) -> T?,
     private val maxSize: Int = 128,
 ) {
-    private val cache = LinkedHashMap<String, T>(0, 0.75f, true)
+    // Insertion-ordered; a hit is re-inserted so the first key is always the least recently used.
+    private val cache = LinkedHashMap<String, T>()
+    private val lock = SynchronizedObject()
 
     suspend fun get(item: SheetMusicItem): T? =
-        synchronized(cache) { cache[item.id] } ?: load(item)
+        synchronized(lock) { touch(item.id) } ?: load(item)
 
     private suspend fun load(item: SheetMusicItem): T? {
-        val cached = synchronized(cache) { cache[item.id] }
+        val cached = synchronized(lock) { touch(item.id) }
         if (cached != null) return cached
 
         val value = try {
@@ -41,7 +45,7 @@ class ScoreThumbnailCache<T>(
         } catch (_: Exception) {
             null
         } ?: return null
-        synchronized(cache) {
+        synchronized(lock) {
             cache[item.id] = value
             while (cache.size > maxSize) {
                 cache.remove(cache.keys.first())
@@ -51,12 +55,14 @@ class ScoreThumbnailCache<T>(
     }
 
     fun clearKey(id: String) {
-        synchronized(cache) { cache.remove(id) }
+        synchronized(lock) { cache.remove(id) }
     }
 
     fun clear() {
-        synchronized(cache) { cache.clear() }
+        synchronized(lock) { cache.clear() }
     }
 
-    val size: Int get() = synchronized(cache) { cache.size }
+    val size: Int get() = synchronized(lock) { cache.size }
+
+    private fun touch(id: String): T? = cache.remove(id)?.also { cache[id] = it }
 }

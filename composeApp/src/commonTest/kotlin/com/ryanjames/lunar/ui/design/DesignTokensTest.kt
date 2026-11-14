@@ -5,6 +5,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 import com.ryanjames.lunar.settings.AppSkin
 import com.ryanjames.lunar.ui.toColorScheme
 import kotlin.math.abs
@@ -124,6 +125,37 @@ class DesignTokensTest {
             600,
             provider.calculatePosition(IntRect(760, 100, 790, 140), window, LayoutDirection.Ltr, popup).x,
         )
+    }
+
+    @Test
+    fun focusRingIsVisibleAgainstEverySurface() {
+        AppSkin.entries.forEach { skin ->
+            val colors = lunarColors(skin)
+            listOf("bg" to colors.bg, "panel" to colors.panel, "field" to colors.field).forEach { (name, surface) ->
+                val ratio = contrastRatio(colors.accent, surface)
+                // WCAG 1.4.11: focus indicators need 3:1 against what surrounds them.
+                assertTrue(ratio >= 3.0, "$skin: focus ring on $name is $ratio:1, below 3:1")
+            }
+        }
+        val focus = LunarFocus()
+        assertTrue(focus.ringWidth.value >= 2f, "Focus ring should be at least 2dp")
+        assertTrue(focus.minTouchTarget.value >= 44f, "Touch targets should be at least 44dp")
+    }
+
+    @Test
+    fun motionDurationsStayShortAndOrdered() {
+        val motion = LunarMotion()
+        assertTrue(motion.quickMillis in 1..motion.standardMillis)
+        assertTrue(motion.standardMillis <= motion.layoutMillis)
+        assertTrue(motion.layoutMillis <= 300, "Layout motion should not drag: ${motion.layoutMillis}ms")
+    }
+
+    @Test
+    fun compactWidthStopsAtTabletBreakpoint() {
+        assertTrue(isCompactWidth(360.dp))
+        assertTrue(isCompactWidth(599.dp))
+        assertEquals(false, isCompactWidth(600.dp))
+        assertEquals(false, isCompactWidth(1280.dp))
     }
 
     private fun assertClose(expected: Double, actual: Double, tolerance: Double = 0.001) {

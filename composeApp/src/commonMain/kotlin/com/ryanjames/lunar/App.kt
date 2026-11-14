@@ -65,6 +65,7 @@ import com.ryanjames.lunar.ui.ViewerTarget
 import com.ryanjames.lunar.ui.availableQuickFindActions
 import com.ryanjames.lunar.ui.buildQuickFindEntries
 import com.ryanjames.lunar.ui.isQuickFindShortcut
+import com.ryanjames.lunar.ui.design.LunarAdaptiveLayout
 import com.ryanjames.lunar.ui.design.LunarTestTags
 import com.ryanjames.lunar.ui.design.lunarTokens
 import com.ryanjames.lunar.ui.TemporarySetlistSession
@@ -236,7 +237,7 @@ internal fun LunarApp(
                 )
             } else {
                 mainScreensStateHolder.SaveableStateProvider(MainScreensStateKey) {
-                    Box(
+                    LunarAdaptiveLayout(
                         modifier = Modifier
                             .fillMaxSize()
                             .externalScoreDropTarget(

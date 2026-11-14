@@ -68,6 +68,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -96,6 +97,8 @@ import com.ryanjames.lunar.platform.RenderedPdfPage
 import com.ryanjames.lunar.settings.AppSettings
 import com.ryanjames.lunar.settings.ViewerKeybindings
 import com.ryanjames.lunar.settings.ViewerShortcutAction
+import com.ryanjames.lunar.ui.design.lunarFocusRing
+import com.ryanjames.lunar.ui.design.lunarTouchTarget
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
@@ -1464,25 +1467,34 @@ private fun ViewerToolbarButton(
         themePalette.headerForeground.copy(alpha = 0.32f)
     }
 
+    val shape = MaterialTheme.shapes.small
+
     LunarTooltip(tooltip) {
-        Surface(
-            color = viewerToolbarBackground(enabled = enabled, selected = selected),
-            shape = MaterialTheme.shapes.small,
+        Box(
             modifier = Modifier
-                .size(34.dp)
+                .lunarTouchTarget()
+                .lunarFocusRing(shape)
+                .clip(shape)
+                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
                 .semantics {
                     this.contentDescription = contentDescription
                     this.selected = selected
-                }
-                .clickable(enabled = enabled, onClick = onClick),
+                },
+            contentAlignment = Alignment.Center,
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(8.dp),
-                contentAlignment = Alignment.Center,
+            Surface(
+                color = viewerToolbarBackground(enabled = enabled, selected = selected),
+                shape = shape,
+                modifier = Modifier.size(34.dp),
             ) {
-                content(iconColor)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    content(iconColor)
+                }
             }
         }
     }
