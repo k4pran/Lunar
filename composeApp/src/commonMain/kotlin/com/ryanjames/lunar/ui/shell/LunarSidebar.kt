@@ -66,6 +66,8 @@ import com.ryanjames.lunar.ui.LibraryArrangement
 import com.ryanjames.lunar.ui.LunarAppState
 import com.ryanjames.lunar.ui.LunarTooltip
 import com.ryanjames.lunar.ui.design.LunarTestTags
+import com.ryanjames.lunar.ui.design.lunarFocusRing
+import com.ryanjames.lunar.ui.design.lunarTouchTarget
 import com.ryanjames.lunar.ui.sidebarShowsLibraryContext
 import kotlin.time.Clock
 
@@ -449,6 +451,8 @@ private fun SidebarTextItem(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .then(if (compact) Modifier else Modifier.lunarTouchTarget())
+            .lunarFocusRing(MaterialTheme.shapes.small)
             .clip(MaterialTheme.shapes.small)
             .background(container)
             .clickable(onClick = onClick)
@@ -537,6 +541,7 @@ private fun RailItem(
         Box(
             modifier = Modifier
                 .size(44.dp)
+                .lunarFocusRing(MaterialTheme.shapes.small)
                 .clip(MaterialTheme.shapes.small)
                 .background(container)
                 .clickable(onClick = onClick)
@@ -563,6 +568,7 @@ private fun ShellIconButton(
         Box(
             modifier = Modifier
                 .size(36.dp)
+                .lunarFocusRing(MaterialTheme.shapes.small)
                 .clip(MaterialTheme.shapes.small)
                 .clickable(onClick = onClick)
                 .semantics {

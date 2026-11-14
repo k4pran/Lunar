@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -51,6 +52,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.ryanjames.lunar.library.data.LibrarySnapshot
 import com.ryanjames.lunar.library.model.SheetMusicItem
+import com.ryanjames.lunar.ui.design.LunarTestTags
+import com.ryanjames.lunar.ui.design.lunarFocusRing
 
 private val TwoPaneMinWidth = 720.dp
 private val IndexPaneWidth = 300.dp
@@ -221,6 +224,7 @@ private fun SetlistIndexPane(
                     ),
                     selected = selectedId == setlist.id,
                     onClick = { appState.openSetlist(setlist.id) },
+                    modifier = Modifier.testTag(LunarTestTags.setlistRow(setlist.id)),
                 )
             }
         }
@@ -377,6 +381,7 @@ private fun ProgrammeList(
                             },
                             MaterialTheme.shapes.small,
                         )
+                        .lunarFocusRing(MaterialTheme.shapes.small)
                         .clickable { onOpen(index) }
                         .padding(vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -671,6 +676,7 @@ internal fun IndexEntry(
                 },
                 MaterialTheme.shapes.small,
             )
+            .lunarFocusRing(MaterialTheme.shapes.small)
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),

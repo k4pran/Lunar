@@ -1,5 +1,10 @@
 package com.ryanjames.lunar.ui.design
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -10,19 +15,24 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
@@ -74,7 +84,9 @@ fun LunarButton(
     Surface(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.defaultMinSize(minHeight = 36.dp),
+        modifier = modifier
+            .defaultMinSize(minHeight = tokens.focus.minTouchTarget)
+            .lunarFocusRing(),
         shape = tokens.shapes.medium,
         color = container,
         contentColor = content,
@@ -128,12 +140,14 @@ fun <T> TextToggle(
                 ),
                 color = if (isSelected) tokens.colors.ink else tokens.colors.muted,
                 modifier = Modifier
+                    .defaultMinSize(minHeight = tokens.focus.minTouchTarget)
+                    .lunarFocusRing(tokens.shapes.small)
                     .selectable(
                         selected = isSelected,
                         role = Role.RadioButton,
                         onClick = { onSelect(option.value) },
                     )
-                    .padding(horizontal = tokens.spacing.xs, vertical = tokens.spacing.xxs),
+                    .padding(horizontal = tokens.spacing.xs, vertical = tokens.spacing.md),
             )
         }
     }
@@ -156,7 +170,8 @@ fun CollectionSwatch(
 
 /**
  * A panel anchored below its parent layout (flipping above when there is no room), dismissed by
- * clicking outside or pressing Escape. Place it next to the anchor inside the same Box.
+ * clicking outside or pressing Escape. Place it next to the anchor inside the same Box. It fades in
+ * and out, and on compact widths (see [LocalLunarCompactLayout]) it is shown as a bottom sheet.
  */
 @Composable
 fun Popover(
@@ -165,7 +180,14 @@ fun Popover(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    if (!expanded) return
+    if (LocalLunarCompactLayout.current) {
+        if (expanded) PopoverSheet(onDismissRequest = onDismissRequest, modifier = modifier, content = content)
+        return
+    }
+    val visibility = remember { MutableTransitionState(false) }
+    visibility.targetState = expanded
+    if (!visibility.currentState && !visibility.targetState) return
+
     val tokens = lunarTokens()
     val gap = with(LocalDensity.current) { tokens.spacing.xs.roundToPx() }
     Popup(
@@ -173,19 +195,54 @@ fun Popover(
         onDismissRequest = onDismissRequest,
         properties = PopupProperties(focusable = true),
     ) {
-        Surface(
-            modifier = modifier.widthIn(min = 160.dp, max = 360.dp),
-            shape = tokens.shapes.large,
-            color = tokens.colors.panel,
-            contentColor = tokens.colors.ink,
-            border = BorderStroke(1.dp, tokens.colors.rule),
-            shadowElevation = 6.dp,
+        AnimatedVisibility(
+            visibleState = visibility,
+            enter = fadeIn(tween(durationMillis = tokens.motion.quickMillis)),
+            exit = fadeOut(tween(durationMillis = tokens.motion.quickMillis)),
         ) {
-            Column(
-                modifier = Modifier.padding(vertical = tokens.spacing.sm),
-                content = content,
-            )
+            Surface(
+                modifier = modifier
+                    .testTag(LunarTestTags.POPOVER)
+                    .widthIn(min = 160.dp, max = 360.dp),
+                shape = tokens.shapes.large,
+                color = tokens.colors.panel,
+                contentColor = tokens.colors.ink,
+                border = BorderStroke(1.dp, tokens.colors.rule),
+                shadowElevation = 6.dp,
+            ) {
+                Column(
+                    modifier = Modifier.padding(vertical = tokens.spacing.sm),
+                    content = content,
+                )
+            }
         }
+    }
+}
+
+/** The phone form of [Popover]: the same content in a modal bottom sheet. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PopoverSheet(
+    onDismissRequest: () -> Unit,
+    modifier: Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val tokens = lunarTokens()
+    ModalBottomSheet(
+        onDismissRequest = onDismissRequest,
+        modifier = modifier.testTag(LunarTestTags.POPOVER_SHEET),
+        shape = tokens.shapes.extraLarge,
+        containerColor = tokens.colors.panel,
+        contentColor = tokens.colors.ink,
+        scrimColor = tokens.colors.scrim,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(bottom = tokens.spacing.lg),
+            content = content,
+        )
     }
 }
 

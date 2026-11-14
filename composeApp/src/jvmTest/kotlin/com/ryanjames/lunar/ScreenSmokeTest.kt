@@ -1343,9 +1343,14 @@ class ScreenSmokeTest {
             reloaded.initialize()
             assertEquals(AppSkin.MOONLIGHT, reloaded.settings.value.skin)
 
-            rule.onNode(settingsOption("start_sidebar_collapsed", "On")).performScrollTo().performClick()
-            rule.onNode(settingsOption("viewer_toolbar_auto_hide", "Never")).performScrollTo().performClick()
-            rule.onNode(settingsOption("refresh_on_launch", "Off")).performScrollTo().performClick()
+            listOf(
+                "start_sidebar_collapsed" to "On",
+                "viewer_toolbar_auto_hide" to "Never",
+                "refresh_on_launch" to "Off",
+            ).forEach { (rowKey, option) ->
+                rule.onNodeWithTag(LunarTestTags.settingsRow(rowKey)).performScrollTo()
+                rule.onNode(settingsOption(rowKey, option)).performScrollTo().assertIsDisplayed().performClick()
+            }
             rule.waitUntil(timeoutMillis = 5_000) {
                 val current = runtime.settingsStore.settings.value
                 current.sidebarCollapsed && current.viewerChromeAutoHideSeconds == null && !current.refreshOnLaunch
