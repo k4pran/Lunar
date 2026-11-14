@@ -282,6 +282,18 @@ private fun rememberActiveViewerDocument(
     )
 }
 
+/** Runs [onToggle] each time [request] changes after first composition, ignoring its initial value. */
+@Composable
+private fun OnPageModeToggleRequest(request: Int, onToggle: () -> Unit) {
+    var handledRequest by remember { mutableIntStateOf(request) }
+    LaunchedEffect(request) {
+        if (request != handledRequest) {
+            handledRequest = request
+            onToggle()
+        }
+    }
+}
+
 private enum class ViewerPopover {
     METRONOME,
     ADD,
@@ -341,6 +353,7 @@ fun ViewerScreen(
     onPageChanged: (Int) -> Unit,
     onPageCountResolved: (Int) -> Unit,
     defaultTwoPageMode: Boolean = false,
+    pageModeToggleRequest: Int = 0,
     viewerKeybindings: ViewerKeybindings = ViewerKeybindings(),
     chromeAutoHideMillis: Long? = AppSettings().viewerChromeAutoHideMillis,
     onEnterFullscreen: (() -> Unit)? = null,
@@ -353,6 +366,10 @@ fun ViewerScreen(
     }
     var zoom by remember(documentState.id) { mutableFloatStateOf(1f) }
     var twoPageMode by remember(documentState.id, defaultTwoPageMode) { mutableStateOf(defaultTwoPageMode) }
+    OnPageModeToggleRequest(pageModeToggleRequest) {
+        twoPageMode = !twoPageMode
+        zoom = FitZoom
+    }
     var renderedPages by remember(documentState.id, currentPage, twoPageMode) {
         mutableStateOf<List<RenderedPdfPage>>(emptyList())
     }
